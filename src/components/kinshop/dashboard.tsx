@@ -1,0 +1,662 @@
+"use client"
+
+import { useCallback, useEffect, useState } from "react"
+import { motion } from "framer-motion"
+import {
+  ArrowLeft,
+  CheckCircle2,
+  Copy,
+  ExternalLink,
+  Loader2,
+  MessageCircle,
+  Package,
+  Plus,
+  Settings,
+  Share2,
+  ShoppingCart,
+  Trash2,
+  XCircle,
+  PackageCheck,
+} from "lucide-react"
+import { toast } from "sonner"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import {
+  CATEGORIES,
+  STORE_EMOJIS,
+  buildWhatsAppLink,
+  formatFC,
+  formatPhoneDisplay,
+  formatUSD,
+  timeAgo,
+  type OrderData,
+  type OrderItem,
+  type OrderStatus,
+  type ProductData,
+  type StoreData,
+} from "@/lib/kinshop"
+
+interface DashboardProps {
+  slug: string
+  onBack: () => void
+  onViewStore: (slug: string) => void
+}
+
+const STATUS_CONFIG: Record<OrderStatus, { label: string; variant: "default" | "secondary" | "destructive" | "outline"; className: string }> = {
+  new: { label: "Nouvelle", variant: "outline", className: "bg-amber-100 text-amber-800 border-amber-300" },
+  confirmed: { label: "Confirmée", variant: "outline", className: "bg-emerald-100 text-emerald-800 border-emerald-300" },
+  delivered: { label: "Livrée", variant: "default", className: "bg-emerald-600 text-white border-emerald-600" },
+  cancelled: { label: "Annulée", variant: "destructive", className: "" },
+}
+
+export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
+  const [store, setStore] = useState<StoreData | null>(null)
+  const [products, setProducts] = useState<ProductData[]>([])
+  const [orders, setOrders] = useState<OrderData[]>([])
+  const [loading, setLoading] = useState(true)
+  const [notFound, setNotFound] = useState(false)
+
+  // Dialogues
+  const [addOpen, setAddOpen] = useState(false)
+  const [shareOpen, setShareOpen] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<ProductData | null>(null)
+
+  // Formulaire produit
+  const [pName, setPName] = useState("")
+  const [pEmoji, setPEmoji] = useState("📦")
+  const [pPrice, setPPrice] = useState("")
+  const [pCategory, setPCategory] = useState("Divers")
+  const [adding, setAdding] = useState(false)
+
+  // Réglages
+  const [sName, setSName] = useState("")
+  const [sDesc, setSDesc] = useState("")
+  const [sPhone, setSPhone] = useState("")
+  const [sCity, setSCity] = useState("")
+  const [sEmoji, setSEmoji] = useState("🛍️")
+  const [savingSettings, setSavingSettings] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  const loadOrders = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/orders?slug=${encodeURIComponent(slug)}`)
+      const data = await res.json()
+      if (res.ok) setOrders(data.orders)
+    } catch {
+      // silencieux
+    }
+  }, [slug])
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch(`/api/stores?slug=${encodeURIComponent(slug)}`)
+        const data = await res.json()
+        if (cancelled) return
+        if (!res.ok) {
+          setNotFound(true)
+        } else {
+          setStore(data.store)
+          setProducts(data.store.products || [])
+          setSName(data.store.name)
+          setSDesc(data.store.description)
+          setSPhone(formatPhoneDisplay(data.store.whatsapp))
+          setSCity(data.store.city)
+          setSEmoji(data.store.logoEmoji)
+          await loadOrders()
+        }
+      } catch {
+        if (!cancelled) setNotFound(true)
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [slug, loadOrders])
+
+  const storeLink = store ? `${window.location.origin}/#/boutique/${store.slug}` : ""
+
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(storeLink)
+      setCopied(true)
+      toast.success("Lien copié ! 🚀")
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      toast.error("Copie impossible")
+    }
+  }
+
+  const addProduct = async () => {
+    if (!store) return
+    if (!pName.trim()) return toast.error("Le nom du produit est requis.")
+    const price = Number(pPrice.replace(",", "."))
+    if (!price || price <= 0) return toast.error("Indique un prix en dollars.")
+    setAdding(true)
+    try {
+      const res = await fetch("/api/products", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          storeId: store.id,
+          name: pName.trim(),
+          emoji: pEmoji || "📦",
+          priceUSD: price,
+          category: pCategory,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setProducts((p) => [data.product, ...p])
+      setPName("")
+      setPPrice("")
+      setPEmoji("📦")
+      setAddOpen(false)
+      toast.success("Produit ajouté ✅")
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur")
+    } finally {
+      setAdding(false)
+    }
+  }
+
+  const deleteProduct = async (product: ProductData) => {
+    try {
+      const res = await fetch(`/api/products?id=${product.id}`, { method: "DELETE" })
+      if (!res.ok) throw new Error()
+      setProducts((p) => p.filter((x) => x.id !== product.id))
+      toast.success(`« ${product.name} » supprimé.`)
+    } catch {
+      toast.error("Suppression impossible.")
+    }
+    setDeleteTarget(null)
+  }
+
+  const updateOrderStatus = async (order: OrderData, status: OrderStatus) => {
+    try {
+      const res = await fetch("/api/orders", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: order.id, status }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setOrders((os) => os.map((o) => (o.id === order.id ? data.order : o)))
+      toast.success(`Commande ${order.ref} → ${STATUS_CONFIG[status].label}`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur")
+    }
+  }
+
+  const saveSettings = async () => {
+    if (!store) return
+    setSavingSettings(true)
+    try {
+      const res = await fetch("/api/stores", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          slug: store.slug,
+          name: sName,
+          description: sDesc,
+          whatsapp: sPhone,
+          city: sCity,
+          logoEmoji: sEmoji,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setStore((s) => (s ? { ...s, ...data.store } : data.store))
+      setProducts((prev) => prev)
+      toast.success("Réglages enregistrés ✅")
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur")
+    } finally {
+      setSavingSettings(false)
+    }
+  }
+
+  const parseItems = (json: string): OrderItem[] => {
+    try {
+      return JSON.parse(json)
+    } catch {
+      return []
+    }
+  }
+
+  const contactClient = (order: OrderData) => {
+    const msg = `Bonjour ${order.customerName} 👋\nC'est ${store?.name ?? "la boutique"} (KinShop).\nTa commande ${order.ref} d'un montant de ${formatFC(order.totalFC)} a bien été reçue !\nNous revenons vers toi très vite pour la livraison. 🚚`
+    window.open(buildWhatsAppLink(order.customerPhone, msg), "_blank")
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+          <p className="text-sm text-muted-foreground">Chargement de ta boutique…</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (notFound || !store) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4">
+        <div className="text-center space-y-4">
+          <p className="text-5xl">🤷</p>
+          <h1 className="text-xl font-bold">Boutique introuvable</h1>
+          <Button onClick={onBack}>Retour à l&apos;accueil</Button>
+        </div>
+      </div>
+    )
+  }
+
+  const newOrders = orders.filter((o) => o.status === "new").length
+  const revenueFC = orders
+    .filter((o) => o.status !== "cancelled")
+    .reduce((sum, o) => sum + o.totalFC, 0)
+
+  return (
+    <div className="min-h-screen flex flex-col bg-muted/30">
+      {/* Header */}
+      <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur-md">
+        <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <Button variant="ghost" size="icon" onClick={onBack} aria-label="Retour">
+              <ArrowLeft className="w-4 h-4" />
+            </Button>
+            <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center text-lg shrink-0">
+              {store.logoEmoji}
+            </div>
+            <div className="min-w-0">
+              <p className="font-bold truncate leading-tight">{store.name}</p>
+              <p className="text-xs text-muted-foreground truncate">kinshop.cd/{store.slug}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button variant="outline" size="sm" onClick={() => setShareOpen(true)} className="hidden sm:inline-flex">
+              <Share2 className="w-4 h-4 mr-1" />
+              Partager
+            </Button>
+            <Button size="sm" onClick={() => onViewStore(store.slug)}>
+              <ExternalLink className="w-4 h-4 mr-1" />
+              Voir ma boutique
+            </Button>
+          </div>
+        </div>
+      </header>
+
+      <main className="flex-1 max-w-6xl w-full mx-auto px-4 py-6 md:py-8">
+        {/* Stats */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-6">
+          {[
+            { label: "Produits", value: String(products.length), icon: <Package className="w-4 h-4" /> },
+            { label: "Nouvelles commandes", value: String(newOrders), icon: <ShoppingCart className="w-4 h-4" />, highlight: newOrders > 0 },
+            { label: "Commandes totales", value: String(orders.length), icon: <PackageCheck className="w-4 h-4" /> },
+            { label: "Volume des ventes", value: formatFC(revenueFC), icon: <CheckCircle2 className="w-4 h-4" /> },
+          ].map((s, i) => (
+            <motion.div key={i} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
+              <Card className={s.highlight ? "border-amber-300 bg-amber-50" : ""}>
+                <CardContent className="p-4 flex items-center gap-3">
+                  <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${s.highlight ? "bg-amber-200 text-amber-800" : "bg-primary/10 text-primary"}`}>
+                    {s.icon}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs text-muted-foreground truncate">{s.label}</p>
+                    <p className="font-bold truncate">{s.value}</p>
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+          ))}
+        </div>
+
+        <Tabs defaultValue="produits">
+          <TabsList className="mb-5 h-11">
+            <TabsTrigger value="produits" className="px-4">
+              <Package className="w-4 h-4 mr-1.5" />
+              Produits
+            </TabsTrigger>
+            <TabsTrigger value="commandes" className="px-4">
+              <ShoppingCart className="w-4 h-4 mr-1.5" />
+              Commandes
+              {newOrders > 0 && (
+                <Badge className="ml-2 h-5 px-1.5 bg-amber-500 hover:bg-amber-500">{newOrders}</Badge>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="reglages" className="px-4">
+              <Settings className="w-4 h-4 mr-1.5" />
+              Réglages
+            </TabsTrigger>
+          </TabsList>
+
+          {/* ─── PRODUITS ─── */}
+          <TabsContent value="produits" className="space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-muted-foreground">{products.length} produit(s) en vente</p>
+              <Button onClick={() => setAddOpen(true)}>
+                <Plus className="w-4 h-4 mr-1" />
+                Ajouter un produit
+              </Button>
+            </div>
+
+            {products.length === 0 ? (
+              <Card>
+                <CardContent className="p-10 text-center space-y-3">
+                  <p className="text-5xl">📦</p>
+                  <p className="font-semibold">Aucun produit pour le moment</p>
+                  <p className="text-sm text-muted-foreground">Ajoute ton premier produit pour commencer à vendre.</p>
+                  <Button onClick={() => setAddOpen(true)}>
+                    <Plus className="w-4 h-4 mr-1" />
+                    Ajouter un produit
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-4">
+                {products.map((p) => (
+                  <Card key={p.id} className="group relative overflow-hidden">
+                    <CardContent className="p-4">
+                      {p.imageUrl ? (
+                        <img src={p.imageUrl} alt={p.name} className="w-full h-28 object-cover rounded-lg mb-3" />
+                      ) : (
+                        <div className="w-full h-28 rounded-lg bg-emerald-50 flex items-center justify-center text-5xl mb-3">
+                          {p.emoji}
+                        </div>
+                      )}
+                      <p className="font-semibold text-sm truncate">{p.name}</p>
+                      <p className="text-xs text-muted-foreground mb-1">{p.category}</p>
+                      <p className="font-bold text-primary">{formatFC(p.priceUSD * store.rateFC)}</p>
+                      <p className="text-xs text-muted-foreground">{formatUSD(p.priceUSD)}</p>
+                      <button
+                        onClick={() => setDeleteTarget(p)}
+                        className="absolute top-2 right-2 w-8 h-8 rounded-lg bg-white/90 border shadow-sm flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-50"
+                        aria-label={`Supprimer ${p.name}`}
+                      >
+                        <Trash2 className="w-4 h-4 text-destructive" />
+                      </button>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </TabsContent>
+
+          {/* ─── COMMANDES ─── */}
+          <TabsContent value="commandes" className="space-y-3">
+            {orders.length === 0 ? (
+              <Card>
+                <CardContent className="p-10 text-center space-y-3">
+                  <p className="text-5xl">🛒</p>
+                  <p className="font-semibold">Pas encore de commande</p>
+                  <p className="text-sm text-muted-foreground">
+                    Partage ton lien dans ton statut WhatsApp — les commandes arriveront ici.
+                  </p>
+                  <Button onClick={() => setShareOpen(true)}>
+                    <Share2 className="w-4 h-4 mr-1" />
+                    Partager ma boutique
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-3 max-h-[70vh] overflow-y-auto scrollbar-thin pr-1">
+                {orders.map((order) => {
+                  const cfg = STATUS_CONFIG[order.status]
+                  return (
+                    <Card key={order.id}>
+                      <CardContent className="p-4 md:p-5 space-y-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono text-sm font-bold">{order.ref}</span>
+                            <Badge variant={cfg.variant} className={cfg.className}>
+                              {cfg.label}
+                            </Badge>
+                            <Badge variant="outline" className="text-xs">
+                              {order.paymentMethod === "mpesa" ? "M-Pesa" : order.paymentMethod === "airtel" ? "Airtel Money" : order.paymentMethod === "orange" ? "Orange Money" : "Espèces"}
+                            </Badge>
+                          </div>
+                          <span className="text-xs text-muted-foreground">{timeAgo(order.createdAt)}</span>
+                        </div>
+
+                        <div className="grid sm:grid-cols-2 gap-2 text-sm">
+                          <p><span className="text-muted-foreground">👤 Client :</span> <strong>{order.customerName}</strong></p>
+                          <p><span className="text-muted-foreground">📞 Tél :</span> {formatPhoneDisplay(order.customerPhone)}</p>
+                          {order.zone && <p><span className="text-muted-foreground">📍 Zone :</span> {order.zone}</p>}
+                          <p className="font-bold text-primary text-base">
+                            💰 {formatFC(order.totalFC)} <span className="text-xs font-normal text-muted-foreground">({formatUSD(order.totalUSD)})</span>
+                          </p>
+                        </div>
+
+                        <div className="rounded-xl bg-muted/60 p-3 text-sm space-y-1">
+                          {parseItems(order.items).map((it, i) => (
+                            <p key={i}>
+                              {it.emoji} <strong>{it.qty} ×</strong> {it.name}{" "}
+                              <span className="text-muted-foreground">— {formatUSD(it.priceUSD * it.qty)}</span>
+                            </p>
+                          ))}
+                          {order.note && (
+                            <p className="text-muted-foreground italic pt-1 border-t border-border/60 mt-2">📝 {order.note}</p>
+                          )}
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                          {order.status === "new" && (
+                            <Button size="sm" onClick={() => updateOrderStatus(order, "confirmed")}>
+                              <CheckCircle2 className="w-4 h-4 mr-1" />
+                              Confirmer
+                            </Button>
+                          )}
+                          {order.status === "confirmed" && (
+                            <Button size="sm" onClick={() => updateOrderStatus(order, "delivered")}>
+                              <PackageCheck className="w-4 h-4 mr-1" />
+                              Marquer livrée
+                            </Button>
+                          )}
+                          <Button size="sm" variant="outline" onClick={() => contactClient(order)}>
+                            <MessageCircle className="w-4 h-4 mr-1 text-emerald-600" />
+                            Contacter sur WhatsApp
+                          </Button>
+                          {order.status !== "cancelled" && order.status !== "delivered" && (
+                            <Button size="sm" variant="ghost" onClick={() => updateOrderStatus(order, "cancelled")} className="text-destructive hover:text-destructive">
+                              <XCircle className="w-4 h-4 mr-1" />
+                              Annuler
+                            </Button>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )
+                })}
+              </div>
+            )}
+          </TabsContent>
+
+          {/* ─── RÉGLAGES ─── */}
+          <TabsContent value="reglages">
+            <Card className="max-w-2xl">
+              <CardContent className="p-6 space-y-5">
+                <div className="space-y-2">
+                  <Label>Nom de la boutique</Label>
+                  <Input value={sName} onChange={(e) => setSName(e.target.value)} maxLength={60} />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Logo (emoji)</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {STORE_EMOJIS.map((e) => (
+                      <button
+                        key={e}
+                        type="button"
+                        onClick={() => setSEmoji(e)}
+                        className={`w-10 h-10 rounded-xl text-xl flex items-center justify-center border-2 transition-all ${
+                          sEmoji === e ? "border-primary bg-primary/10" : "border-border hover:border-primary/40"
+                        }`}
+                        aria-label={`Logo ${e}`}
+                      >
+                        {e}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid sm:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Numéro WhatsApp</Label>
+                    <Input value={sPhone} onChange={(e) => setSPhone(e.target.value)} maxLength={20} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Ville</Label>
+                    <Input value={sCity} onChange={(e) => setSCity(e.target.value)} maxLength={40} />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Description</Label>
+                  <Textarea value={sDesc} onChange={(e) => setSDesc(e.target.value)} rows={3} maxLength={300} />
+                </div>
+
+                <div className="rounded-xl bg-muted p-4 text-sm text-muted-foreground">
+                  💡 Le taux de change est de <strong className="text-foreground">{formatFC(store.rateFC)}</strong> pour 1 $. Il servira à afficher tous les prix en FC.
+                </div>
+
+                <Button onClick={saveSettings} disabled={savingSettings}>
+                  {savingSettings ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                  Enregistrer les modifications
+                </Button>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
+      </main>
+
+      {/* Dialog : ajout produit */}
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Nouveau produit</DialogTitle>
+            <DialogDescription>Ajoute un article à ton catalogue.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-[70px_1fr] gap-3">
+              <div className="space-y-2">
+                <Label>Emoji</Label>
+                <Input className="text-center text-xl" value={pEmoji} onChange={(e) => setPEmoji(e.target.value)} maxLength={4} />
+              </div>
+              <div className="space-y-2">
+                <Label>Nom du produit *</Label>
+                <Input placeholder="Ex : Chaussures Nike 42" value={pName} onChange={(e) => setPName(e.target.value)} maxLength={80} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Prix ($) *</Label>
+                <Input type="number" min="0" step="0.5" placeholder="12" value={pPrice} onChange={(e) => setPPrice(e.target.value)} />
+                <p className="text-xs text-muted-foreground">
+                  {pPrice && Number(pPrice) > 0 ? `≈ ${formatFC(Number(pPrice) * store.rateFC)}` : " "}
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label>Catégorie</Label>
+                <Select value={pCategory} onValueChange={setPCategory}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CATEGORIES.map((c) => (
+                      <SelectItem key={c} value={c}>{c}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddOpen(false)}>Annuler</Button>
+            <Button onClick={addProduct} disabled={adding}>
+              {adding ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Plus className="w-4 h-4 mr-1" />}
+              Ajouter
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog : partage */}
+      <Dialog open={shareOpen} onOpenChange={setShareOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Partage ta boutique 🚀</DialogTitle>
+            <DialogDescription>Colle ce lien dans ton statut WhatsApp, tes messages ou ta page Facebook.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="flex gap-2">
+              <Input readOnly value={storeLink} className="font-mono text-sm" />
+              <Button onClick={copyLink} className="shrink-0">
+                {copied ? <CheckCircle2 className="w-4 h-4" /> : <Copy className="w-4 h-4 mr-1" />}
+                {copied ? "Copié" : "Copier"}
+              </Button>
+            </div>
+            <div className="rounded-xl bg-muted p-4 text-sm">
+              <p className="font-semibold mb-1">Message prêt à publier :</p>
+              <p className="text-muted-foreground">
+                « 🛍️ Ma boutique est en ligne ! Passe commande en 2 clics 👉 {storeLink} »
+              </p>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Confirmation suppression produit */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Supprimer « {deleteTarget?.name} » ?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Cette action est définitive. Le produit ne sera plus visible dans ta boutique.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annuler</AlertDialogCancel>
+            <AlertDialogAction onClick={() => deleteTarget && deleteProduct(deleteTarget)} className="bg-destructive text-white hover:bg-destructive/90">
+              <Trash2 className="w-4 h-4 mr-1" />
+              Supprimer
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  )
+}

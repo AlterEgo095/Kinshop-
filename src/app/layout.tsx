@@ -1,7 +1,7 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { Toaster } from "@/components/ui/toaster";
+import { Toaster } from "@/components/ui/sonner";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -14,25 +14,32 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Z.ai Code Scaffold - AI-Powered Development",
-  description: "Modern Next.js scaffold optimized for AI-powered development with Z.ai. Built with TypeScript, Tailwind CSS, and shadcn/ui.",
-  keywords: ["Z.ai", "Next.js", "TypeScript", "Tailwind CSS", "shadcn/ui", "AI development", "React"],
-  authors: [{ name: "Z.ai Team" }],
-  icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
-  },
+  title: "KinShop — Ta boutique en ligne en 5 minutes 🇨🇩",
+  description:
+    "KinShop transforme ton statut WhatsApp en vraie boutique en ligne. Crée ton catalogue, reçois tes commandes et encaisse par M-Pesa, Airtel Money ou Orange Money. Conçu pour les vendeurs de Kinshasa et de toute la RDC.",
+  keywords: [
+    "KinShop",
+    "boutique en ligne RDC",
+    "vendre WhatsApp Congo",
+    "mobile money",
+    "M-Pesa",
+    "Airtel Money",
+    "Orange Money",
+    "e-commerce Kinshasa",
+  ],
+  authors: [{ name: "KinShop" }],
   openGraph: {
-    title: "Z.ai Code Scaffold",
-    description: "AI-powered development with modern React stack",
-    url: "https://chat.z.ai",
-    siteName: "Z.ai",
+    title: "KinShop — Ta boutique en ligne en 5 minutes",
+    description:
+      "Transforme ton statut WhatsApp en boutique pro. Gratuit, simple, pensé pour la RDC.",
+    siteName: "KinShop",
     type: "website",
+    locale: "fr_CD",
   },
-  twitter: {
-    card: "summary_large_image",
-    title: "Z.ai Code Scaffold",
-    description: "AI-powered development with modern React stack",
-  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#059669",
 };
 
 export default function RootLayout({
@@ -41,12 +48,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="fr" suppressHydrationWarning>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
       >
         {children}
-        <Toaster />
+        <Toaster position="top-center" richColors />
       </body>
     </html>
   );
