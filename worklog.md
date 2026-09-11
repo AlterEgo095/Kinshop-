@@ -256,3 +256,17 @@ Stage Summary:
 - Décisions clés : modération admin des avis séparée de la modération vendeur (route PIN-guardée dédiée, traçée dans le journal d'audit) ; zones de livraison en lecture seule côté admin (domaine vendeur, visibilité plateforme suffisante) ; toggle coupon admin pour couper un code abusé sans le supprimer.
 - Artifacts : src/app/api/admin/{reviews,growth}/route.ts (nouveaux), src/app/api/admin/overview/route.ts (enrichi), src/components/kinshop/admin-console.tsx (2 nouveaux onglets + KPIs + récap commande), src/lib/kinshop.ts (fix TS optionnels).
 - Reste connu : /api/reviews PATCH/DELETE publics ne sont PAS authentifiés (choix de conception V6 : dashboard vendeur sans auth — à durcir si besoin un jour) ; PAT GitHub toujours à révoquer.
+
+---
+Task ID: 9
+Agent: Z.ai Code (principal)
+Task: Correction du message de commit + publication GitHub (V6 + extension admin)
+
+Work Log:
+- Constat : 2 commits locaux non poussés (2e1c68b V6 Confiance & Croissance ; commit d44c13a avec message UUID à corriger) ; origin/main = 639771c.
+- Amend du commit UUID → b87fc82 « feat: console admin au complet — modération globale des avis, onglet Croissance (codes promo + zones de livraison), KPIs plateforme V6 » (contenu inchangé : 6 fichiers, +948/-8).
+- Push de main vers origin avec PAT inline dans l'URL uniquement (non persisté) ; vérification synchronisation origin/main == HEAD.
+
+Stage Summary:
+- KinShop publié sur GitHub : V6 (avis vérifiés, codes promo, zones de livraison, suivi de commande) + console admin au complet (7 onglets, 9 routes /api/admin/* PIN-guardées).
+- PAT GitHub toujours à révoquer (exposé en clair dans le chat).
