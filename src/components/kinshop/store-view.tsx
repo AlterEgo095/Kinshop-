@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { motion } from "framer-motion"
 import {
+  AlertCircle,
   ArrowLeft,
   CheckCircle2,
   Loader2,
@@ -12,6 +13,7 @@ import {
   Search,
   ShoppingBag,
   ShoppingCart,
+  Smartphone,
   Trash2,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -44,6 +46,18 @@ interface CartLine {
   qty: number
 }
 
+// V2 — Flux de paiement mobile money en ligne (push USSD agrégateur)
+interface PaymentFlow {
+  ref: string
+  totalFC: number
+  totalUSD: number
+  whatsappUrl: string
+  operatorLabel: string
+  status: "idle" | "initiating" | "waiting" | "paid" | "failed"
+  mode: "live" | "simulation" | null
+  errorMsg?: string
+}
+
 const PAYMENTS: { id: PaymentMethod; label: string; sub: string; emoji: string }[] = [
   { id: "mpesa", label: "M-Pesa", sub: "Vodacom", emoji: "🔴" },
   { id: "airtel", label: "Airtel Money", sub: "Airtel", emoji: "🔴" },
@@ -74,6 +88,10 @@ export function StoreView({ slug, onBack }: StoreViewProps) {
   const [checkoutOpen, setCheckoutOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [success, setSuccess] = useState<{ ref: string; totalFC: number; totalUSD: number; whatsappUrl: string } | null>(null)
+
+  // V2 — Paiement mobile money de la commande
+  const [payment, setPayment] = useState<PaymentFlow | null>(null)
+  const [payerPhone, setPayerPhone] = useState("")
 
   // Formulaire de commande
   const [cName, setCName] = useState("")
@@ -109,6 +127,25 @@ export function StoreView({ slug, onBack }: StoreViewProps) {
     return () => {
       cancelled = true
     }
+  }, [slug])
+
+  // V2 — Comptabiliser la visite (1× max par session navigateur et par boutique)
+  useEffect(() => {
+    const key = `ks_v2_visit_${slug}`
+    try {
+      if (sessionStorage.getItem(key)) return
+      sessionStorage.setItem(key, "1")
+    } catch {
+      // sessionStorage indisponible : on compte quand même (mode privé)
+    }
+    fetch("/api/analytics/visit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ slug }),
+      keepalive: true,
+    }).catch(() => {
+      // silencieux : la visite ne doit jamais casser la boutique
+    })
   }, [slug])
 
   const categories = useMemo(() => {
@@ -171,21 +208,107 @@ export function StoreView({ slug, onBack }: StoreViewProps) {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "Erreur lors de la commande.")
-      setSuccess({
+      const done = {
         ref: data.order.ref,
         totalFC: data.order.totalFC,
         totalUSD: data.order.totalUSD,
         whatsappUrl: data.whatsappUrl,
-      })
+      }
       setCart([])
       setCartOpen(false)
-      toast.success(`Commande ${data.order.ref} envoyée ! ✅`)
+      if (cPayment !== "cash") {
+        // V2 — Passer à l'écran de paiement mobile money (push USSD)
+        setPayerPhone(cPhone)
+        setPayment({
+          ...done,
+          operatorLabel: PAYMENTS.find((p) => p.id === cPayment)?.label || "mobile money",
+          status: "idle",
+          mode: null,
+        })
+      } else {
+        setSuccess(done)
+        toast.success(`Commande ${data.order.ref} envoyée ! ✅`)
+      }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Erreur inconnue")
     } finally {
       setSubmitting(false)
     }
   }
+
+  /* ─────────── V2 — Paiement mobile money ─────────── */
+
+  const startPayment = async () => {
+    if (!payment) return
+    setPayment({ ...payment, status: "initiating", errorMsg: undefined })
+    try {
+      const res = await fetch("/api/payments/initiate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ref: payment.ref, payerPhone: payerPhone || undefined }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Impossible de lancer le paiement.")
+      if (data.alreadyPaid || data.paymentStatus === "paid") {
+        setPayment({ ...payment, status: "paid" })
+        return
+      }
+      setPayment({ ...payment, status: "waiting", mode: data.mode })
+    } catch (e) {
+      setPayment({
+        ...payment,
+        status: "failed",
+        errorMsg: e instanceof Error ? e.message : "Erreur inconnue",
+      })
+    }
+  }
+
+  const confirmSimPayment = async () => {
+    if (!payment) return
+    try {
+      const res = await fetch("/api/payments/simulate-confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ref: payment.ref }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Erreur lors de la confirmation.")
+      setPayment((p) => (p ? { ...p, status: "paid" } : p))
+      toast.success(`Paiement confirmé — ${payment.ref} ✅`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur inconnue")
+    }
+  }
+
+  // Polling du statut pendant l'attente du push USSD (toutes les 4 s)
+  const payStatus = payment?.status
+  const payRef = payment?.ref
+  useEffect(() => {
+    if (payStatus !== "waiting" || !payRef) return
+    let cancelled = false
+    const tick = async () => {
+      try {
+        const res = await fetch(`/api/payments/status?ref=${encodeURIComponent(payRef)}`)
+        const data = await res.json()
+        if (cancelled || !res.ok) return
+        if (data.paymentStatus === "paid") {
+          setPayment((p) => (p ? { ...p, status: "paid" } : p))
+          toast.success(`Paiement confirmé — ${payRef} ✅`)
+        } else if (data.paymentStatus === "failed") {
+          setPayment((p) =>
+            p ? { ...p, status: "failed", errorMsg: "Le paiement a été refusé ou a expiré. Tu peux réessayer." } : p,
+          )
+        }
+      } catch {
+        // silencieux : on retentera au prochain tick
+      }
+    }
+    const iv = setInterval(tick, 4000)
+    return () => {
+      cancelled = true
+      clearInterval(iv)
+    }
+  }, [payStatus, payRef])
 
   /* ─────────── Rendu ─────────── */
 
@@ -399,7 +522,7 @@ export function StoreView({ slug, onBack }: StoreViewProps) {
       </main>
 
       {/* Barre panier collante */}
-      {cartCount > 0 && !success && (
+      {cartCount > 0 && !success && !payment && (
         <motion.div
           initial={{ y: 80 }}
           animate={{ y: 0 }}
@@ -498,10 +621,201 @@ export function StoreView({ slug, onBack }: StoreViewProps) {
         </SheetContent>
       </Sheet>
 
-      {/* Dialog commande / succès */}
-      <Dialog open={checkoutOpen || !!success} onOpenChange={(open) => { if (!open) { setCheckoutOpen(false); setSuccess(null) } }}>
+      {/* Dialog commande / paiement / succès */}
+      <Dialog
+        open={checkoutOpen || !!success || !!payment}
+        onOpenChange={(open) => {
+          if (!open) {
+            setCheckoutOpen(false)
+            setSuccess(null)
+            setPayment(null)
+          }
+        }}
+      >
         <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto scrollbar-thin">
-          {success ? (
+          {payment ? (
+            /* ── PAIEMENT MOBILE MONEY (V2) ── */
+            payment.status === "idle" || payment.status === "initiating" ? (
+              <div className="space-y-4 py-1">
+                <DialogHeader className="space-y-1.5">
+                  <DialogTitle className="text-xl font-bold text-center flex items-center justify-center gap-2">
+                    <Smartphone className="w-5 h-5 text-primary" />
+                    Payer par {payment.operatorLabel}
+                  </DialogTitle>
+                  <DialogDescription className="text-center">
+                    Commande <strong className="font-mono text-foreground">{payment.ref}</strong>
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="rounded-2xl bg-emerald-50 border border-emerald-200 p-4 text-center">
+                  <p className="text-xs font-medium text-muted-foreground">Montant à payer</p>
+                  <p className="text-3xl font-extrabold text-primary">{formatFC(payment.totalFC)}</p>
+                  <p className="text-sm text-muted-foreground">({formatUSD(payment.totalUSD)})</p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="payerPhone">Numéro à débiter *</Label>
+                  <Input
+                    id="payerPhone"
+                    type="tel"
+                    placeholder="081 234 5678"
+                    value={payerPhone}
+                    onChange={(e) => setPayerPhone(e.target.value)}
+                    maxLength={20}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Le numéro mobile money qui recevra le push de paiement et validera avec son code PIN.
+                  </p>
+                </div>
+
+                {payment.errorMsg && (
+                  <p className="text-sm text-destructive flex items-center gap-1.5">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    {payment.errorMsg}
+                  </p>
+                )}
+
+                <Button size="lg" className="w-full text-base" onClick={startPayment} disabled={payment.status === "initiating"}>
+                  {payment.status === "initiating" ? (
+                    <>
+                      <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                      Envoi du push…
+                    </>
+                  ) : (
+                    <>
+                      <Smartphone className="w-5 h-5 mr-2" />
+                      Payer {formatFC(payment.totalFC)}
+                    </>
+                  )}
+                </Button>
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => {
+                    setSuccess(payment)
+                    setPayment(null)
+                  }}
+                >
+                  Payer plus tard via WhatsApp
+                </Button>
+              </div>
+            ) : payment.status === "waiting" ? (
+              <div className="space-y-5 py-2 text-center">
+                <motion.div
+                  animate={{ scale: [1, 1.08, 1] }}
+                  transition={{ repeat: Infinity, duration: 1.6, ease: "easeInOut" }}
+                  className="w-20 h-20 mx-auto rounded-full bg-amber-100 flex items-center justify-center"
+                >
+                  <Smartphone className="w-10 h-10 text-amber-600" />
+                </motion.div>
+                <DialogHeader className="space-y-1">
+                  <DialogTitle className="text-xl font-bold text-center">Push envoyé 📲</DialogTitle>
+                  <DialogDescription className="text-center">
+                    Un push a été envoyé au <strong className="text-foreground">{formatPhoneDisplay(payerPhone)}</strong>
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="rounded-2xl border bg-muted/50 p-4 text-left text-sm space-y-1.5">
+                  <p className="font-semibold">Sur ton téléphone :</p>
+                  <ol className="list-decimal ml-5 space-y-1 text-muted-foreground">
+                    <li>Déverrouille ton écran</li>
+                    <li>
+                      Valide <strong className="text-foreground">{formatFC(payment.totalFC)}</strong> avec ton code PIN{" "}
+                      {payment.operatorLabel}
+                    </li>
+                  </ol>
+                </div>
+
+                <p className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  En attente de confirmation…
+                </p>
+
+                {payment.mode === "simulation" && (
+                  <Button
+                    size="lg"
+                    className="w-full bg-amber-500 hover:bg-amber-600 text-amber-950 font-bold"
+                    onClick={confirmSimPayment}
+                  >
+                    ✅ J&apos;ai validé le PIN (démo)
+                  </Button>
+                )}
+
+                <Button
+                  variant="ghost"
+                  className="w-full"
+                  onClick={() => {
+                    setSuccess(payment)
+                    setPayment(null)
+                  }}
+                >
+                  Payer plus tard via WhatsApp
+                </Button>
+              </div>
+            ) : payment.status === "failed" ? (
+              <div className="space-y-4 py-2 text-center">
+                <div className="w-16 h-16 mx-auto rounded-full bg-red-100 flex items-center justify-center">
+                  <AlertCircle className="w-8 h-8 text-red-600" />
+                </div>
+                <DialogHeader className="space-y-1">
+                  <DialogTitle className="text-xl font-bold text-center">Paiement non abouti</DialogTitle>
+                  <DialogDescription className="text-center">
+                    {payment.errorMsg || "Le paiement n'a pas pu être confirmé."}
+                  </DialogDescription>
+                </DialogHeader>
+                <Button size="lg" className="w-full" onClick={startPayment}>
+                  <Smartphone className="w-5 h-5 mr-2" />
+                  Réessayer le paiement
+                </Button>
+                <Button variant="outline" className="w-full" onClick={() => setPayment({ ...payment, status: "idle" })}>
+                  Modifier le numéro
+                </Button>
+                <Button
+                  variant="ghost"
+                  className="w-full"
+                  onClick={() => {
+                    setSuccess(payment)
+                    setPayment(null)
+                  }}
+                >
+                  Continuer via WhatsApp
+                </Button>
+              </div>
+            ) : (
+              /* ── PAYÉ ✅ ── */
+              <div className="text-center space-y-4 py-2">
+                <motion.div
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  transition={{ type: "spring", stiffness: 260, damping: 15 }}
+                  className="w-20 h-20 mx-auto rounded-full bg-emerald-100 flex items-center justify-center"
+                >
+                  <CheckCircle2 className="w-10 h-10 text-emerald-600" />
+                </motion.div>
+                <DialogHeader className="space-y-1.5">
+                  <DialogTitle className="text-2xl font-bold text-center">Paiement confirmé ! 🎉</DialogTitle>
+                  <DialogDescription className="text-center">
+                    Réf : <strong className="text-foreground font-mono">{payment.ref}</strong> —{" "}
+                    {formatFC(payment.totalFC)} payés
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-4 text-sm text-left space-y-1">
+                  <p className="font-semibold">✅ Commande payée en ligne</p>
+                  <p className="text-muted-foreground">
+                    Le vendeur a reçu ta commande et va préparer la livraison. Garde ta référence sous la main.
+                  </p>
+                </div>
+                <Button size="lg" className="w-full text-base bg-emerald-600 hover:bg-emerald-700" asChild>
+                  <a href={payment.whatsappUrl} target="_blank" rel="noopener noreferrer">
+                    📲 Suivre la livraison sur WhatsApp
+                  </a>
+                </Button>
+                <Button variant="outline" className="w-full" onClick={() => { setPayment(null); setCheckoutOpen(false) }}>
+                  Retour à la boutique
+                </Button>
+              </div>
+            )
+          ) : success ? (
             /* ── SUCCÈS ── */
             <div className="text-center space-y-4 py-4">
               <motion.div

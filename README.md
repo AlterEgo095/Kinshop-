@@ -34,6 +34,13 @@ Chaque boutique KinShop affiche fièrement **« Propulsé par KinShop »**. Chaq
 - 📱 **Mobile-first** — conçu pour les smartphones, réseau 3G, zones urbaines de Kinshasa
 - 🔗 **Deep-link** — `#/boutique/{slug}` : le lien survit au partage et au reload
 
+## 🚀 Fonctionnalités V2
+
+- 💳 **Paiement mobile money en ligne des commandes** — push USSD vers le téléphone du client (M-Pesa, Airtel Money, Orange Money via agrégateur type FlexPay), confirmation automatique par webhook, polling temps réel côté client, mode simulation intégré pour la démo
+- 📊 **Statistiques vendeur avancées** — vues de la boutique (dédupliquées par session), tendance 7 j, taux de conversion, panier moyen, produits stars, entonnoir des statuts, répartition des paiements, clients fidèles
+- 🔔 **Notifications SMS** — alerte vendeur + confirmation client à chaque commande (compatible Africa's Talking, mode simulation par défaut), journal dans l'onglet Alertes
+- 💵 **Paiement espèces** — le vendeur enregistre « Paiement reçu » à la livraison
+
 ## 🧰 Stack technique
 
 | Technologie | Usage |
@@ -75,19 +82,25 @@ src/
 │   └── api/
 │       ├── stores/           # Création / lecture / réglages boutique
 │       ├── products/         # Ajout / suppression produits
-│       └── orders/           # Commandes (totaux recalculés côté serveur)
+│       ├── orders/           # Commandes (totaux recalculés côté serveur)
+│       ├── payments/         # V2 : initiate · status · webhook · simulate-confirm
+│       ├── stats/            # V2 : statistiques vendeur (vues, conversion, produits stars)
+│       ├── notifications/    # V2 : journal SMS
+│       └── analytics/visit/  # V2 : compteur de visites boutique
 ├── components/kinshop/
 │   ├── landing.tsx           # Landing page (hero, features, FAQ, CTA)
 │   ├── create-wizard.tsx     # Assistant création boutique (3 étapes)
-│   ├── dashboard.tsx         # Tableau de bord vendeur
-│   ├── store-view.tsx        # Boutique publique + panier + checkout
+│   ├── dashboard.tsx         # Tableau de bord vendeur (+ Stats & Alertes V2)
+│   ├── store-view.tsx        # Boutique publique + panier + checkout + paiement USSD
 │   ├── status-studio.tsx     # Générateur d'image statut WhatsApp (QR code)
 │   ├── admin-console.tsx     # Console d'administration (#/admin, PIN)
 │   └── kinshop-app.tsx       # Routeur à états + deep-linking
 └── lib/
     ├── kinshop.ts            # Helpers : format FC/USD, liens WhatsApp, slugs
-    └── chariow.ts            # Checkout + webhook Chariow (Pulses)
-prisma/schema.prisma          # Models : Store, Product, Order, PulseDelivery, PlatformSetting, AdminAction
+    ├── chariow.ts            # Checkout + webhook Chariow (Pulses)
+    ├── mobile-money.ts       # V2 : paiement commandes (agrégateur FlexPay/simulation)
+    └── notifier.ts           # V2 : SMS vendeur/client (Africa's Talking/simulation)
+prisma/schema.prisma          # Models : Store, Product, Order, PulseDelivery, StoreVisit, NotificationLog, PlatformSetting, AdminAction
 ```
 
 ## 🛡️ Console d'administration
@@ -97,10 +110,27 @@ Accessible via le lien discret « Espace admin » en pied de page ou directement
 - **Authentification par PIN** (`ADMIN_PIN` dans `.env`, par défaut `243243` en démo)
 - **Vue d'ensemble** : KPIs temps réel (boutiques, premium, GMV), graphique des commandes sur 14 jours, répartition des moyens de paiement, top boutiques, alertes premium expirants
 - **Boutiques** : recherche/filtres, suspendre · réactiver, accorder/révoquer le Premium (+30 j/+90 j/+1 an), contact WhatsApp propriétaire, suppression cascade
-- **Commandes** : filtres, changement de statut, détail complet, contact client, suppression
+- **Commandes** : filtres (statut **+ statut de paiement V2**), changement de statut, confirmation manuelle de paiement, détail complet, contact client, suppression
 - **Produits** : filtres par boutique/catégorie, ajustement du stock, suppression
 - **Paramètres plateforme** : mode maintenance global, bandeau d'annonce (affiché sur toutes les boutiques), taux FC/USD par défaut des nouvelles boutiques
 - **Journaux** : audit de toutes les actions admin + livraisons des webhooks Chariow (Pulses)
+
+## 💳 Paiement mobile money des commandes (V2)
+
+Le checkout des boutiques propose un **vrai parcours de paiement** :
+
+1. Le client choisit M-Pesa / Airtel Money / Orange Money → il renseigne le numéro à débiter
+2. Un **push USSD** est envoyé sur son téléphone (via l'agrégateur) → il valide avec son PIN
+3. KinShop est notifié par **webhook** (`/api/payments/webhook`) → la commande passe « Payée en ligne » automatiquement, côté client (polling 4 s) comme côté vendeur
+
+**Deux modes** (variables `.env`) :
+
+| Mode | Configuration | Comportement |
+|---|---|---|
+| **Simulation** (défaut) | `MOMO_TOKEN` vide | Push simulé, bouton « J'ai validé le PIN (démo) » — parfait pour tester |
+| **Live** | `MOMO_TOKEN` + `MOMO_MERCHANT` (+ `MOMO_CALLBACK_TOKEN`) | Push USSD réel M-Pesa/Airtel/Orange via l'agrégateur (pattern FlexPay), simulation désactivée (403) |
+
+Les commandes payées en espèces restent marquées « À la livraison » — le vendeur enregistre « Paiement reçu » à la remise.
 
 ## 🔒 Points de sécurité
 
@@ -109,14 +139,15 @@ Accessible via le lien discret « Espace admin » en pied de page ou directement
 - Slug de boutique unique et validé côté API
 - Console admin protégée par **PIN vérifié côté serveur** sur chaque requête (`x-admin-pin`), avec **journal d'audit** de toutes les actions
 - Webhooks Chariow signés **HMAC-SHA256** + idempotence en base
+- Webhook mobile money protégé par **token de callback** (`MOMO_CALLBACK_TOKEN`) + idempotence ; la simulation de confirmation est **refusée (403)** en mode live
 
 ## 🗺️ Roadmap
 
-- [x] ~~V2 : Paiement mobile money intégré~~ ✅ via Chariow (M-Pesa, Airtel Money, Orange Money)
+- [x] ~~V2 : Paiement mobile money intégré~~ ✅ Chariow (abonnement Premium) + **paiement en ligne des commandes** (push USSD M-Pesa/Airtel/Orange)
 - [x] ~~V2 : Générateur d'image statut WhatsApp~~ ✅ Studio Statut avec QR code
 - [x] ~~V2 : Console d'administration plateforme~~ ✅ `#/admin`
-- [ ] V2 : Notifications commandes par SMS
-- [ ] V2 : Statistiques avancées (vues boutique, produits stars)
+- [x] ~~V2 : Notifications commandes par SMS~~ ✅ journal vendeur/client (Africa's Talking ready)
+- [x] ~~V2 : Statistiques avancées~~ ✅ vues boutique, conversion, produits stars, clients fidèles
 - [ ] V3 : Générateur de CV Express RDC
 - [ ] V3 : KinFacture — factures pro avec QR de paiement
 

@@ -21,6 +21,7 @@ export interface OrderItem {
 
 export type PaymentMethod = "mpesa" | "airtel" | "orange" | "cash"
 export type OrderStatus = "new" | "paid" | "confirmed" | "delivered" | "cancelled"
+export type PaymentStatus = "unpaid" | "pending" | "paid" | "failed"
 
 export interface OrderData {
   id: string
@@ -33,6 +34,11 @@ export interface OrderData {
   totalUSD: number
   totalFC: number
   paymentMethod: PaymentMethod
+  // V2 — Paiement mobile money en ligne
+  paymentStatus: PaymentStatus
+  paymentRef: string
+  payerPhone: string
+  paidAt: string | null
   note: string
   status: OrderStatus
   createdAt: string
@@ -55,6 +61,46 @@ export interface StoreData {
   createdAt: string
   products?: ProductData[]
   orders?: OrderData[]
+}
+
+/* ─────────── V2 — Statistiques & Notifications ─────────── */
+
+export interface DailyPoint {
+  day: string // "YYYY-MM-DD"
+  count: number
+}
+
+export interface TopProductStat {
+  productId: string
+  name: string
+  emoji: string
+  qty: number
+  revenueUSD: number
+  orders: number
+}
+
+export interface VendorStats {
+  views: { total: number; period: number; series: DailyPoint[] }
+  orders: { total: number; period: number; series: DailyPoint[] }
+  conversionPct: number
+  avgBasketUSD: number
+  repeatCustomers: number
+  topProducts: TopProductStat[]
+  statusFunnel: Record<OrderStatus, number>
+  payments: Record<PaymentMethod, number>
+  trendPct: number // évolution vues 7 derniers j vs 7 précédents
+}
+
+export interface NotificationData {
+  id: string
+  storeId: string
+  orderId: string
+  audience: "vendor" | "customer"
+  to: string
+  body: string
+  status: "simulated" | "sent" | "failed"
+  provider: string
+  createdAt: string
 }
 
 /* ─────────── Devise ─────────── */
@@ -105,6 +151,40 @@ export const PAYMENT_LABELS: Record<PaymentMethod, string> = {
   airtel: "Airtel Money",
   orange: "Orange Money",
   cash: "Espèces à la livraison",
+}
+
+export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
+  unpaid: "Non payée",
+  pending: "Paiement en cours",
+  paid: "Payée en ligne",
+  failed: "Paiement échoué",
+}
+
+/** Détecte l'opérateur RDC d'après le préfixe (indice UX, jamais bloquant). */
+export function detectOperator(phone: string): "vodacom" | "airtel" | "orange" | "africell" | "unknown" {
+  const p = normalizePhone(phone)
+  const local = p.startsWith("243") ? p.slice(3) : p
+  if (local.startsWith("08") || local.startsWith("8")) {
+    const two = local.slice(0, 3)
+    if (["081", "082", "083", "088"].includes(two)) return "vodacom"
+    if (["084", "085", "089"].includes(two)) return "orange"
+    return "unknown"
+  }
+  if (local.startsWith("09") || local.startsWith("9") || local.startsWith("07")) {
+    const two = local.slice(0, 3)
+    if (["099", "090", "091"].includes(two)) return "airtel"
+    if (["097", "098"].includes(two)) return "africell"
+    return "unknown"
+  }
+  return "unknown"
+}
+
+export const OPERATOR_LABELS: Record<string, string> = {
+  vodacom: "Vodacom (M-Pesa)",
+  airtel: "Airtel",
+  orange: "Orange",
+  africell: "Africell",
+  unknown: "Opérateur détecté automatiquement",
 }
 
 export function buildOrderMessage(params: {

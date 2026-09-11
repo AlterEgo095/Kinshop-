@@ -4,23 +4,34 @@ import { useCallback, useEffect, useState } from "react"
 import { motion } from "framer-motion"
 import {
   ArrowLeft,
+  BarChart3,
+  Banknote,
+  Bell,
+  BellRing,
   CheckCircle2,
   Copy,
   Crown,
   ExternalLink,
+  Eye,
   Loader2,
   MessageCircle,
   Package,
+  Percent,
   Plus,
   Settings,
   Share2,
   ShoppingCart,
   Sparkles,
   Trash2,
+  TrendingDown,
+  TrendingUp,
+  Trophy,
+  Users,
   XCircle,
   PackageCheck,
 } from "lucide-react"
 import { toast } from "sonner"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -55,17 +66,21 @@ import {
 } from "@/components/ui/alert-dialog"
 import {
   CATEGORIES,
+  PAYMENT_LABELS,
   STORE_EMOJIS,
   buildWhatsAppLink,
   formatFC,
   formatPhoneDisplay,
   formatUSD,
   timeAgo,
+  type NotificationData,
   type OrderData,
   type OrderItem,
   type OrderStatus,
+  type PaymentMethod,
   type ProductData,
   type StoreData,
+  type VendorStats,
 } from "@/lib/kinshop"
 import { StatusStudio } from "@/components/kinshop/status-studio"
 
@@ -121,11 +136,51 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
   const [submitting, setSubmitting] = useState(false)
   const [simPaying, setSimPaying] = useState(false)
 
+  // V2 — Statistiques avancées & Notifications SMS
+  const [stats, setStats] = useState<VendorStats | null>(null)
+  const [statsLoading, setStatsLoading] = useState(true)
+  const [notifications, setNotifications] = useState<NotificationData[]>([])
+  const [notifUnread, setNotifUnread] = useState(0)
+  const [activeTab, setActiveTab] = useState("produits")
+
   const loadOrders = useCallback(async () => {
     try {
       const res = await fetch(`/api/orders?slug=${encodeURIComponent(slug)}`)
       const data = await res.json()
       if (res.ok) setOrders(data.orders)
+    } catch {
+      // silencieux
+    }
+  }, [slug])
+
+  const loadStats = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/stats?slug=${encodeURIComponent(slug)}&days=14`)
+      const data = await res.json()
+      if (res.ok) setStats(data.stats)
+    } catch {
+      // silencieux
+    } finally {
+      setStatsLoading(false)
+    }
+  }, [slug])
+
+  const loadNotifications = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/notifications?slug=${encodeURIComponent(slug)}`)
+      const data = await res.json()
+      if (res.ok) {
+        setNotifications(data.notifications)
+        let seen = 0
+        try {
+          seen = Number(localStorage.getItem(`ks_notif_seen_${slug}`) || 0)
+        } catch {
+          // silencieux
+        }
+        setNotifUnread(
+          (data.notifications as NotificationData[]).filter((n) => new Date(n.createdAt).getTime() > seen).length,
+        )
+      }
     } catch {
       // silencieux
     }
@@ -148,7 +203,7 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
           setSPhone(formatPhoneDisplay(data.store.whatsapp))
           setSCity(data.store.city)
           setSEmoji(data.store.logoEmoji)
-          await loadOrders()
+          await Promise.all([loadOrders(), loadStats(), loadNotifications()])
         }
       } catch {
         if (!cancelled) setNotFound(true)
@@ -159,7 +214,7 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
     return () => {
       cancelled = true
     }
-  }, [slug, loadOrders])
+  }, [slug, loadOrders, loadStats, loadNotifications])
 
   const storeLink = store ? `${window.location.origin}/#/boutique/${store.slug}` : ""
 
@@ -268,6 +323,35 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
       return JSON.parse(json)
     } catch {
       return []
+    }
+  }
+
+  const handleTabChange = (value: string) => {
+    setActiveTab(value)
+    if (value === "notifications") {
+      try {
+        localStorage.setItem(`ks_notif_seen_${slug}`, String(Date.now()))
+      } catch {
+        // silencieux
+      }
+      setNotifUnread(0)
+    }
+  }
+
+  // V2 — Le vendeur enregistre un paiement espèces reçu à la livraison
+  const markCashReceived = async (order: OrderData) => {
+    try {
+      const res = await fetch("/api/orders", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: order.id, paymentStatus: "paid" }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Erreur.")
+      setOrders((os) => os.map((o) => (o.id === order.id ? { ...o, paymentStatus: "paid" } : o)))
+      toast.success(`Paiement espèces enregistré — ${order.ref} 💵`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur inconnue")
     }
   }
 
@@ -492,7 +576,7 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
           </div>
         )}
 
-        <Tabs defaultValue="produits">
+        <Tabs value={activeTab} onValueChange={handleTabChange}>
           <TabsList className="mb-5 h-11">
             <TabsTrigger value="produits" className="px-4">
               <Package className="w-4 h-4 mr-1.5" />
@@ -503,6 +587,17 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
               Commandes
               {newOrders > 0 && (
                 <Badge className="ml-2 h-5 px-1.5 bg-amber-500 hover:bg-amber-500">{newOrders}</Badge>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="stats" className="px-4">
+              <BarChart3 className="w-4 h-4 mr-1.5" />
+              Stats
+            </TabsTrigger>
+            <TabsTrigger value="notifications" className="px-4">
+              {notifUnread > 0 ? <BellRing className="w-4 h-4 mr-1.5 text-amber-500" /> : <Bell className="w-4 h-4 mr-1.5" />}
+              Alertes
+              {notifUnread > 0 && (
+                <Badge className="ml-2 h-5 px-1.5 bg-amber-500 hover:bg-amber-500">{notifUnread}</Badge>
               )}
             </TabsTrigger>
             <TabsTrigger value="statut" className="px-4">
@@ -599,6 +694,22 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
                             <Badge variant="outline" className="text-xs">
                               {order.paymentMethod === "mpesa" ? "M-Pesa" : order.paymentMethod === "airtel" ? "Airtel Money" : order.paymentMethod === "orange" ? "Orange Money" : "Espèces"}
                             </Badge>
+                            {/* V2 — Statut du paiement */}
+                            {order.paymentStatus === "paid" && (
+                              <Badge className="bg-emerald-600 hover:bg-emerald-600 text-white text-xs">✅ Payée</Badge>
+                            )}
+                            {order.paymentStatus === "pending" && (
+                              <Badge variant="outline" className="text-xs border-amber-400 text-amber-700 bg-amber-50">⏳ Paiement en cours</Badge>
+                            )}
+                            {order.paymentStatus === "failed" && (
+                              <Badge variant="destructive" className="text-xs">Paiement échoué</Badge>
+                            )}
+                            {order.paymentMethod === "cash" && order.paymentStatus !== "paid" && (
+                              <Badge variant="outline" className="text-xs">💵 À la livraison</Badge>
+                            )}
+                            {order.paymentMethod !== "cash" && order.paymentStatus === "unpaid" && (
+                              <Badge variant="outline" className="text-xs text-muted-foreground">Non payée</Badge>
+                            )}
                           </div>
                           <span className="text-xs text-muted-foreground">{timeAgo(order.createdAt)}</span>
                         </div>
@@ -641,6 +752,12 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
                             <MessageCircle className="w-4 h-4 mr-1 text-emerald-600" />
                             Contacter sur WhatsApp
                           </Button>
+                          {order.paymentMethod === "cash" && order.paymentStatus !== "paid" && (
+                            <Button size="sm" variant="outline" onClick={() => markCashReceived(order)}>
+                              <Banknote className="w-4 h-4 mr-1 text-emerald-600" />
+                              Paiement reçu
+                            </Button>
+                          )}
                           {order.status !== "cancelled" && order.status !== "delivered" && (
                             <Button size="sm" variant="ghost" onClick={() => updateOrderStatus(order, "cancelled")} className="text-destructive hover:text-destructive">
                               <XCircle className="w-4 h-4 mr-1" />
@@ -652,6 +769,237 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
                     </Card>
                   )
                 })}
+              </div>
+            )}
+          </TabsContent>
+
+          {/* ─── STATISTIQUES (V2) ─── */}
+          <TabsContent value="stats" className="space-y-4">
+            {statsLoading ? (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <Skeleton key={i} className="h-24 rounded-2xl" />
+                ))}
+              </div>
+            ) : !stats ? (
+              <Card>
+                <CardContent className="p-10 text-center space-y-2">
+                  <p className="text-5xl">📊</p>
+                  <p className="font-semibold">Statistiques indisponibles</p>
+                  <p className="text-sm text-muted-foreground">Réessaie dans un instant.</p>
+                </CardContent>
+              </Card>
+            ) : (
+              <>
+                {/* KPIs */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <Card>
+                    <CardContent className="p-4 space-y-1">
+                      <p className="text-xs text-muted-foreground flex items-center gap-1">
+                        <Eye className="w-3.5 h-3.5" /> Vues (14 j)
+                      </p>
+                      <p className="text-2xl font-extrabold">{stats.views.period}</p>
+                      <p
+                        className={`text-xs font-medium flex items-center gap-1 ${
+                          stats.trendPct >= 0 ? "text-emerald-600" : "text-red-600"
+                        }`}
+                      >
+                        {stats.trendPct >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                        {stats.trendPct >= 0 ? "+" : ""}
+                        {stats.trendPct}% vs 7 j précédents
+                      </p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="p-4 space-y-1">
+                      <p className="text-xs text-muted-foreground flex items-center gap-1">
+                        <ShoppingCart className="w-3.5 h-3.5" /> Commandes (14 j)
+                      </p>
+                      <p className="text-2xl font-extrabold">{stats.orders.period}</p>
+                      <p className="text-xs text-muted-foreground">{stats.orders.total} au total</p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="p-4 space-y-1">
+                      <p className="text-xs text-muted-foreground flex items-center gap-1">
+                        <Percent className="w-3.5 h-3.5" /> Conversion
+                      </p>
+                      <p className="text-2xl font-extrabold">{stats.conversionPct}%</p>
+                      <p className="text-xs text-muted-foreground">vues → commandes</p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="p-4 space-y-1">
+                      <p className="text-xs text-muted-foreground flex items-center gap-1">
+                        <Users className="w-3.5 h-3.5" /> Fidélité
+                      </p>
+                      <p className="text-2xl font-extrabold">{stats.repeatCustomers}</p>
+                      <p className="text-xs text-muted-foreground">clients à 2+ commandes</p>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Graphique vues vs commandes */}
+                <Card>
+                  <CardContent className="p-5 space-y-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="font-semibold text-sm">Vues &amp; commandes — 14 derniers jours</p>
+                      <div className="flex gap-3 text-xs text-muted-foreground">
+                        <span className="flex items-center gap-1">
+                          <span className="w-2.5 h-2.5 rounded-sm bg-primary inline-block" /> Vues
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <span className="w-2.5 h-2.5 rounded-sm bg-amber-400 inline-block" /> Commandes
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-end gap-1.5">
+                      {stats.views.series.map((pt, i) => {
+                        const maxV = Math.max(...stats.views.series.map((p) => p.count), 1)
+                        const ordersCount = stats.orders.series[i]?.count ?? 0
+                        const maxO = Math.max(...stats.orders.series.map((p) => p.count), 1)
+                        const vh = Math.max((pt.count / maxV) * 100, pt.count > 0 ? 8 : 2)
+                        const oh = Math.max((ordersCount / maxO) * 100, ordersCount > 0 ? 8 : 2)
+                        const d = new Date(pt.day + "T00:00:00Z")
+                        const label = `${d.getUTCDate()}/${d.getUTCMonth() + 1}`
+                        return (
+                          <div
+                            key={pt.day}
+                            className="flex-1 flex flex-col items-center gap-1 min-w-0"
+                            title={`${label} — ${pt.count} vue(s), ${ordersCount} commande(s)`}
+                          >
+                            <div className="w-full flex items-end justify-center gap-0.5 h-32">
+                              <div className="w-1/2 max-w-[14px] bg-primary/80 rounded-t" style={{ height: `${vh}%` }} />
+                              <div className="w-1/2 max-w-[14px] bg-amber-400 rounded-t" style={{ height: `${oh}%` }} />
+                            </div>
+                            <span className="text-[9px] text-muted-foreground whitespace-nowrap">
+                              {i % 2 === 0 ? label : ""}
+                            </span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Top produits + suivi */}
+                <div className="grid md:grid-cols-2 gap-4">
+                  <Card>
+                    <CardContent className="p-5 space-y-3">
+                      <p className="font-semibold text-sm flex items-center gap-1.5">
+                        <Trophy className="w-4 h-4 text-amber-500" /> Produits stars
+                      </p>
+                      {stats.topProducts.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">Aucune vente sur la période.</p>
+                      ) : (
+                        <div className="space-y-2.5">
+                          {stats.topProducts.map((tp, i) => (
+                            <div key={tp.productId || tp.name} className="flex items-center gap-3 text-sm">
+                              <span className="w-6 h-6 rounded-lg bg-muted flex items-center justify-center text-xs font-bold">
+                                {i + 1}
+                              </span>
+                              <span className="text-lg">{tp.emoji}</span>
+                              <div className="flex-1 min-w-0">
+                                <p className="font-medium truncate">{tp.name}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {tp.qty} vendu(s) · {tp.orders} commande(s)
+                                </p>
+                              </div>
+                              <span className="font-bold text-primary text-sm">{formatUSD(tp.revenueUSD)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardContent className="p-5 space-y-3">
+                      <p className="font-semibold text-sm">Suivi des commandes (14 j)</p>
+                      <div className="space-y-2">
+                        {(
+                          [
+                            ["new", "Nouvelles"],
+                            ["paid", "Payées en ligne"],
+                            ["confirmed", "Confirmées"],
+                            ["delivered", "Livrées"],
+                            ["cancelled", "Annulées"],
+                          ] as const
+                        ).map(([k, label]) => {
+                          const v = stats.statusFunnel[k] ?? 0
+                          const max = Math.max(...Object.values(stats.statusFunnel), 1)
+                          return (
+                            <div key={k} className="flex items-center gap-2 text-sm">
+                              <span className="w-28 text-xs text-muted-foreground shrink-0">{label}</span>
+                              <div className="flex-1 h-5 bg-muted rounded-md overflow-hidden">
+                                <div
+                                  className={`h-full rounded-md ${
+                                    k === "cancelled" ? "bg-red-300" : k === "paid" ? "bg-emerald-500" : "bg-emerald-400/70"
+                                  }`}
+                                  style={{ width: `${(v / max) * 100}%` }}
+                                />
+                              </div>
+                              <span className="w-6 text-right font-bold text-xs">{v}</span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                      <div className="pt-2 border-t flex flex-wrap gap-1.5">
+                        {(
+                          [
+                            ["mpesa", "M-Pesa"],
+                            ["airtel", "Airtel"],
+                            ["orange", "Orange"],
+                            ["cash", "Espèces"],
+                          ] as const
+                        ).map(([k, label]) => (
+                          <Badge key={k} variant="outline" className="text-xs">
+                            {label} : {stats.payments[k] ?? 0}
+                          </Badge>
+                        ))}
+                      </div>
+                      <p className="text-xs text-muted-foreground">Panier moyen : {formatUSD(stats.avgBasketUSD)}</p>
+                    </CardContent>
+                  </Card>
+                </div>
+              </>
+            )}
+          </TabsContent>
+
+          {/* ─── ALERTES SMS (V2) ─── */}
+          <TabsContent value="notifications" className="space-y-3">
+            {notifications.length === 0 ? (
+              <Card>
+                <CardContent className="p-10 text-center space-y-3">
+                  <p className="text-5xl">🔔</p>
+                  <p className="font-semibold">Aucune notification</p>
+                  <p className="text-sm text-muted-foreground">
+                    Les alertes SMS de tes commandes apparaîtront ici (vendeur + client).
+                  </p>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-2 max-h-[70vh] overflow-y-auto scrollbar-thin pr-1">
+                {notifications.map((n) => (
+                  <Card key={n.id}>
+                    <CardContent className="p-4 space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="outline" className="text-xs">
+                          {n.audience === "vendor" ? "🏪 Vendeur" : "👤 Client"}
+                        </Badge>
+                        <Badge
+                          variant={n.status === "sent" ? "default" : n.status === "failed" ? "destructive" : "secondary"}
+                          className="text-xs"
+                        >
+                          {n.status === "sent" ? "Envoyé" : n.status === "failed" ? "Échec" : "Simulé"}
+                        </Badge>
+                        <span className="text-xs text-muted-foreground">{n.to}</span>
+                        <span className="ml-auto text-xs text-muted-foreground">{timeAgo(n.createdAt)}</span>
+                      </div>
+                      <p className="text-sm whitespace-pre-line bg-muted/50 rounded-lg p-3">{n.body}</p>
+                    </CardContent>
+                  </Card>
+                ))}
               </div>
             )}
           </TabsContent>

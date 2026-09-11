@@ -3,6 +3,7 @@ import { db } from "@/lib/db"
 import { guardAdmin, logAdminAction } from "@/lib/admin"
 
 const ORDER_STATUSES = ["new", "paid", "confirmed", "delivered", "cancelled"]
+const PAYMENT_STATUSES = ["unpaid", "pending", "paid", "failed"]
 
 // GET /api/admin/orders — Toutes les commandes de la plateforme
 export async function GET(req: NextRequest) {
@@ -13,6 +14,7 @@ export async function GET(req: NextRequest) {
     const sp = req.nextUrl.searchParams
     const q = (sp.get("q") || "").toLowerCase().trim()
     const status = sp.get("status") || ""
+    const pay = sp.get("pay") || ""
     const storeId = sp.get("storeId") || ""
 
     const orders = await db.order.findMany({
@@ -24,6 +26,10 @@ export async function GET(req: NextRequest) {
     let list = orders
     if (status && ORDER_STATUSES.includes(status)) {
       list = list.filter((o) => o.status === status)
+    }
+    // V2 — filtre par statut de paiement
+    if (pay && PAYMENT_STATUSES.includes(pay)) {
+      list = list.filter((o) => o.paymentStatus === pay)
     }
     if (storeId) list = list.filter((o) => o.storeId === storeId)
     if (q) {
@@ -43,7 +49,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// PATCH /api/admin/orders — Changer le statut d'une commande
+// PATCH /api/admin/orders — Changer le statut d'une commande / confirmer un paiement (V2)
 export async function PATCH(req: NextRequest) {
   const denied = guardAdmin(req)
   if (denied) return denied
@@ -52,15 +58,44 @@ export async function PATCH(req: NextRequest) {
     const body = await req.json()
     const id = String(body.id || "")
     const status = String(body.status || "")
-    if (!id || !ORDER_STATUSES.includes(status)) {
-      return NextResponse.json({ error: "id et status valides requis." }, { status: 400 })
-    }
+    const paymentStatus = String(body.paymentStatus || "")
+    if (!id) return NextResponse.json({ error: "id requis." }, { status: 400 })
 
     const order = await db.order.findUnique({ where: { id } })
     if (!order) return NextResponse.json({ error: "Commande introuvable." }, { status: 404 })
 
-    const updated = await db.order.update({ where: { id }, data: { status } })
-    await logAdminAction("order.status", `order:${order.ref}`, `Statut de ${order.ref} → ${status} (admin)`)
+    const data: { status?: string; paymentStatus?: string; paidAt?: Date } = {}
+    if (status) {
+      if (!ORDER_STATUSES.includes(status)) {
+        return NextResponse.json({ error: "Statut invalide." }, { status: 400 })
+      }
+      data.status = status
+    }
+    if (paymentStatus) {
+      if (!PAYMENT_STATUSES.includes(paymentStatus)) {
+        return NextResponse.json({ error: "Statut de paiement invalide." }, { status: 400 })
+      }
+      data.paymentStatus = paymentStatus
+      if (paymentStatus === "paid") {
+        data.paidAt = new Date()
+        if (order.status === "new") data.status = "paid"
+      }
+    }
+    if (Object.keys(data).length === 0) {
+      return NextResponse.json({ error: "Rien à mettre à jour." }, { status: 400 })
+    }
+
+    const updated = await db.order.update({ where: { id }, data })
+    if (status) {
+      await logAdminAction("order.status", `order:${order.ref}`, `Statut de ${order.ref} → ${status} (admin)`)
+    }
+    if (paymentStatus) {
+      await logAdminAction(
+        "order.payment",
+        `order:${order.ref}`,
+        `Paiement de ${order.ref} → ${paymentStatus} (admin, confirmé manuellement)`,
+      )
+    }
 
     return NextResponse.json({ order: updated })
   } catch (e) {

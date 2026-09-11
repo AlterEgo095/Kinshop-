@@ -173,6 +173,10 @@ interface AdminOrderRow {
   totalUSD: number
   totalFC: number
   paymentMethod: PaymentMethod
+  paymentStatus: string
+  paymentRef: string
+  payerPhone: string
+  paidAt: string | null
   note: string
   status: OrderStatus
   createdAt: string
@@ -236,6 +240,14 @@ const SHORT_PAYMENT: Record<PaymentMethod, string> = {
   airtel: "Airtel Money",
   orange: "Orange Money",
   cash: "Espèces",
+}
+
+// V2 — Méta des statuts de paiement mobile money
+const PAY_STATUS_META: Record<string, { label: string; badge: string }> = {
+  unpaid: { label: "Non payée", badge: "bg-muted text-muted-foreground border-border" },
+  pending: { label: "En cours", badge: "bg-amber-100 text-amber-800 border-amber-200" },
+  paid: { label: "Payée ✅", badge: "bg-emerald-100 text-emerald-800 border-emerald-200" },
+  failed: { label: "Échoué", badge: "bg-rose-100 text-rose-700 border-rose-200" },
 }
 
 function fmtDate(d: string | null): string {
@@ -345,6 +357,7 @@ export function AdminConsole({
   const [ordersLoading, setOrdersLoading] = useState(false)
   const [ordersQ, setOrdersQ] = useState("")
   const [ordersStatus, setOrdersStatus] = useState("all")
+  const [ordersPay, setOrdersPay] = useState("all")
   const [ordersStore, setOrdersStore] = useState("all")
   const [detailOrder, setDetailOrder] = useState<AdminOrderRow | null>(null)
   const [deleteOrder, setDeleteOrder] = useState<AdminOrderRow | null>(null)
@@ -433,7 +446,7 @@ export function AdminConsole({
     setOrdersLoading(true)
     try {
       const res = await adminFetch(
-        `/api/admin/orders?q=${encodeURIComponent(ordersQ)}&status=${ordersStatus}&storeId=${ordersStore === "all" ? "" : ordersStore}`,
+        `/api/admin/orders?q=${encodeURIComponent(ordersQ)}&status=${ordersStatus}&pay=${ordersPay}&storeId=${ordersStore === "all" ? "" : ordersStore}`,
       )
       const data = await res.json()
       if (res.ok) setOrders(data.orders)
@@ -443,7 +456,7 @@ export function AdminConsole({
     } finally {
       setOrdersLoading(false)
     }
-  }, [adminFetch, ordersQ, ordersStatus, ordersStore])
+  }, [adminFetch, ordersQ, ordersStatus, ordersPay, ordersStore])
 
   const loadProducts = useCallback(async () => {
     setProductsLoading(true)
@@ -683,6 +696,33 @@ export function AdminConsole({
       setOrders((list) => list.map((o) => (o.id === order.id ? { ...o, status } : o)))
       setDetailOrder((d) => (d && d.id === order.id ? { ...d, status } : d))
       toast.success(`Commande ${order.ref} → ${ORDER_STATUS_META[status].label}`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur réseau")
+    }
+  }
+
+  const confirmOrderPayment = async (order: AdminOrderRow) => {
+    try {
+      const res = await adminFetch("/api/admin/orders", {
+        method: "PATCH",
+        body: JSON.stringify({ id: order.id, paymentStatus: "paid" }),
+      })
+      if (!res.ok) {
+        toast.error(await readError(res))
+        return
+      }
+      const newStatus: OrderStatus = order.status === "new" ? "paid" : order.status
+      setOrders((list) =>
+        list.map((o) =>
+          o.id === order.id
+            ? { ...o, paymentStatus: "paid", paidAt: new Date().toISOString(), status: newStatus }
+            : o,
+        ),
+      )
+      setDetailOrder((d) =>
+        d && d.id === order.id ? { ...d, paymentStatus: "paid", paidAt: new Date().toISOString(), status: newStatus } : d,
+      )
+      toast.success(`Paiement confirmé manuellement — ${order.ref}`)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Erreur réseau")
     }
@@ -1363,6 +1403,19 @@ export function AdminConsole({
                   <SelectItem value="cancelled">Annulées</SelectItem>
                 </SelectContent>
               </Select>
+              {/* V2 — Filtre par statut de paiement */}
+              <Select value={ordersPay} onValueChange={setOrdersPay}>
+                <SelectTrigger className="md:w-44" aria-label="Filtrer par paiement">
+                  <SelectValue placeholder="Paiement" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Tous les paiements</SelectItem>
+                  <SelectItem value="paid">Payées en ligne</SelectItem>
+                  <SelectItem value="pending">Paiement en cours</SelectItem>
+                  <SelectItem value="unpaid">Non payées</SelectItem>
+                  <SelectItem value="failed">Paiement échoué</SelectItem>
+                </SelectContent>
+              </Select>
               <Select value={ordersStore} onValueChange={setOrdersStore}>
                 <SelectTrigger className="md:w-52" aria-label="Filtrer par boutique">
                   <SelectValue placeholder="Boutique" />
@@ -1433,7 +1486,12 @@ export function AdminConsole({
                               <p className="text-xs text-muted-foreground whitespace-nowrap">{formatFC(o.totalFC)}</p>
                             </TableCell>
                             <TableCell>
-                              <span className="text-xs whitespace-nowrap">{SHORT_PAYMENT[o.paymentMethod] ?? o.paymentMethod}</span>
+                              <div className="space-y-1">
+                                <span className="text-xs whitespace-nowrap">{SHORT_PAYMENT[o.paymentMethod] ?? o.paymentMethod}</span>
+                                <Badge variant="outline" className={`text-[10px] ${PAY_STATUS_META[o.paymentStatus]?.badge ?? ""}`}>
+                                  {PAY_STATUS_META[o.paymentStatus]?.label ?? o.paymentStatus}
+                                </Badge>
+                              </div>
                             </TableCell>
                             <TableCell>
                               <Select
@@ -1842,7 +1900,18 @@ export function AdminConsole({
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Paiement</p>
-                    <p className="font-medium">{SHORT_PAYMENT[detailOrder.paymentMethod] ?? detailOrder.paymentMethod}</p>
+                    <p className="font-medium">
+                      {SHORT_PAYMENT[detailOrder.paymentMethod] ?? detailOrder.paymentMethod}
+                      <Badge variant="outline" className={`ml-2 text-[10px] ${PAY_STATUS_META[detailOrder.paymentStatus]?.badge ?? ""}`}>
+                        {PAY_STATUS_META[detailOrder.paymentStatus]?.label ?? detailOrder.paymentStatus}
+                      </Badge>
+                    </p>
+                    {detailOrder.payerPhone && detailOrder.paymentStatus !== "unpaid" && (
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Payeur : {formatPhoneDisplay(detailOrder.payerPhone)}
+                        {detailOrder.paidAt ? ` · ${fmtDate(detailOrder.paidAt)}` : ""}
+                      </p>
+                    )}
                   </div>
                 </div>
                 <div>
@@ -1884,6 +1953,12 @@ export function AdminConsole({
                       ))}
                     </SelectContent>
                   </Select>
+                  {detailOrder.paymentStatus !== "paid" && (
+                    <Button onClick={() => confirmOrderPayment(detailOrder)} aria-label="Confirmer le paiement">
+                      <CheckCircle2 className="w-4 h-4 mr-1" />
+                      Paiement OK
+                    </Button>
+                  )}
                   <Button
                     variant="outline"
                     onClick={() => {

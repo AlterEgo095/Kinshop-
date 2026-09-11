@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import {
+  PAYMENT_LABELS,
   buildOrderMessage,
   buildWhatsAppLink,
   makeOrderRef,
@@ -9,6 +10,7 @@ import {
   type OrderItem,
   type PaymentMethod,
 } from "@/lib/kinshop"
+import { notifyNewOrder } from "@/lib/notifier"
 
 const VALID_PAYMENTS: PaymentMethod[] = ["mpesa", "airtel", "orange", "cash"]
 
@@ -85,6 +87,21 @@ export async function POST(req: NextRequest) {
       note: order.note,
     })
 
+    // V2 — Notification SMS vendeur + client (jamais bloquante, simulée si fournisseur absent)
+    await notifyNewOrder({
+      storeId: store.id,
+      storeName: store.name,
+      storeWhatsapp: store.whatsapp,
+      orderId: order.id,
+      ref: order.ref,
+      customerName: order.customerName,
+      customerPhone: order.customerPhone,
+      zone: order.zone,
+      items,
+      totalFC,
+      paymentLabel: PAYMENT_LABELS[paymentMethod],
+    })
+
     return NextResponse.json({ order, whatsappUrl: buildWhatsAppLink(store.whatsapp, message) }, { status: 201 })
   } catch (e) {
     console.error("POST /api/orders", e)
@@ -114,23 +131,44 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// PATCH /api/orders — Changer le statut d'une commande
+// PATCH /api/orders — Changer le statut d'une commande (+ paiement espèces reçu)
 export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json()
     const id = String(body.id || "")
     const status = String(body.status || "")
+    const paymentStatus = String(body.paymentStatus || "")
 
     const allowed = ["new", "confirmed", "delivered", "cancelled"]
     if (!id) return NextResponse.json({ error: "Paramètre id requis." }, { status: 400 })
-    if (!allowed.includes(status)) {
-      return NextResponse.json({ error: "Statut invalide." }, { status: 400 })
-    }
 
     const order = await db.order.findUnique({ where: { id } })
     if (!order) return NextResponse.json({ error: "Commande introuvable." }, { status: 404 })
 
-    const updated = await db.order.update({ where: { id }, data: { status } })
+    const data: { status?: string; paymentStatus?: string; paidAt?: Date } = {}
+    if (status) {
+      if (!allowed.includes(status)) {
+        return NextResponse.json({ error: "Statut invalide." }, { status: 400 })
+      }
+      data.status = status
+    }
+    // Le vendeur peut enregistrer un paiement reçu (espèces à la livraison uniquement)
+    if (paymentStatus === "paid") {
+      if (order.paymentMethod === "cash") {
+        data.paymentStatus = "paid"
+        data.paidAt = new Date()
+      } else {
+        return NextResponse.json(
+          { error: "Ce paiement passe par mobile money — il est confirmé automatiquement." },
+          { status: 400 },
+        )
+      }
+    }
+    if (Object.keys(data).length === 0) {
+      return NextResponse.json({ error: "Rien à mettre à jour." }, { status: 400 })
+    }
+
+    const updated = await db.order.update({ where: { id }, data })
     return NextResponse.json({ order: updated })
   } catch (e) {
     console.error("PATCH /api/orders", e)

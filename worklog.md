@@ -104,3 +104,30 @@ Work Log:
 Stage Summary:
 - origin/main synchronisé avec la V1 complète : boutiques WhatsApp + Chariow premium + Statut Studio + console admin.
 - Rappel sécurité : PAT affiché en clair dans le chat → à révoquer depuis GitHub Settings après usage.
+
+---
+Task ID: 5
+Agent: Z.ai Code (principal)
+Task: Version V2 — paiement mobile money en ligne des commandes + finalisation stats vendeur + notifications SMS
+
+Work Log:
+- Reprise du travail V2 laissé inachevé par la session précédente (commit local 73037b3 non poussé, message UUID, sans entrée worklog) : le backend existait (routes /api/stats, /api/analytics/visit, /api/notifications, lib/notifier.ts) mais l'UI dashboard n'avait AUCUN onglet (imports BarChart3/Trophy/Users inutilisés) et le paiement en ligne des commandes n'était pas commencé.
+- Prisma : Order étendu avec paymentStatus (unpaid|pending|paid|failed), paymentRef, payerPhone, paidAt. db:push OK. Redémarrage du dev server requis (Prisma Client chargé avant le push → "Unknown field paymentStatus", résolu).
+- src/lib/mobile-money.ts : abstraction agrégateur RDC (pattern FlexPay flexpay.cd) — initiateMomoPayment (push USSD type 1, callbackUrl, Bearer token), isMomoLive (MOMO_TOKEN+MOMO_MERCHANT), isWebhookAuthorized (MOMO_CALLBACK_TOKEN). Mode SIMULATION par défaut.
+- 4 routes /api/payments : initiate (marque pending + push), status (polling), webhook (code "0" → paid + order.status="paid", idempotent, sinon failed), simulate-confirm (403 en mode live). PATCH /api/orders : le vendeur peut marquer paymentStatus "paid" (espèces reçues, uniquement cash).
+- kinshop.ts : types PaymentStatus + OrderData étendu, PAYMENT_STATUS_LABELS, detectOperator (préfixes Vodacom/Orange/Airtel/Africell), OPERATOR_LABELS.
+- store-view.tsx (~200 lignes) : écran de paiement complet dans le dialog checkout — idle (montant, numéro à débiter prérempli, CTA "Payer X FC", repli "Payer plus tard via WhatsApp") → waiting (carte push animée, instructions PIN, polling 4 s, bouton démo "J'ai validé le PIN (démo)" en simulation) → paid ("Paiement confirmé ! 🎉" + suivi livraison WhatsApp) / failed (réessayer / modifier numéro). Espèces → écran succès classique inchangé.
+- dashboard.tsx : onglet "Stats" (4 KPI cards vues/tendance/conversion/fidélité, graphique double barres vues vs commandes 14 j, produits stars, entonnoir statuts, répartition paiements, panier moyen) + onglet "Alertes" (journal SMS vendeur/client avec badges Simulé/Envoyé/Échec, badge non-lues) + Tabs passé en contrôlé (activeTab/handleTabChange) + badges paiement sur commandes (Payée/Paiement en cours/Échoué/À la livraison/Non payée) + bouton "Paiement reçu" (cash).
+- admin-console.tsx : filtre "Tous les paiements" (bug corrigé au passage : ordersPay absent des deps de loadOrders → filtre inerte), badge statut paiement dans la colonne Paiement, détail enrichi (payeur, date paiement), bouton "Paiement OK" (confirmation manuelle admin, journalisée order.payment).
+- API admin orders : filtre pay=, PATCH paymentStatus (paid → order.status "paid" si new, log d'audit).
+- Conversion vendeur plafonnée à 100 % (1 vue seedée vs 14 commandes seedées affichait 1300 %).
+- .env documenté (MOMO_*, SMS_*), README : section "Fonctionnalités V2" + "Paiement mobile money des commandes" (modes simulation/live), roadmap V2 cochée.
+- Tests E2E Agent Browser complets : boutique → checkout M-Pesa → écran paiement (37 050 FC) → push USSD (instructions PIN, numéro +243 formaté) → bouton démo → "Paiement confirmé ! 🎉" + toast ; webhook curl (code 0 → paid, idempotence duplicate:true, statut final paid) ; notification SMS vendeur+client simulées ; dashboard Stats (KPIs, graphique, produits stars, entonnoir) ; Alertes (SMS journalisés, badge non-lues effacé) ; Commandes (badge ✅ Payée) ; admin (filtre paiement, détail, confirmation manuelle → Payée en ligne) ; parcours espèces intact (KIN-HQ5NF7) ; mobile 375 px push/paid OK ; console navigateur propre.
+- Nettoyage : commandes de test supprimées via console admin (KIN-0WP2DD, KIN-2PFF5Q, KIN-HQ5NF7, KIN-IRMB36), conservée KIN-5MR3KP comme démo payée réaliste.
+
+Stage Summary:
+- KinShop V2 est complète : le client peut PAYER sa commande en ligne par push USSD mobile money (M-Pesa/Airtel/Orange) avec confirmation automatique webhook + polling, le vendeur voit les stats avancées (vues, conversion, produits stars, fidélité) et reçoit des alertes SMS (simulées tant que SMS_API_KEY est vide), l'admin supervise les paiements (filtre, badges, confirmation manuelle auditée).
+- Passage en production : remplir MOMO_TOKEN + MOMO_MERCHANT (+ MOMO_CALLBACK_TOKEN, APP_URL) pour le push USSD réel via agrégateur FlexPay-compatible — la simulation est alors automatiquement désactivée (403). SMS réels via SMS_API_URL/SMS_API_KEY (format Africa's Talking).
+- Décisions clés : webhook agrégateur au pattern FlexPay (reference=notre réf commande, code "0"=succès), idempotence par état paymentStatus, paymentRef distinct de la réf commande, polling client 4 s (pas de WebSocket — simplicité 3G), la commande payée passe automatiquement status="paid" côté vendeur.
+- Artifacts : prisma/schema.prisma (Order.payment*), src/lib/mobile-money.ts, src/app/api/payments/{initiate,status,webhook,simulate-confirm}/route.ts, store-view.tsx (écran paiement), dashboard.tsx (tabs Stats/Alertes + badges), admin-console.tsx (filtre/badge/confirmation), README.md, .env.
+- Git : commit local UUID 73037b3 (backend V2 session précédente) fusionné par soft reset dans le commit V2 propre de cette session.
