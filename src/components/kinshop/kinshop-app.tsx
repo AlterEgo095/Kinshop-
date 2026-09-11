@@ -7,6 +7,8 @@ import { Dashboard } from "@/components/kinshop/dashboard"
 import { StoreView } from "@/components/kinshop/store-view"
 import { PremiumSuccess } from "@/components/kinshop/premium-success"
 import { AdminConsole } from "@/components/kinshop/admin-console"
+import CvExpress from "@/components/kinshop/cv-express"
+import { InvoicePublicView } from "@/components/kinshop/facture-view"
 import type { StoreData } from "@/lib/kinshop"
 
 type View =
@@ -16,11 +18,13 @@ type View =
   | { name: "store"; slug: string }
   | { name: "premium-success" }
   | { name: "admin" }
+  | { name: "cv" }
+  | { name: "invoice-public"; number: string }
 
 const OWNER_KEY = "kinshop_owner_slug"
 const DEMO_SLUG = "maman-ngo"
 
-type HashTarget = { type: "store"; slug: string } | { type: "premium" } | { type: "admin" } | null
+type HashTarget = { type: "store"; slug: string } | { type: "premium" } | { type: "admin" } | { type: "cv" } | { type: "invoice"; number: string } | null
 
 function parseHash(): HashTarget {
   if (typeof window === "undefined") return null
@@ -28,6 +32,9 @@ function parseHash(): HashTarget {
   if (store) return { type: "store", slug: store[1] }
   if (/^#\/premium\/succes/i.test(window.location.hash)) return { type: "premium" }
   if (/^#\/admin/i.test(window.location.hash)) return { type: "admin" }
+  if (/^#\/cv/i.test(window.location.hash)) return { type: "cv" }
+  const invoice = window.location.hash.match(/^#\/facture\/([A-Za-z0-9-]+)/)
+  if (invoice) return { type: "invoice", number: invoice[1] }
   return null
 }
 
@@ -49,6 +56,8 @@ export function KinShopApp() {
       if (hashTarget?.type === "store") setView({ name: "store", slug: hashTarget.slug })
       else if (hashTarget?.type === "premium") setView({ name: "premium-success" })
       else if (hashTarget?.type === "admin") setView({ name: "admin" })
+      else if (hashTarget?.type === "cv") setView({ name: "cv" })
+      else if (hashTarget?.type === "invoice") setView({ name: "invoice-public", number: hashTarget.number })
       setHydrated(true)
     })()
     return () => {
@@ -74,10 +83,22 @@ export function KinShopApp() {
       if (window.location.hash !== target) {
         window.history.pushState(null, "", target)
       }
+    } else if (view.name === "cv") {
+      const target = "#/cv"
+      if (window.location.hash !== target) {
+        window.history.pushState(null, "", target)
+      }
+    } else if (view.name === "invoice-public") {
+      const target = `#/facture/${view.number}`
+      if (window.location.hash !== target) {
+        window.history.pushState(null, "", target)
+      }
     } else if (
       window.location.hash.startsWith("#/boutique/") ||
       window.location.hash.startsWith("#/premium/") ||
-      window.location.hash.startsWith("#/admin")
+      window.location.hash.startsWith("#/admin") ||
+      window.location.hash.startsWith("#/facture/") ||
+      window.location.hash.startsWith("#/cv")
     ) {
       window.history.replaceState(null, "", window.location.pathname)
     }
@@ -90,9 +111,11 @@ export function KinShopApp() {
       if (hashTarget?.type === "store") setView({ name: "store", slug: hashTarget.slug })
       else if (hashTarget?.type === "premium") setView({ name: "premium-success" })
       else if (hashTarget?.type === "admin") setView({ name: "admin" })
+      else if (hashTarget?.type === "cv") setView({ name: "cv" })
+      else if (hashTarget?.type === "invoice") setView({ name: "invoice-public", number: hashTarget.number })
       else
         setView((v) =>
-          v.name === "store" || v.name === "premium-success" || v.name === "admin"
+          v.name === "store" || v.name === "premium-success" || v.name === "admin" || v.name === "cv" || v.name === "invoice-public"
             ? { name: "landing" }
             : v,
         )
@@ -148,6 +171,10 @@ export function KinShopApp() {
       return <PremiumSuccess ownerSlug={ownerSlug} onGoDashboard={openDashboard} onGoHome={goHome} />
     case "admin":
       return <AdminConsole onBack={goHome} onOpenStore={openStore} />
+    case "cv":
+      return <CvExpress onHome={goHome} onCreateStore={() => setView({ name: "create" })} />
+    case "invoice-public":
+      return <InvoicePublicView number={view.number} onHome={goHome} />
     default:
       return (
         <Landing
@@ -156,6 +183,7 @@ export function KinShopApp() {
           onDemo={openDemo}
           onOpenDashboard={openDashboard}
           onAdmin={() => setView({ name: "admin" })}
+          onCvExpress={() => setView({ name: "cv" })}
         />
       )
   }

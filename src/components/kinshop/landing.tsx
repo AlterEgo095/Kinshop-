@@ -16,6 +16,8 @@ import {
   MapPin,
   Sparkles,
   Eye,
+  FileText,
+  Receipt,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -33,11 +35,12 @@ interface LandingProps {
   onDemo: () => void
   onOpenDashboard: (slug: string) => void
   onAdmin: () => void
+  onCvExpress: () => void
 }
 
 const DEMO_SLUG = "maman-ngo"
 
-export function Landing({ ownerSlug, onCreateStore, onDemo, onOpenDashboard, onAdmin }: LandingProps) {
+export function Landing({ ownerSlug, onCreateStore, onDemo, onOpenDashboard, onAdmin, onCvExpress }: LandingProps) {
   return (
     <div className="min-h-screen flex flex-col bg-background">
       {/* Header sticky */}
@@ -361,6 +364,90 @@ export function Landing({ ownerSlug, onCreateStore, onDemo, onOpenDashboard, onA
               </CardContent>
             </Card>
           </motion.div>
+        </section>
+
+        {/* Outils gratuits (V3) */}
+        <section className="max-w-6xl mx-auto px-4 pb-16 md:pb-24">
+          <div className="text-center space-y-3 mb-10">
+            <Badge variant="secondary" className="px-3 py-1.5 gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+              Nouveauté V3 — outils gratuits
+            </Badge>
+            <h2 className="text-3xl md:text-4xl font-bold tracking-tight">Bien plus qu&apos;une boutique</h2>
+            <p className="text-muted-foreground max-w-2xl mx-auto">
+              KinShop t&apos;accompagne dans tout ton business : décroche ton prochain job avec un CV pro,
+              facture tes clients entreprises en un clic.
+            </p>
+          </div>
+          <div className="grid md:grid-cols-2 gap-5">
+            <motion.div
+              initial={{ opacity: 0, y: 16 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.4 }}
+            >
+              <Card className="h-full border-2 border-emerald-200 hover:border-emerald-400 transition-colors">
+                <CardContent className="p-6 md:p-8 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="w-14 h-14 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                      <FileText className="w-7 h-7" />
+                    </div>
+                    <Badge className="bg-amber-400 hover:bg-amber-400 text-amber-950">100 % gratuit</Badge>
+                  </div>
+                  <h3 className="text-xl font-bold">CV Express RDC 🇨🇩</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Crée un CV professionnel en 5 minutes, depuis ton téléphone : 2 modèles modernes,
+                    export PDF et image, prêt à envoyer sur WhatsApp aux employeurs.
+                  </p>
+                  <ul className="text-sm space-y-1.5 text-foreground/90">
+                    <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-primary shrink-0" /> Modèles « Kin Classique » et « Kin Moderne »</li>
+                    <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-primary shrink-0" /> Photo, compétences, langues, expériences</li>
+                    <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-primary shrink-0" /> PDF A4 + PNG partageable instantanément</li>
+                  </ul>
+                  <Button size="lg" className="w-full sm:w-auto" onClick={onCvExpress}>
+                    <FileText className="w-5 h-5 mr-2" />
+                    Créer mon CV maintenant
+                  </Button>
+                </CardContent>
+              </Card>
+            </motion.div>
+            <motion.div
+              initial={{ opacity: 0, y: 16 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.4, delay: 0.1 }}
+            >
+              <Card className="h-full border-2 border-amber-200 hover:border-amber-400 transition-colors">
+                <CardContent className="p-6 md:p-8 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="w-14 h-14 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center">
+                      <Receipt className="w-7 h-7" />
+                    </div>
+                    <Badge className="bg-emerald-600 hover:bg-emerald-600">Inclus dans ta boutique</Badge>
+                  </div>
+                  <h3 className="text-xl font-bold">KinFacture 🧾</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Factures professionnelles avec QR de paiement mobile money : idéal pour tes clients
+                    entreprises, ONG et commandes en gros. Partage par WhatsApp, PDF ou image.
+                  </p>
+                  <ul className="text-sm space-y-1.5 text-foreground/90">
+                    <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-primary shrink-0" /> Lignes détaillées, totaux FC &amp; USD automatiques</li>
+                    <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-primary shrink-0" /> QR de paiement M-Pesa / Airtel / Orange intégré</li>
+                    <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-primary shrink-0" /> Lien de facture publique à envoyer au client</li>
+                  </ul>
+                  <Button
+                    size="lg"
+                    variant="outline"
+                    className="w-full sm:w-auto border-amber-300 hover:bg-amber-50"
+                    onClick={() => (ownerSlug ? onOpenDashboard(ownerSlug) : onCreateStore())}
+                  >
+                    <Receipt className="w-5 h-5 mr-2" />
+                    {ownerSlug ? "Ouvrir mes factures" : "Créer ma boutique pour facturer"}
+                  </Button>
+                </CardContent>
+              </Card>
+            </motion.div>
+          </div>
         </section>
 
         {/* Témoignages */}

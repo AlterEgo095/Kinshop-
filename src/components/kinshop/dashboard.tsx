@@ -18,6 +18,7 @@ import {
   Package,
   Percent,
   Plus,
+  Receipt,
   Settings,
   Share2,
   ShoppingCart,
@@ -73,6 +74,7 @@ import {
   formatPhoneDisplay,
   formatUSD,
   timeAgo,
+  usdToFC,
   type NotificationData,
   type OrderData,
   type OrderItem,
@@ -83,6 +85,19 @@ import {
   type VendorStats,
 } from "@/lib/kinshop"
 import { StatusStudio } from "@/components/kinshop/status-studio"
+import {
+  buildInvoiceMessage,
+  INVOICE_STATUS_LABELS,
+  type InvoiceData,
+  type InvoiceItem,
+  type InvoiceStatus,
+} from "@/lib/kinfacture"
+import {
+  InvoiceCanvas,
+  downloadInvoicePNG,
+  exportInvoicePDF,
+  shareInvoiceCanvas,
+} from "@/components/kinshop/invoice-canvas"
 
 interface DashboardProps {
   slug: string
@@ -143,6 +158,18 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
   const [notifUnread, setNotifUnread] = useState(0)
   const [activeTab, setActiveTab] = useState("produits")
 
+  // V3 — KinFacture
+  const [invoices, setInvoices] = useState<InvoiceData[]>([])
+  const [invOpen, setInvOpen] = useState(false)
+  const [invPreview, setInvPreview] = useState<InvoiceData | null>(null)
+  const [previewCanvas, setPreviewCanvas] = useState<HTMLCanvasElement | null>(null)
+  const [invClientName, setInvClientName] = useState("")
+  const [invClientPhone, setInvClientPhone] = useState("")
+  const [invDueDate, setInvDueDate] = useState("")
+  const [invNote, setInvNote] = useState("")
+  const [invLines, setInvLines] = useState<InvoiceItem[]>([{ desc: "", qty: 1, unitFC: 0 }])
+  const [invCreating, setInvCreating] = useState(false)
+
   const loadOrders = useCallback(async () => {
     try {
       const res = await fetch(`/api/orders?slug=${encodeURIComponent(slug)}`)
@@ -186,6 +213,16 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
     }
   }, [slug])
 
+  const loadInvoices = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/invoices?slug=${encodeURIComponent(slug)}`)
+      const data = await res.json()
+      if (res.ok) setInvoices(data.invoices)
+    } catch {
+      // silencieux
+    }
+  }, [slug])
+
   useEffect(() => {
     let cancelled = false
     ;(async () => {
@@ -203,7 +240,7 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
           setSPhone(formatPhoneDisplay(data.store.whatsapp))
           setSCity(data.store.city)
           setSEmoji(data.store.logoEmoji)
-          await Promise.all([loadOrders(), loadStats(), loadNotifications()])
+          await Promise.all([loadOrders(), loadStats(), loadNotifications(), loadInvoices()])
         }
       } catch {
         if (!cancelled) setNotFound(true)
@@ -214,7 +251,7 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
     return () => {
       cancelled = true
     }
-  }, [slug, loadOrders, loadStats, loadNotifications])
+  }, [slug, loadOrders, loadStats, loadNotifications, loadInvoices])
 
   const storeLink = store ? `${window.location.origin}/#/boutique/${store.slug}` : ""
 
@@ -438,6 +475,138 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
     window.open(buildWhatsAppLink(order.customerPhone, msg), "_blank")
   }
 
+  /* ─────── V3 — KinFacture ─────── */
+
+  const parseInvItems = (json: string): InvoiceItem[] => {
+    try {
+      const a = JSON.parse(json)
+      return Array.isArray(a) ? a : []
+    } catch {
+      return []
+    }
+  }
+
+  const openInvoiceDialog = () => {
+    setInvClientName("")
+    setInvClientPhone("")
+    setInvDueDate("")
+    setInvNote("")
+    setInvLines([{ desc: "", qty: 1, unitFC: 0 }])
+    setInvOpen(true)
+  }
+
+  const addCatalogLine = (productId: string) => {
+    const p = products.find((x) => x.id === productId)
+    if (!p || !store) return
+    setInvLines((ls) => [...ls, { desc: p.name, qty: 1, unitFC: usdToFC(p.priceUSD, store.rateFC) }])
+  }
+
+  const invTotal = invLines.reduce(
+    (s, l) => s + Math.round(l.unitFC) * Math.max(1, Math.min(999, l.qty || 1)),
+    0,
+  )
+
+  const createInvoice = async () => {
+    if (!store) return
+    if (!invClientName.trim()) return toast.error("Le nom du client est requis.")
+    const items = invLines.filter((l) => l.desc.trim() && l.unitFC > 0).map((l) => ({ desc: l.desc.trim().slice(0, 120), qty: Math.max(1, Math.min(999, Math.round(l.qty) || 1)), unitFC: Math.round(l.unitFC) }))
+    if (items.length === 0) return toast.error("Ajoute au moins une ligne avec une description et un prix.")
+    setInvCreating(true)
+    try {
+      const res = await fetch("/api/invoices", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          slug: store.slug,
+          clientName: invClientName,
+          clientPhone: invClientPhone,
+          dueDate: invDueDate,
+          note: invNote,
+          items,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setInvoices((iv) => [data.invoice, ...iv])
+      setInvOpen(false)
+      toast.success(`Facture ${data.invoice.number} créée 🧾`)
+      setInvPreview(data.invoice)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur")
+    } finally {
+      setInvCreating(false)
+    }
+  }
+
+  const updateInvoiceStatus = async (inv: InvoiceData, status: InvoiceStatus) => {
+    try {
+      const res = await fetch("/api/invoices", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: inv.id, status }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setInvoices((iv) => iv.map((x) => (x.id === inv.id ? data.invoice : x)))
+      setInvPreview((p) => (p && p.id === inv.id ? data.invoice : p))
+      toast.success(status === "paid" ? `Facture ${inv.number} payée ✅` : `Facture ${inv.number} marquée envoyée 📤`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur")
+    }
+  }
+
+  const deleteInvoice = async (inv: InvoiceData) => {
+    try {
+      const res = await fetch(`/api/invoices?id=${inv.id}`, { method: "DELETE" })
+      if (!res.ok) throw new Error()
+      setInvoices((iv) => iv.filter((x) => x.id !== inv.id))
+      setInvPreview(null)
+      toast.success(`Facture ${inv.number} supprimée.`)
+    } catch {
+      toast.error("Suppression impossible.")
+    }
+  }
+
+  const sendInvoiceWhatsApp = (inv: InvoiceData) => {
+    if (!store) return
+    const publicUrl = `${window.location.origin}/#/facture/${inv.number}`
+    const msg = buildInvoiceMessage({
+      storeName: store.name,
+      number: inv.number,
+      clientName: inv.clientName,
+      items: parseInvItems(inv.items),
+      totalFC: inv.totalFC,
+      totalUSD: inv.totalUSD,
+      dueDate: inv.dueDate,
+      publicUrl,
+    })
+    window.open(buildWhatsAppLink(inv.clientPhone || store.whatsapp, msg), "_blank")
+    if (inv.status === "draft") updateInvoiceStatus(inv, "sent")
+  }
+
+  const exportPreview = async (kind: "png" | "pdf" | "share") => {
+    if (!invPreview || !previewCanvas) return toast.error("Aperçu pas encore prêt — patiente une seconde.")
+    if (kind === "png") {
+      const ok = await downloadInvoicePNG(previewCanvas, invPreview)
+      if (ok) toast.success("Facture PNG téléchargée ! 🖼️")
+      else toast.error("Échec du téléchargement.")
+    } else if (kind === "pdf") {
+      const ok = await exportInvoicePDF(previewCanvas, invPreview)
+      if (ok) toast.success("Facture PDF téléchargée ! 📄")
+      else toast.error("Échec de l'export PDF.")
+    } else {
+      const r = await shareInvoiceCanvas(previewCanvas, invPreview)
+      if (r === "shared") toast.success("Facture partagée ! 🚀")
+      else if (r === "downloaded") toast.info("Partage non supporté ici — facture téléchargée en PNG.")
+    }
+  }
+
+  const INVOICE_STATUS_STYLE: Record<InvoiceStatus, string> = {
+    draft: "bg-stone-100 text-stone-700 border-stone-200",
+    sent: "bg-amber-50 text-amber-800 border-amber-200",
+    paid: "bg-emerald-50 text-emerald-800 border-emerald-300",
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -588,6 +757,10 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
               {newOrders > 0 && (
                 <Badge className="ml-2 h-5 px-1.5 bg-amber-500 hover:bg-amber-500">{newOrders}</Badge>
               )}
+            </TabsTrigger>
+            <TabsTrigger value="factures" className="px-4">
+              <Receipt className="w-4 h-4 mr-1.5" />
+              Factures
             </TabsTrigger>
             <TabsTrigger value="stats" className="px-4">
               <BarChart3 className="w-4 h-4 mr-1.5" />
@@ -764,6 +937,88 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
                               Annuler
                             </Button>
                           )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )
+                })}
+              </div>
+            )}
+          </TabsContent>
+
+          {/* ─── FACTURES (V3 — KinFacture) ─── */}
+          <TabsContent value="factures" className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm text-muted-foreground">
+                {invoices.length} facture(s) — professionnelles, avec QR de paiement mobile money.
+              </p>
+              <Button onClick={openInvoiceDialog}>
+                <Plus className="w-4 h-4 mr-1" />
+                Nouvelle facture
+              </Button>
+            </div>
+
+            {invoices.length === 0 ? (
+              <Card>
+                <CardContent className="p-10 text-center space-y-3">
+                  <p className="text-5xl">🧾</p>
+                  <p className="font-semibold">Aucune facture pour le moment</p>
+                  <p className="text-sm text-muted-foreground max-w-md mx-auto">
+                    Crée une facture pro pour un client ou une entreprise : lignes détaillées, total en FC,
+                    QR de paiement mobile money et lien de partage WhatsApp.
+                  </p>
+                  <Button onClick={openInvoiceDialog}>
+                    <Plus className="w-4 h-4 mr-1" />
+                    Créer ma première facture
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid md:grid-cols-2 gap-3 max-h-[70vh] overflow-y-auto scrollbar-thin pr-1">
+                {invoices.map((inv) => {
+                  const st = (inv.status as InvoiceStatus) || "draft"
+                  return (
+                    <Card key={inv.id} className="overflow-hidden">
+                      <CardContent className="p-4 space-y-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="font-mono font-bold text-sm">{inv.number}</p>
+                            <p className="text-sm truncate">👤 {inv.clientName}</p>
+                          </div>
+                          <Badge variant="outline" className={`text-xs font-bold shrink-0 ${INVOICE_STATUS_STYLE[st]}`}>
+                            {INVOICE_STATUS_LABELS[st]}
+                          </Badge>
+                        </div>
+                        <p className="font-bold text-primary text-lg">
+                          {formatFC(inv.totalFC)}
+                          <span className="ml-1 text-xs font-normal text-muted-foreground">({formatUSD(inv.totalUSD)})</span>
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {parseInvItems(inv.items).length} ligne(s) · créée {timeAgo(inv.createdAt)}
+                          {inv.dueDate ? ` · échéance ${inv.dueDate}` : ""}
+                        </p>
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          <Button size="sm" variant="outline" onClick={() => setInvPreview(inv)}>
+                            👁️ Aperçu
+                          </Button>
+                          <Button size="sm" onClick={() => sendInvoiceWhatsApp(inv)}>
+                            <MessageCircle className="w-4 h-4 mr-1 text-emerald-100" />
+                            WhatsApp
+                          </Button>
+                          {st !== "paid" && (
+                            <Button size="sm" variant="outline" onClick={() => updateInvoiceStatus(inv, "paid")}>
+                              ✅ Payée
+                            </Button>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-destructive hover:text-destructive ml-auto"
+                            onClick={() => deleteInvoice(inv)}
+                            aria-label={`Supprimer la facture ${inv.number}`}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
                         </div>
                       </CardContent>
                     </Card>
@@ -1230,6 +1485,164 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
               Annuler
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog : création facture (KinFacture) */}
+      <Dialog open={invOpen} onOpenChange={setInvOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Nouvelle facture 🧾</DialogTitle>
+            <DialogDescription>
+              Une facture pro avec QR de paiement mobile money, partageable par WhatsApp.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 max-h-[60vh] overflow-y-auto scrollbar-thin pr-1">
+            <div className="grid sm:grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Client *</Label>
+                <Input placeholder="Nom du client ou entreprise" value={invClientName} onChange={(e) => setInvClientName(e.target.value)} maxLength={80} />
+              </div>
+              <div className="space-y-2">
+                <Label>Téléphone client (WhatsApp)</Label>
+                <Input placeholder="0812345678" value={invClientPhone} onChange={(e) => setInvClientPhone(e.target.value)} maxLength={20} />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Échéance (optionnel)</Label>
+              <Input type="date" value={invDueDate} onChange={(e) => setInvDueDate(e.target.value)} />
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>Lignes de la facture *</Label>
+                {products.length > 0 && (
+                  <Select value="" onValueChange={addCatalogLine}>
+                    <SelectTrigger className="h-8 w-[190px] text-xs">
+                      <SelectValue placeholder="＋ Importer du catalogue" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {products.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.emoji} {p.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+              {invLines.map((line, idx) => (
+                <div key={idx} className="grid grid-cols-[1fr_64px_110px_36px] gap-2 items-start">
+                  <Input
+                    placeholder="Description"
+                    value={line.desc}
+                    onChange={(e) => setInvLines((ls) => ls.map((l, i) => (i === idx ? { ...l, desc: e.target.value } : l)))}
+                    maxLength={120}
+                    aria-label={`Description ligne ${idx + 1}`}
+                  />
+                  <Input
+                    type="number"
+                    min="1"
+                    value={line.qty}
+                    onChange={(e) => setInvLines((ls) => ls.map((l, i) => (i === idx ? { ...l, qty: Number(e.target.value) } : l)))}
+                    aria-label={`Quantité ligne ${idx + 1}`}
+                  />
+                  <Input
+                    type="number"
+                    min="0"
+                    placeholder="Prix FC"
+                    value={line.unitFC || ""}
+                    onChange={(e) => setInvLines((ls) => ls.map((l, i) => (i === idx ? { ...l, unitFC: Number(e.target.value) } : l)))}
+                    aria-label={`Prix unitaire FC ligne ${idx + 1}`}
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-9 w-9 text-destructive hover:text-destructive"
+                    onClick={() => setInvLines((ls) => (ls.length > 1 ? ls.filter((_, i) => i !== idx) : [{ desc: "", qty: 1, unitFC: 0 }]))}
+                    aria-label={`Supprimer la ligne ${idx + 1}`}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
+                </div>
+              ))}
+              <Button variant="outline" size="sm" onClick={() => setInvLines((ls) => [...ls, { desc: "", qty: 1, unitFC: 0 }])}>
+                <Plus className="w-4 h-4 mr-1" />
+                Ajouter une ligne
+              </Button>
+            </div>
+
+            <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3 flex items-center justify-between">
+              <span className="text-sm font-semibold text-emerald-900">Total</span>
+              <span className="font-extrabold text-emerald-800">
+                {formatFC(invTotal)}
+                {store && invTotal > 0 && (
+                  <span className="ml-1 text-xs font-normal text-muted-foreground">≈ {formatUSD(Math.round((invTotal / store.rateFC) * 100) / 100)}</span>
+                )}
+              </span>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Note (optionnel)</Label>
+              <Textarea placeholder="Ex : Merci pour votre commande — livraison Gombe offerte." rows={2} value={invNote} onChange={(e) => setInvNote(e.target.value)} maxLength={300} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setInvOpen(false)}>Annuler</Button>
+            <Button onClick={createInvoice} disabled={invCreating}>
+              {invCreating ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Receipt className="w-4 h-4 mr-1" />}
+              Créer la facture
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog : aperçu facture (KinFacture) */}
+      <Dialog open={!!invPreview} onOpenChange={(o) => !o && setInvPreview(null)}>
+        <DialogContent className="sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Facture {invPreview?.number}</DialogTitle>
+            <DialogDescription>
+              Envoie-la au client : lien WhatsApp, PDF A4 ou image — le QR de paiement est inclus.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[60vh] overflow-y-auto scrollbar-thin pr-1">
+            {invPreview && store && (
+              <InvoiceCanvas
+                invoice={invPreview}
+                store={{ name: store.name, logoEmoji: store.logoEmoji, whatsapp: store.whatsapp, city: store.city }}
+                onRendered={setPreviewCanvas}
+              />
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {invPreview && invPreview.status !== "paid" && (
+              <Button size="sm" onClick={() => sendInvoiceWhatsApp(invPreview)}>
+                <MessageCircle className="w-4 h-4 mr-1" />
+                Envoyer par WhatsApp
+              </Button>
+            )}
+            <Button size="sm" variant="outline" onClick={() => exportPreview("pdf")}>📄 PDF</Button>
+            <Button size="sm" variant="outline" onClick={() => exportPreview("png")}>🖼️ PNG</Button>
+            <Button size="sm" variant="outline" onClick={() => exportPreview("share")} aria-label="Partager la facture">
+              <Share2 className="w-4 h-4" />
+            </Button>
+            {invPreview && invPreview.status === "draft" && (
+              <Button size="sm" variant="outline" onClick={() => updateInvoiceStatus(invPreview, "sent")}>
+                📤 Marquer envoyée
+              </Button>
+            )}
+            {invPreview && invPreview.status !== "paid" && (
+              <Button size="sm" variant="outline" className="border-emerald-300 text-emerald-700 hover:bg-emerald-50" onClick={() => updateInvoiceStatus(invPreview, "paid")}>
+                ✅ Marquer payée
+              </Button>
+            )}
+            {invPreview && invPreview.status === "paid" && (
+              <Badge variant="outline" className="ml-auto bg-emerald-50 text-emerald-800 border-emerald-300 font-bold">
+                ✅ Payée
+              </Badge>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
 

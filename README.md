@@ -2,7 +2,7 @@
 
 > **Transformez votre statut WhatsApp en véritable boutique en ligne — en 5 minutes.**
 
-KinShop est la plateforme e-commerce pensée pour les **entrepreneurs de la République Démocratique du Congo** 🇨🇩. Créez votre boutique, partagez le lien sur WhatsApp ou Facebook, et recevez vos commandes directement — avec paiement mobile money (M-Pesa, Airtel Money, Orange Money).
+KinShop est la plateforme e-commerce pensée pour les **entrepreneurs de la République Démocratique du Congo** 🇨🇩. Créez votre boutique, partagez le lien sur WhatsApp ou Facebook, recevez vos commandes — et boostez votre business avec un **CV professionnel** et des **factures avec QR de paiement** (V3).
 
 ![KinShop](public/images/hero-kinshop.png)
 
@@ -41,6 +41,11 @@ Chaque boutique KinShop affiche fièrement **« Propulsé par KinShop »**. Chaq
 - 🔔 **Notifications SMS** — alerte vendeur + confirmation client à chaque commande (compatible Africa's Talking, mode simulation par défaut), journal dans l'onglet Alertes
 - 💵 **Paiement espèces** — le vendeur enregistre « Paiement reçu » à la livraison
 
+## 🚀 Fonctionnalités V3
+
+- 📄 **CV Express RDC** (`#/cv`) — générateur de CV professionnel 100 % gratuit : 2 modèles canvas A4 (« Kin Classique » & « Kin Moderne » avec timeline), photo optionnelle, compétences/langues/références, exports **PNG + PDF + partage WhatsApp**, brouillon auto-sauvegardé. Outil d'acquisition ouvert à tous les demandeurs d'emploi congolais.
+- 🧾 **KinFacture** — factures professionnelles dans le dashboard vendeur (onglet « Factures ») : lignes détaillées (saisie libre ou import du catalogue avec conversion FC automatique), totaux FC/USD recalculés côté serveur, **QR de paiement mobile money** imprimé sur la facture (M-Pesa / Airtel / Orange + référence), statuts brouillon → envoyée → payée, export **PDF A4 / PNG**, envoi WhatsApp avec **lien de facture publique** (`#/facture/KF-XXX`) où le client trouve les instructions de paiement.
+
 ## 🧰 Stack technique
 
 | Technologie | Usage |
@@ -49,7 +54,8 @@ Chaque boutique KinShop affiche fièrement **« Propulsé par KinShop »**. Chaq
 | **TypeScript 5** | Typage strict de bout en bout |
 | **Tailwind CSS 4** | Design mobile-first, thème emerald/ambre |
 | **shadcn/ui** | Composants UI accessibles |
-| **Prisma + SQLite** | Persistance (Store, Product, Order) |
+| **Prisma + SQLite** | Persistance (Store, Product, Order, Invoice, PulseDelivery, StoreVisit, NotificationLog, PlatformSetting, AdminAction) |
+| **Canvas + jsPDF + qrcode** | V3 : rendu A4 du CV et des factures, export PDF/PNG, QR de paiement mobile money |
 | **Framer Motion** | Animations fluides |
 | **wa.me deep links** | Confirmation de commande via WhatsApp |
 
@@ -73,6 +79,16 @@ Ouvrez l'application → créez votre boutique → partagez votre lien sur votre
 
 > 💡 **Astuce démo** : ouvrez `#/boutique/maman-ngo` pour voir une boutique d'exemple avec 12 produits et des commandes.
 
+## 🔗 Tous les deep-links
+
+| Lien | Description |
+|---|---|
+| `#/boutique/{slug}` | Boutique publique d'un vendeur |
+| `#/premium/succes` | Retour de paiement Premium Chariow |
+| `#/admin` | Console d'administration (PIN) |
+| `#/cv` | CV Express RDC (V3, gratuit, sans compte) |
+| `#/facture/{number}` | Facture publique KinFacture (V3) |
+
 ## 📁 Structure du projet
 
 ```
@@ -84,6 +100,7 @@ src/
 │       ├── products/         # Ajout / suppression produits
 │       ├── orders/           # Commandes (totaux recalculés côté serveur)
 │       ├── payments/         # V2 : initiate · status · webhook · simulate-confirm
+│       ├── invoices/         # V3 : factures KinFacture (créer · lister · statut · lecture publique)
 │       ├── stats/            # V2 : statistiques vendeur (vues, conversion, produits stars)
 │       ├── notifications/    # V2 : journal SMS
 │       └── analytics/visit/  # V2 : compteur de visites boutique
@@ -93,12 +110,16 @@ src/
 │   ├── dashboard.tsx         # Tableau de bord vendeur (+ Stats & Alertes V2)
 │   ├── store-view.tsx        # Boutique publique + panier + checkout + paiement USSD
 │   ├── status-studio.tsx     # Générateur d'image statut WhatsApp (QR code)
+│   ├── cv-express.tsx        # V3 : générateur de CV Express RDC (canvas A4, 2 modèles)
+│   ├── invoice-canvas.tsx    # V3 : rendu facture A4 + QR paiement + exports PDF/PNG
+│   ├── facture-view.tsx      # V3 : vue publique d'une facture (#/facture/KF-XXX)
 │   ├── admin-console.tsx     # Console d'administration (#/admin, PIN)
 │   └── kinshop-app.tsx       # Routeur à états + deep-linking
 └── lib/
     ├── kinshop.ts            # Helpers : format FC/USD, liens WhatsApp, slugs
     ├── chariow.ts            # Checkout + webhook Chariow (Pulses)
     ├── mobile-money.ts       # V2 : paiement commandes (agrégateur FlexPay/simulation)
+    ├── kinfacture.ts         # V3 : types & helpers factures (numéro KF, QR, message WhatsApp)
     └── notifier.ts           # V2 : SMS vendeur/client (Africa's Talking/simulation)
 prisma/schema.prisma          # Models : Store, Product, Order, PulseDelivery, StoreVisit, NotificationLog, PlatformSetting, AdminAction
 ```
@@ -132,6 +153,28 @@ Le checkout des boutiques propose un **vrai parcours de paiement** :
 
 Les commandes payées en espèces restent marquées « À la livraison » — le vendeur enregistre « Paiement reçu » à la remise.
 
+## 🧾 KinFacture — factures pro avec QR de paiement (V3)
+
+Dans le dashboard vendeur, l'onglet **Factures** permet de créer une facture en 30 secondes :
+
+1. Client (nom + WhatsApp), échéance optionnelle, lignes détaillées (saisie libre en FC **ou import direct du catalogue**, prix convertis automatiquement)
+2. KinShop génère une **facture A4 professionnelle** : bandeau boutique, tableau détaillé, total FC/USD, **QR de paiement mobile money** (encodé avec montant, marchand et référence) et mention « Facture générée par KinShop »
+3. Envoi en 1 clic : **WhatsApp** (message + lien public), **PDF A4** (jsPDF) ou **PNG** — le client ouvre `#/facture/KF-XXX` et voit les instructions de paiement pas à pas
+4. Suivi des statuts : brouillon → envoyée → **payée** (badges colorés, date de paiement)
+
+> 💡 Astuce démo : ouvrez `#/facture/KF-DEMO01` pour voir une facture d'exemple avec QR de paiement.
+
+## 📄 CV Express RDC (V3)
+
+Accessible depuis la landing (« Bien plus qu'une boutique ») ou `#/cv` — **aucun compte requis** :
+
+- Wizard 3 étapes : identité (communes de Kinshasa en autocomplétion) → parcours (expériences + formations) → compétences/langues/référence
+- Bouton « Remplir un exemple » pour tester en 5 secondes
+- 2 modèles canvas A4 1240×1754 : **Kin Classique** (bandeau emerald) et **Kin Moderne** (sidebar + timeline)
+- Photo de profil optionnelle (recadrée en cercle)
+- Exports : **PNG** haute résolution, **PDF A4** (jsPDF), **partage natif** WhatsApp/réseaux
+- Brouillon auto-sauvegardé dans le navigateur — le CTA « Créez votre boutique » transforme les demandeurs d'emploi en vendeurs 🔁
+
 ## 🔒 Points de sécurité
 
 - Les **totaux des commandes sont recalculés côté serveur** à partir de la base de données (jamais de confiance aux prix envoyés par le client)
@@ -148,8 +191,8 @@ Les commandes payées en espèces restent marquées « À la livraison » — le
 - [x] ~~V2 : Console d'administration plateforme~~ ✅ `#/admin`
 - [x] ~~V2 : Notifications commandes par SMS~~ ✅ journal vendeur/client (Africa's Talking ready)
 - [x] ~~V2 : Statistiques avancées~~ ✅ vues boutique, conversion, produits stars, clients fidèles
-- [ ] V3 : Générateur de CV Express RDC
-- [ ] V3 : KinFacture — factures pro avec QR de paiement
+- [x] ~~V3 : Générateur de CV Express RDC~~ ✅ `#/cv` — 2 modèles canvas A4, PDF/PNG/partage
+- [x] ~~V3 : KinFacture — factures pro avec QR de paiement~~ ✅ onglet Factures + lien public `#/facture/KF-XXX`
 
 ## 📄 Licence
 

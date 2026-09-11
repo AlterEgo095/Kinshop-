@@ -33,8 +33,28 @@ model Store {
   updatedAt   DateTime  @updatedAt
   products    Product[]
   orders      Order[]
+  invoices    Invoice[]
   visits      StoreVisit[]
   notifications NotificationLog[]
+}
+
+// V3 — KinFacture : factures professionnelles avec QR de paiement mobile money
+model Invoice {
+  id           String    @id @default(cuid())
+  number       String    @unique // KF-XXXXXX
+  storeId      String
+  store        Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  clientName   String
+  clientPhone  String    @default("")
+  items        String    @default("[]") // JSON [{desc, qty, unitFC}]
+  totalFC      Float     @default(0)
+  totalUSD     Float     @default(0)
+  note         String    @default("")
+  dueDate      String    @default("") // date d'échéance libre (AAAA-MM-JJ)
+  status       String    @default("draft") // draft | sent | paid
+  paidAt       DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 }
 
 model Product {
