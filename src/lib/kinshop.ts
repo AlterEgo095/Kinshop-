@@ -72,6 +72,11 @@ export interface OrderData {
   paymentRef: string
   payerPhone: string
   paidAt: string | null
+  // V6 — Récap commerce détaillé
+  couponCode: string
+  discountUSD: number
+  deliveryZone: string
+  deliveryFeeFC: number
   note: string
   status: OrderStatus
   createdAt: string
@@ -134,6 +139,117 @@ export interface NotificationData {
   status: "simulated" | "sent" | "failed"
   provider: string
   createdAt: string
+}
+
+/* ─────────── V6 — Confiance & Croissance ─────────── */
+
+export type CouponType = "percent" | "fixed"
+
+export interface CouponData {
+  id: string
+  storeId: string
+  code: string
+  type: CouponType
+  value: number
+  minTotalUSD: number
+  maxUses: number
+  uses: number
+  active: boolean
+  createdAt: string
+}
+
+export interface DeliveryZoneData {
+  id: string
+  storeId: string
+  name: string
+  feeFC: number
+  active: boolean
+  createdAt: string
+}
+
+export interface ReviewData {
+  id: string
+  storeId: string
+  orderId: string
+  authorName: string
+  rating: number
+  comment: string
+  hidden: boolean
+  createdAt: string
+}
+
+export interface ReviewStats {
+  avg: number
+  count: number
+  dist: Record<1 | 2 | 3 | 4 | 5, number>
+}
+
+export const COUPON_TYPE_LABELS: Record<CouponType, string> = {
+  percent: "Remise en %",
+  fixed: "Montant fixe ($)",
+}
+
+/** Libellé court d'un code promo, ex : « -10% » ou « -$2 ». */
+export function couponLabel(type: CouponType, value: number): string {
+  return type === "percent" ? `-${Math.round(value)}%` : `-${formatUSD(value)}`
+}
+
+/** Description lisible des conditions d'un code promo. */
+export function couponCondition(type: CouponType, value: number, minTotalUSD: number): string {
+  const parts: string[] = []
+  parts.push(type === "percent" ? `${Math.round(value)}% de remise` : `${formatUSD(value)} de remise`)
+  if (minTotalUSD > 0) parts.push(`dès ${formatUSD(minTotalUSD)} d'achat`)
+  return parts.join(", ")
+}
+
+/**
+ * Remise calculée d'un code promo pour un sous-total donné (USD, arrondie au centime).
+ * Le serveur fait foi ; la vitrine utilise la même fonction pour la prévisualisation.
+ */
+export function computeCouponDiscount(
+  coupon: { type: CouponType; value: number; minTotalUSD: number },
+  subtotalUSD: number,
+): number {
+  if (subtotalUSD < coupon.minTotalUSD) return 0
+  const raw = coupon.type === "percent" ? (subtotalUSD * coupon.value) / 100 : coupon.value
+  return Math.max(0, Math.min(Math.round(raw * 100) / 100, subtotalUSD))
+}
+
+/**
+ * Calcul des totaux commande — centré FC (devise d'affichage principale en RDC),
+ * l'USD est dérivé du total FC pour garantir zéro écart entre la prévisualisation
+ * de la vitrine et le montant enregistré par le serveur.
+ */
+export function computeOrderTotals(params: {
+  subtotalUSD: number
+  discountUSD: number
+  deliveryFeeFC: number
+  rate: number
+}): { totalUSD: number; totalFC: number } {
+  const subtotalFC = Math.round(params.subtotalUSD * params.rate)
+  const discountFC = Math.round(params.discountUSD * params.rate)
+  const totalFC = Math.max(0, subtotalFC - discountFC + Math.round(params.deliveryFeeFC))
+  const totalUSD = Math.round((totalFC / params.rate) * 100) / 100
+  return { totalUSD, totalFC }
+}
+
+export interface TrackOrderData {
+  ref: string
+  status: OrderStatus
+  paymentMethod: PaymentMethod
+  paymentStatus: PaymentStatus
+  customerName: string
+  zone: string
+  items: OrderItem[]
+  subtotalUSD: number
+  discountUSD: number
+  couponCode: string
+  deliveryZone: string
+  deliveryFeeFC: number
+  totalUSD: number
+  totalFC: number
+  createdAt: string
+  store: { name: string; logoEmoji: string; slug: string; whatsapp: string }
 }
 
 /* ─────────── Devise ─────────── */
@@ -231,6 +347,10 @@ export function buildOrderMessage(params: {
   totalFC: number
   paymentMethod: PaymentMethod
   note: string
+  // V6 — récap détaillé (optionnel : rétrocompatible)
+  discountUSD?: number
+  couponCode?: string
+  deliveryFeeFC?: number
 }): string {
   const lines: string[] = []
   lines.push("🛍️ NOUVELLE COMMANDE — KinShop")
@@ -247,6 +367,13 @@ export function buildOrderMessage(params: {
     lines.push(`• ${it.qty} × ${it.name} — ${formatUSD(it.priceUSD * it.qty)}`)
   }
   lines.push("━━━━━━━━━━━━━━━━")
+  // V6 — remise et livraison détaillées avant le total
+  if (params.discountUSD > 0) {
+    lines.push(`🏷️ Code ${params.couponCode || "PROMO"} : −${formatUSD(params.discountUSD)}`)
+  }
+  if (params.deliveryFeeFC > 0) {
+    lines.push(`🚚 Livraison : ${formatFC(params.deliveryFeeFC)}`)
+  }
   lines.push(`💰 TOTAL : ${formatUSD(params.totalUSD)} (${formatFC(params.totalFC)})`)
   lines.push(`💳 Paiement : ${PAYMENT_LABELS[params.paymentMethod]}`)
   if (params.note) lines.push(`📝 Note : ${params.note}`)

@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { motion } from "framer-motion"
 import {
   ArrowLeft,
@@ -13,22 +13,28 @@ import {
   Crown,
   ExternalLink,
   Eye,
+  EyeOff,
   Images,
   Loader2,
+  Megaphone,
   MessageCircle,
   Package,
   Percent,
   Pencil,
   Plus,
   Receipt,
+  RotateCcw,
   Settings,
   Share2,
   ShoppingCart,
   Sparkles,
+  Star,
+  TicketPercent,
   Trash2,
   TrendingDown,
   TrendingUp,
   Trophy,
+  Truck,
   Users,
   XCircle,
   PackageCheck,
@@ -72,17 +78,22 @@ import {
   PAYMENT_LABELS,
   STORE_EMOJIS,
   buildWhatsAppLink,
+  couponCondition,
   formatFC,
   formatPhoneDisplay,
   formatUSD,
   timeAgo,
   usdToFC,
+  type CouponData,
+  type CouponType,
+  type DeliveryZoneData,
   type NotificationData,
   type OrderData,
   type OrderItem,
   type OrderStatus,
   type PaymentMethod,
   type ProductData,
+  type ReviewData,
   type StoreData,
   type VendorStats,
 } from "@/lib/kinshop"
@@ -185,6 +196,27 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
   const [invLines, setInvLines] = useState<InvoiceItem[]>([{ desc: "", qty: 1, unitFC: 0 }])
   const [invCreating, setInvCreating] = useState(false)
 
+  // V6 — Confiance & Croissance : zones de livraison, codes promo, avis
+  const [zones, setZones] = useState<DeliveryZoneData[]>([])
+  const [zName, setZName] = useState("")
+  const [zFee, setZFee] = useState("")
+  const [zSaving, setZSaving] = useState(false)
+
+  const [coupons, setCoupons] = useState<CouponData[]>([])
+  const [cCode, setCCode] = useState("")
+  const [cType, setCType] = useState<CouponType>("percent")
+  const [cValue, setCValue] = useState("")
+  const [cMin, setCMin] = useState("")
+  const [cMaxUses, setCMaxUses] = useState("")
+  const [cSaving, setCSaving] = useState(false)
+
+  const [reviews, setReviews] = useState<ReviewData[]>([])
+  const visibleReviews = useMemo(() => reviews.filter((r) => !r.hidden), [reviews])
+  const reviewAvg =
+    visibleReviews.length > 0
+      ? Math.round((visibleReviews.reduce((s, r) => s + r.rating, 0) / visibleReviews.length) * 10) / 10
+      : 0
+
   const loadOrders = useCallback(async () => {
     try {
       const res = await fetch(`/api/orders?slug=${encodeURIComponent(slug)}`)
@@ -237,6 +269,176 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
       // silencieux
     }
   }, [slug])
+
+  /* ─────────── V6 — Confiance & Croissance ─────────── */
+
+  const loadGrowth = useCallback(async () => {
+    try {
+      const [resZ, resC] = await Promise.all([
+        fetch(`/api/delivery-zones?slug=${encodeURIComponent(slug)}`),
+        fetch(`/api/coupons?slug=${encodeURIComponent(slug)}`),
+      ])
+      const [dz, dc] = await Promise.all([resZ.json(), resC.json()])
+      if (resZ.ok && Array.isArray(dz.zones)) setZones(dz.zones)
+      if (resC.ok && Array.isArray(dc.coupons)) setCoupons(dc.coupons)
+    } catch {
+      // silencieux
+    }
+  }, [slug])
+
+  const loadReviews = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/reviews?slug=${encodeURIComponent(slug)}&all=1`)
+      const data = await res.json()
+      if (res.ok && Array.isArray(data.reviews)) setReviews(data.reviews)
+    } catch {
+      // silencieux
+    }
+  }, [slug])
+
+  // Chargement paresseux des données V6 quand l'onglet correspondant est ouvert
+  useEffect(() => {
+    if (activeTab === "croissance") loadGrowth()
+    if (activeTab === "avis") loadReviews()
+  }, [activeTab, loadGrowth, loadReviews])
+
+  const addZone = async () => {
+    if (zName.trim().length < 2) return toast.error("Le nom de la zone est requis (2 caractères min).")
+    setZSaving(true)
+    try {
+      const res = await fetch("/api/delivery-zones", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slug, name: zName.trim(), feeFC: Number(zFee) || 0 }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Erreur lors de l'ajout de la zone.")
+      toast.success(`Zone ${data.zone.name} ajoutée ✅`)
+      setZName("")
+      setZFee("")
+      await loadGrowth()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur inconnue")
+    } finally {
+      setZSaving(false)
+    }
+  }
+
+  const toggleZone = async (z: DeliveryZoneData) => {
+    try {
+      const res = await fetch("/api/delivery-zones", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: z.id, active: !z.active }),
+      })
+      if (!res.ok) throw new Error("Erreur lors de la mise à jour.")
+      setZones((zs) => zs.map((x) => (x.id === z.id ? { ...x, active: !z.active } : x)))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur inconnue")
+    }
+  }
+
+  const deleteZone = async (id: string) => {
+    try {
+      const res = await fetch(`/api/delivery-zones?id=${encodeURIComponent(id)}`, { method: "DELETE" })
+      if (!res.ok) throw new Error("Erreur lors de la suppression.")
+      setZones((zs) => zs.filter((x) => x.id !== id))
+      toast.success("Zone supprimée")
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur inconnue")
+    }
+  }
+
+  const addCoupon = async () => {
+    const value = Number(cValue)
+    if (!/^[A-Z0-9]{3,16}$/.test(cCode.trim().toUpperCase())) {
+      return toast.error("Code invalide : 3 à 16 caractères majuscules/chiffres.")
+    }
+    if (cType === "percent" && (!value || value < 1 || value > 90)) {
+      return toast.error("Pourcentage invalide (1 à 90 %).")
+    }
+    if (cType === "fixed" && (!value || value < 0.1)) {
+      return toast.error("Montant fixe invalide (minimum $0.10).")
+    }
+    setCSaving(true)
+    try {
+      const res = await fetch("/api/coupons", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          slug,
+          code: cCode.trim().toUpperCase(),
+          type: cType,
+          value,
+          minTotalUSD: Number(cMin) || 0,
+          maxUses: Number(cMaxUses) || 0,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Erreur lors de la création du code.")
+      toast.success(`Code ${data.coupon.code} créé ✅`)
+      setCCode("")
+      setCValue("")
+      setCMin("")
+      setCMaxUses("")
+      await loadGrowth()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur inconnue")
+    } finally {
+      setCSaving(false)
+    }
+  }
+
+  const toggleCoupon = async (c: CouponData) => {
+    try {
+      const res = await fetch("/api/coupons", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: c.id, active: !c.active }),
+      })
+      if (!res.ok) throw new Error("Erreur lors de la mise à jour.")
+      setCoupons((cs) => cs.map((x) => (x.id === c.id ? { ...x, active: !c.active } : x)))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur inconnue")
+    }
+  }
+
+  const deleteCoupon = async (id: string) => {
+    try {
+      const res = await fetch(`/api/coupons?id=${encodeURIComponent(id)}`, { method: "DELETE" })
+      if (!res.ok) throw new Error("Erreur lors de la suppression.")
+      setCoupons((cs) => cs.filter((x) => x.id !== id))
+      toast.success("Code promo supprimé")
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur inconnue")
+    }
+  }
+
+  const toggleReviewHidden = async (r: ReviewData) => {
+    try {
+      const res = await fetch("/api/reviews", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: r.id, hidden: !r.hidden }),
+      })
+      if (!res.ok) throw new Error("Erreur lors de la modération.")
+      setReviews((rs) => rs.map((x) => (x.id === r.id ? { ...x, hidden: !r.hidden } : x)))
+      toast.success(r.hidden ? "Avis restauré" : "Avis masqué")
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur inconnue")
+    }
+  }
+
+  const deleteReview = async (id: string) => {
+    try {
+      const res = await fetch(`/api/reviews?id=${encodeURIComponent(id)}`, { method: "DELETE" })
+      if (!res.ok) throw new Error("Erreur lors de la suppression.")
+      setReviews((rs) => rs.filter((x) => x.id !== id))
+      toast.success("Avis supprimé")
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur inconnue")
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -809,7 +1011,7 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
         )}
 
         <Tabs value={activeTab} onValueChange={handleTabChange}>
-          <TabsList className="mb-5 h-11">
+          <TabsList className="mb-5 h-11 max-w-full justify-start overflow-x-auto scrollbar-thin">
             <TabsTrigger value="produits" className="px-4">
               <Package className="w-4 h-4 mr-1.5" />
               Produits
@@ -828,6 +1030,14 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
             <TabsTrigger value="stats" className="px-4">
               <BarChart3 className="w-4 h-4 mr-1.5" />
               Stats
+            </TabsTrigger>
+            <TabsTrigger value="croissance" className="px-4">
+              <Megaphone className="w-4 h-4 mr-1.5" />
+              Croissance
+            </TabsTrigger>
+            <TabsTrigger value="avis" className="px-4">
+              <Star className="w-4 h-4 mr-1.5" />
+              Avis
             </TabsTrigger>
             <TabsTrigger value="notifications" className="px-4">
               {notifUnread > 0 ? <BellRing className="w-4 h-4 mr-1.5 text-amber-500" /> : <Bell className="w-4 h-4 mr-1.5" />}
@@ -1302,6 +1512,286 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
           </TabsContent>
 
           {/* ─── ALERTES SMS (V2) ─── */}
+          {/* ─── V6 CROISSANCE : livraison + codes promo ─── */}
+          <TabsContent value="croissance" className="space-y-4">
+            <div className="grid md:grid-cols-2 gap-4 items-start">
+              {/* Zones de livraison */}
+              <Card>
+                <CardContent className="p-5 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center">
+                      <Truck className="w-5 h-5 text-emerald-700" />
+                    </div>
+                    <div>
+                      <p className="font-bold leading-tight">Zones de livraison</p>
+                      <p className="text-xs text-muted-foreground">Frais ajoutés automatiquement au checkout</p>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="Ex : Gombe"
+                      value={zName}
+                      onChange={(e) => setZName(e.target.value)}
+                      maxLength={60}
+                      className="flex-1"
+                      aria-label="Nom de la zone"
+                    />
+                    <Input
+                      type="number"
+                      placeholder="Frais FC"
+                      value={zFee}
+                      onChange={(e) => setZFee(e.target.value)}
+                      min={0}
+                      className="w-28 shrink-0"
+                      aria-label="Frais de livraison en FC"
+                    />
+                    <Button onClick={addZone} disabled={zSaving || zName.trim().length < 2} aria-label="Ajouter la zone">
+                      {zSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                    </Button>
+                  </div>
+                  {zones.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-4 border border-dashed rounded-xl">
+                      Aucune zone — tes clients tapent librement leur commune (0 FC de frais).
+                    </p>
+                  ) : (
+                    <div className="space-y-2 max-h-72 overflow-y-auto scrollbar-thin pr-1">
+                      {zones.map((z) => (
+                        <div
+                          key={z.id}
+                          className={`rounded-xl border p-3 flex items-center gap-2 ${z.active ? "bg-white" : "bg-muted/40 opacity-70"}`}
+                        >
+                          <div className="flex-1 min-w-0">
+                            <p className="font-semibold text-sm truncate flex items-center gap-1.5">
+                              <Truck className="w-3.5 h-3.5 text-primary shrink-0" />
+                              {z.name}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {z.feeFC > 0 ? `${formatFC(z.feeFC)} de frais` : "Livraison gratuite"}
+                              {!z.active && " · masquée"}
+                            </p>
+                          </div>
+                          <Button variant="outline" size="sm" className="shrink-0" onClick={() => toggleZone(z)}>
+                            {z.active ? "Masquer" : "Activer"}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 shrink-0 text-destructive"
+                            onClick={() => deleteZone(z.id)}
+                            aria-label={`Supprimer la zone ${z.name}`}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Codes promo */}
+              <Card>
+                <CardContent className="p-5 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center">
+                      <TicketPercent className="w-5 h-5 text-amber-700" />
+                    </div>
+                    <div>
+                      <p className="font-bold leading-tight">Codes promo</p>
+                      <p className="text-xs text-muted-foreground">Remises validées automatiquement au checkout</p>
+                    </div>
+                  </div>
+                  <div className="space-y-2 rounded-xl border bg-muted/30 p-3">
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="CODE (ex : BIENVENUE10)"
+                        value={cCode}
+                        onChange={(e) => setCCode(e.target.value.toUpperCase())}
+                        maxLength={16}
+                        className="flex-1 font-mono"
+                        aria-label="Code promo"
+                      />
+                      <Select value={cType} onValueChange={(v) => setCType(v as CouponType)}>
+                        <SelectTrigger className="w-32 shrink-0" aria-label="Type de remise">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="percent">% de remise</SelectItem>
+                          <SelectItem value="fixed">Montant fixe $</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex gap-2">
+                      <Input
+                        type="number"
+                        placeholder={cType === "percent" ? "Valeur % (1-90)" : "Valeur $ (ex : 2)"}
+                        value={cValue}
+                        onChange={(e) => setCValue(e.target.value)}
+                        min={0}
+                        className="flex-1"
+                        aria-label="Valeur de la remise"
+                      />
+                      <Input
+                        type="number"
+                        placeholder="Panier min $ (0)"
+                        value={cMin}
+                        onChange={(e) => setCMin(e.target.value)}
+                        min={0}
+                        className="flex-1"
+                        aria-label="Panier minimum en dollars"
+                      />
+                      <Input
+                        type="number"
+                        placeholder="Max uses (0 = ∞)"
+                        value={cMaxUses}
+                        onChange={(e) => setCMaxUses(e.target.value)}
+                        min={0}
+                        className="flex-1"
+                        aria-label="Nombre maximum d'utilisations"
+                      />
+                    </div>
+                    <Button onClick={addCoupon} disabled={cSaving || !cCode.trim() || !cValue} className="w-full">
+                      {cSaving ? (
+                        <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                      ) : (
+                        <TicketPercent className="w-4 h-4 mr-1" />
+                      )}
+                      Créer le code promo
+                    </Button>
+                  </div>
+                  {coupons.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-4 border border-dashed rounded-xl">
+                      Aucun code promo — crée-en un pour booster tes ventes !
+                    </p>
+                  ) : (
+                    <div className="space-y-2 max-h-72 overflow-y-auto scrollbar-thin pr-1">
+                      {coupons.map((c) => (
+                        <div
+                          key={c.id}
+                          className={`rounded-xl border p-3 flex items-center gap-2 ${c.active ? "bg-white" : "bg-muted/40 opacity-70"}`}
+                        >
+                          <div className="flex-1 min-w-0">
+                            <p className="font-mono font-bold text-sm truncate">{c.code}</p>
+                            <p className="text-xs text-muted-foreground truncate">
+                              {couponCondition(c.type as CouponType, c.value, c.minTotalUSD)}
+                              {c.maxUses > 0 ? ` · ${c.uses}/${c.maxUses} utilisations` : ` · ${c.uses} utilisation(s)`}
+                              {!c.active && " · désactivé"}
+                            </p>
+                          </div>
+                          <Button variant="outline" size="sm" className="shrink-0" onClick={() => toggleCoupon(c)}>
+                            {c.active ? "Désactiver" : "Activer"}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 shrink-0 text-destructive"
+                            onClick={() => deleteCoupon(c.id)}
+                            aria-label={`Supprimer le code ${c.code}`}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+
+          {/* ─── V6 AVIS CLIENTS ─── */}
+          <TabsContent value="avis" className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm text-muted-foreground">
+                {visibleReviews.length > 0 ? (
+                  <>
+                    <span className="font-bold text-foreground inline-flex items-center gap-1">
+                      <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
+                      {reviewAvg}/5
+                    </span>{" "}
+                    — {visibleReviews.length} avis visible(s) sur la boutique
+                  </>
+                ) : (
+                  "Aucun avis visible — encourage tes clients à en laisser !"
+                )}
+              </p>
+              <Button variant="outline" size="sm" onClick={loadReviews}>
+                <RotateCcw className="w-4 h-4 mr-1" />
+                Rafraîchir
+              </Button>
+            </div>
+
+            {reviews.length === 0 ? (
+              <Card>
+                <CardContent className="p-10 text-center space-y-3">
+                  <p className="text-5xl">⭐</p>
+                  <p className="font-semibold">Aucun avis pour le moment</p>
+                  <p className="text-sm text-muted-foreground">
+                    Tes clients peuvent laisser un avis depuis ta boutique — avec le badge « Commande vérifiée »
+                    s'ils renseignent leur référence.
+                  </p>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-3">
+                {reviews.map((r) => (
+                  <div key={r.id} className={`rounded-xl border p-4 ${r.hidden ? "bg-muted/40 opacity-70" : "bg-white"}`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-sm flex items-center gap-1.5 flex-wrap">
+                          {r.authorName}
+                          {r.orderId && (
+                            <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-1.5 py-0.5 flex items-center gap-0.5">
+                              <CheckCircle2 className="w-3 h-3" />
+                              Commande vérifiée
+                            </span>
+                          )}
+                          {r.hidden && (
+                            <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-1.5 py-0.5 flex items-center gap-0.5">
+                              <EyeOff className="w-3 h-3" />
+                              Masqué
+                            </span>
+                          )}
+                        </p>
+                        <div className="mt-1">
+                          {[1, 2, 3, 4, 5].map((i) => (
+                            <Star
+                              key={i}
+                              className={`w-3.5 h-3.5 inline-block ${
+                                i <= r.rating ? "fill-amber-400 text-amber-400" : "fill-muted text-muted-foreground/30"
+                              }`}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                      <span className="text-[11px] text-muted-foreground shrink-0">{timeAgo(r.createdAt)}</span>
+                    </div>
+                    {r.comment && <p className="text-sm text-muted-foreground mt-2 whitespace-pre-line">{r.comment}</p>}
+                    <div className="flex gap-2 mt-3">
+                      <Button variant="outline" size="sm" onClick={() => toggleReviewHidden(r)}>
+                        {r.hidden ? (
+                          <>
+                            <Eye className="w-3.5 h-3.5 mr-1" />
+                            Restaurer
+                          </>
+                        ) : (
+                          <>
+                            <EyeOff className="w-3.5 h-3.5 mr-1" />
+                            Masquer
+                          </>
+                        )}
+                      </Button>
+                      <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => deleteReview(r.id)}>
+                        <Trash2 className="w-3.5 h-3.5 mr-1" />
+                        Supprimer
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </TabsContent>
+
           <TabsContent value="notifications" className="space-y-3">
             {notifications.length === 0 ? (
               <Card>

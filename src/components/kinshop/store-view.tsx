@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from "framer-motion"
 import {
   AlertCircle,
   ArrowLeft,
+  BadgeCheck,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -17,7 +18,10 @@ import {
   ShoppingBag,
   ShoppingCart,
   Smartphone,
+  Star,
+  TicketPercent,
   Trash2,
+  Truck,
 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -30,12 +34,20 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from "@/com
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
+  DEFAULT_RATE_FC,
+  computeCouponDiscount,
+  computeOrderTotals,
   formatFC,
   formatPhoneDisplay,
   formatUSD,
+  timeAgo,
   usdToFC,
+  type CouponType,
+  type DeliveryZoneData,
   type PaymentMethod,
   type ProductData,
+  type ReviewData,
+  type ReviewStats,
   type StoreData,
 } from "@/lib/kinshop"
 
@@ -74,6 +86,44 @@ const ZONES_KIN = [
   "Selembao", "Ngaba", "Makala", "Kasa-Vubu", "Barumbu", "Kinshasa",
 ]
 
+/* ─────────── V6 — Avis clients (composants locaux) ─────────── */
+
+function Stars({ n, size = "w-3.5 h-3.5" }: { n: number; size?: string }) {
+  return (
+    <span className="flex items-center gap-0.5" aria-label={`${n} étoile${n > 1 ? "s" : ""} sur 5`}>
+      {[1, 2, 3, 4, 5].map((i) => (
+        <Star
+          key={i}
+          className={`${size} ${i <= n ? "fill-amber-400 text-amber-400" : "fill-muted text-muted-foreground/30"}`}
+        />
+      ))}
+    </span>
+  )
+}
+
+function ReviewItem({ review }: { review: ReviewData }) {
+  return (
+    <div className="rounded-xl border bg-white p-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="font-semibold text-sm flex items-center gap-1.5 flex-wrap">
+            {review.authorName}
+            {review.orderId && (
+              <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-1.5 py-0.5 flex items-center gap-0.5">
+                <BadgeCheck className="w-3 h-3" />
+                Commande vérifiée
+              </span>
+            )}
+          </p>
+        </div>
+        <Stars n={review.rating} />
+      </div>
+      {review.comment && <p className="text-sm text-muted-foreground mt-1.5 whitespace-pre-line">{review.comment}</p>}
+      <p className="text-[11px] text-muted-foreground/70 mt-1.5">{timeAgo(review.createdAt)}</p>
+    </div>
+  )
+}
+
 export function StoreView({ slug, onBack }: StoreViewProps) {
   const [store, setStore] = useState<StoreData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -107,21 +157,55 @@ export function StoreView({ slug, onBack }: StoreViewProps) {
   const [detail, setDetail] = useState<ProductData | null>(null)
   const [detailIdx, setDetailIdx] = useState(0)
 
+  // V6 — Zones de livraison, code promo & avis clients
+  const [zones, setZones] = useState<DeliveryZoneData[]>([])
+  const [cZoneId, setCZoneId] = useState("")
+  const [couponInput, setCouponInput] = useState("")
+  const [coupon, setCoupon] = useState<{
+    code: string
+    type: CouponType
+    value: number
+    minTotalUSD: number
+    label: string
+  } | null>(null)
+  const [couponChecking, setCouponChecking] = useState(false)
+  const [reviews, setReviews] = useState<ReviewData[]>([])
+  const [reviewStats, setReviewStats] = useState<ReviewStats | null>(null)
+  const [reviewOpen, setReviewOpen] = useState(false)
+  const [allReviewsOpen, setAllReviewsOpen] = useState(false)
+  const [rName, setRName] = useState("")
+  const [rRating, setRRating] = useState(0)
+  const [rComment, setRComment] = useState("")
+  const [rRef, setRRef] = useState("")
+  const [rSubmitting, setRSubmitting] = useState(false)
+
   useEffect(() => {
     let cancelled = false
     ;(async () => {
       try {
-        const [resStore, resPlatform] = await Promise.all([
+        const [resStore, resPlatform, resZones, resReviews] = await Promise.all([
           fetch(`/api/stores?slug=${encodeURIComponent(slug)}`),
           fetch("/api/platform"),
+          fetch(`/api/delivery-zones?slug=${encodeURIComponent(slug)}`).catch(() => null),
+          fetch(`/api/reviews?slug=${encodeURIComponent(slug)}`).catch(() => null),
         ])
-        const [data, dataPlatform] = await Promise.all([resStore.json(), resPlatform.json().catch(() => null)])
+        const [data, dataPlatform, dataZones, dataReviews] = await Promise.all([
+          resStore.json(),
+          resPlatform.json().catch(() => null),
+          resZones ? resZones.json().catch(() => null) : Promise.resolve(null),
+          resReviews ? resReviews.json().catch(() => null) : Promise.resolve(null),
+        ])
         if (cancelled) return
         if (dataPlatform && typeof dataPlatform.maintenance === "boolean") {
           setPlatform({
             maintenance: dataPlatform.maintenance,
             announcement: dataPlatform.announcement || "",
           })
+        }
+        if (dataZones && Array.isArray(dataZones.zones)) setZones(dataZones.zones)
+        if (dataReviews && Array.isArray(dataReviews.reviews)) {
+          setReviews(dataReviews.reviews)
+          setReviewStats(dataReviews.stats || null)
         }
         if (!resStore.ok) setFailed(true)
         else setStore(data.store)
@@ -172,6 +256,17 @@ export function StoreView({ slug, onBack }: StoreViewProps) {
   const cartCount = cart.reduce((s, l) => s + l.qty, 0)
   const totalUSD = cart.reduce((s, l) => s + l.product.priceUSD * l.qty, 0)
 
+  // V6 — Prévisualisation des totaux (sous-total − remise + livraison). Le serveur fait foi.
+  const activeZones = useMemo(() => zones.filter((z) => z.active), [zones])
+  const selectedZone = activeZones.find((z) => z.id === cZoneId) || null
+  const discountUSD = coupon ? computeCouponDiscount(coupon, totalUSD) : 0
+  const previewTotals = computeOrderTotals({
+    subtotalUSD: totalUSD,
+    discountUSD,
+    deliveryFeeFC: selectedZone?.feeFC || 0,
+    rate: store?.rateFC || DEFAULT_RATE_FC,
+  })
+
   const addToCart = (product: ProductData) => {
     setCart((c) => {
       const existing = c.find((l) => l.product.id === product.id)
@@ -202,10 +297,82 @@ export function StoreView({ slug, onBack }: StoreViewProps) {
     setCart((c) => c.map((l) => (l.product.id === productId ? { ...l, qty: Math.min(99, qty) } : l)))
   }
 
+  /* ─────────── V6 — Code promo & avis ─────────── */
+
+  const applyCoupon = async () => {
+    if (!store || !couponInput.trim()) return
+    setCouponChecking(true)
+    try {
+      const res = await fetch("/api/coupons/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slug: store.slug, code: couponInput, subtotalUSD: totalUSD }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data.ok) throw new Error(data.error || "Code invalide.")
+      setCoupon(data.coupon)
+      setCouponInput("")
+      toast.success(`Code ${data.coupon.code} appliqué ! 🏷️`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Code invalide")
+    } finally {
+      setCouponChecking(false)
+    }
+  }
+
+  const refreshReviews = async (storeSlug: string) => {
+    try {
+      const res = await fetch(`/api/reviews?slug=${encodeURIComponent(storeSlug)}`)
+      const data = await res.json()
+      if (res.ok && Array.isArray(data.reviews)) {
+        setReviews(data.reviews)
+        setReviewStats(data.stats || null)
+      }
+    } catch {
+      // silencieux
+    }
+  }
+
+  const submitReview = async () => {
+    if (!store) return
+    if (rName.trim().length < 2) return toast.error("Ton nom est requis (2 caractères min).")
+    if (rRating < 1) return toast.error("Choisis une note entre 1 et 5 étoiles.")
+    setRSubmitting(true)
+    try {
+      const res = await fetch("/api/reviews", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          slug: store.slug,
+          authorName: rName.trim(),
+          rating: rRating,
+          comment: rComment.trim(),
+          ref: rRef.trim(),
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Erreur lors de l'envoi de l'avis.")
+      toast.success("Merci pour ton avis ! ⭐")
+      setReviewOpen(false)
+      setRName("")
+      setRRating(0)
+      setRComment("")
+      setRRef("")
+      await refreshReviews(store.slug)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur inconnue")
+    } finally {
+      setRSubmitting(false)
+    }
+  }
+
   const submitOrder = async () => {
     if (!store) return
     if (!cName.trim()) return toast.error("Ton nom est requis pour commander.")
     if (cPhone.replace(/\D/g, "").length < 9) return toast.error("Ton numéro de téléphone est requis.")
+    if (activeZones.length > 0 && !selectedZone) {
+      return toast.error("Choisis ta zone de livraison pour continuer.")
+    }
 
     setSubmitting(true)
     try {
@@ -216,7 +383,9 @@ export function StoreView({ slug, onBack }: StoreViewProps) {
           slug: store.slug,
           customerName: cName.trim(),
           customerPhone: cPhone,
-          zone: cZone,
+          zone: selectedZone ? selectedZone.name : cZone,
+          zoneId: selectedZone?.id || "",
+          couponCode: coupon && discountUSD > 0 ? coupon.code : "",
           paymentMethod: cPayment,
           note: cNote,
           items: cart.map((l) => ({ productId: l.product.id, qty: l.qty })),
@@ -232,6 +401,7 @@ export function StoreView({ slug, onBack }: StoreViewProps) {
       }
       setCart([])
       setCartOpen(false)
+      setCoupon(null)
       if (cPayment !== "cash") {
         // V2 — Passer à l'écran de paiement mobile money (push USSD)
         setPayerPhone(cPhone)
@@ -437,6 +607,12 @@ export function StoreView({ slug, onBack }: StoreViewProps) {
                 <MapPin className="w-3 h-3" /> {store.city}
               </Badge>
               <Badge variant="secondary">Par {store.ownerName}</Badge>
+              {reviewStats && reviewStats.count > 0 && (
+                <Badge variant="outline" className="bg-white gap-1">
+                  <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
+                  {reviewStats.avg.toFixed(1)} ({reviewStats.count} avis)
+                </Badge>
+              )}
               <Badge variant="outline" className="bg-white">Commandes via WhatsApp ✅</Badge>
             </div>
           </div>
@@ -544,7 +720,7 @@ export function StoreView({ slug, onBack }: StoreViewProps) {
         )}
 
         {/* Info vendeur */}
-        <section className="mt-10 mb-6">
+        <section className="mt-10 mb-4">
           <Card className="bg-white/70">
             <CardContent className="p-5 flex flex-col sm:flex-row items-center gap-4">
               <div className="text-3xl">🤝</div>
@@ -555,6 +731,48 @@ export function StoreView({ slug, onBack }: StoreViewProps) {
                   Tu paies par M-Pesa, Airtel Money, Orange Money ou à la livraison.
                 </p>
               </div>
+            </CardContent>
+          </Card>
+        </section>
+
+        {/* V6 — Avis clients */}
+        <section className="mb-6" aria-label="Avis clients">
+          <Card className="bg-white/70">
+            <CardContent className="p-5">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
+                <div className="flex-1">
+                  <p className="font-semibold flex items-center gap-2">
+                    <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
+                    Avis clients
+                  </p>
+                  {reviewStats && reviewStats.count > 0 ? (
+                    <p className="text-sm text-muted-foreground mt-1">
+                      <span className="font-bold text-foreground">{reviewStats.avg.toFixed(1)}/5</span> —{" "}
+                      {reviewStats.count} avis de clients
+                    </p>
+                  ) : (
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Sois le premier à donner ton avis sur cette boutique.
+                    </p>
+                  )}
+                </div>
+                <Button variant="outline" size="sm" onClick={() => setReviewOpen(true)}>
+                  <Star className="w-4 h-4 mr-1" />
+                  Laisser un avis
+                </Button>
+              </div>
+              {reviews.length > 0 && (
+                <div className="space-y-3">
+                  {reviews.slice(0, 3).map((rv) => (
+                    <ReviewItem key={rv.id} review={rv} />
+                  ))}
+                  {reviews.length > 3 && (
+                    <Button variant="ghost" size="sm" className="w-full" onClick={() => setAllReviewsOpen(true)}>
+                      Voir les {reviews.length} avis
+                    </Button>
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
         </section>
@@ -771,6 +989,101 @@ export function StoreView({ slug, onBack }: StoreViewProps) {
         </SheetContent>
       </Sheet>
 
+      {/* V6 — Laisser un avis */}
+      <Dialog open={reviewOpen} onOpenChange={setReviewOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Star className="w-5 h-5 fill-amber-400 text-amber-400" />
+              Laisser un avis
+            </DialogTitle>
+            <DialogDescription>Partage ton expérience d'achat avec {store.name}.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="rName">Ton nom *</Label>
+              <Input id="rName" value={rName} onChange={(e) => setRName(e.target.value)} maxLength={40} placeholder="Ex : Kabongo Jean" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Note *</Label>
+              <div className="flex gap-1" role="radiogroup" aria-label="Note de 1 à 5 étoiles">
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => setRRating(n)}
+                    aria-label={`${n} étoile${n > 1 ? "s" : ""}`}
+                    aria-pressed={rRating === n}
+                    className="p-1 rounded hover:scale-110 transition-transform"
+                  >
+                    <Star
+                      className={`w-8 h-8 transition-colors ${
+                        n <= rRating ? "fill-amber-400 text-amber-400" : "text-muted-foreground/40"
+                      }`}
+                    />
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="rComment">Commentaire (optionnel)</Label>
+              <Textarea
+                id="rComment"
+                value={rComment}
+                onChange={(e) => setRComment(e.target.value)}
+                rows={3}
+                maxLength={300}
+                placeholder="Qualité, rapidité, communication…"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="rRef">Réf de commande (optionnel)</Label>
+              <Input
+                id="rRef"
+                value={rRef}
+                onChange={(e) => setRRef(e.target.value.toUpperCase())}
+                maxLength={12}
+                placeholder="KIN-XXXX — débloque le badge « Commande vérifiée »"
+              />
+            </div>
+            <Button size="lg" className="w-full" onClick={submitReview} disabled={rSubmitting}>
+              {rSubmitting ? (
+                <>
+                  <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                  Envoi en cours…
+                </>
+              ) : (
+                "Publier mon avis"
+              )}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* V6 — Tous les avis */}
+      <Dialog open={allReviewsOpen} onOpenChange={setAllReviewsOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Star className="w-5 h-5 fill-amber-400 text-amber-400" />
+              Avis clients
+            </DialogTitle>
+            <DialogDescription>
+              {reviewStats && reviewStats.count > 0
+                ? `${reviewStats.avg.toFixed(1)}/5 — ${reviewStats.count} avis de clients`
+                : "Aucun avis pour le moment"}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[50vh] overflow-y-auto scrollbar-thin space-y-3 pr-1">
+            {reviews.length === 0 ? (
+              <p className="text-center text-sm text-muted-foreground py-8">Aucun avis pour le moment.</p>
+            ) : (
+              reviews.map((rv) => <ReviewItem key={rv.id} review={rv} />)
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Dialog commande / paiement / succès */}
       <Dialog
         open={checkoutOpen || !!success || !!payment}
@@ -960,8 +1273,17 @@ export function StoreView({ slug, onBack }: StoreViewProps) {
                     📲 Suivre la livraison sur WhatsApp
                   </a>
                 </Button>
-                <Button variant="outline" className="w-full" onClick={() => { setPayment(null); setCheckoutOpen(false) }}>
-                  Retour à la boutique
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => {
+                    const ref = payment.ref
+                    setPayment(null)
+                    setCheckoutOpen(false)
+                    window.location.hash = `#/suivi/${ref}`
+                  }}
+                >
+                  🔎 Suivre ma commande ({payment.ref})
                 </Button>
               </div>
             )
@@ -995,8 +1317,17 @@ export function StoreView({ slug, onBack }: StoreViewProps) {
                   📲 Confirmer sur WhatsApp
                 </a>
               </Button>
-              <Button variant="outline" className="w-full" onClick={() => { setSuccess(null); setCheckoutOpen(false) }}>
-                Retour à la boutique
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => {
+                  const ref = success.ref
+                  setSuccess(null)
+                  setCheckoutOpen(false)
+                  window.location.hash = `#/suivi/${ref}`
+                }}
+              >
+                🔎 Suivre ma commande ({success.ref})
               </Button>
             </div>
           ) : (
@@ -1019,14 +1350,44 @@ export function StoreView({ slug, onBack }: StoreViewProps) {
                     <Label htmlFor="cPhone">Ton téléphone *</Label>
                     <Input id="cPhone" type="tel" placeholder="081 234 5678" value={cPhone} onChange={(e) => setCPhone(e.target.value)} maxLength={20} />
                   </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="cZone">Zone / Commune</Label>
-                    <Input id="cZone" list="zones-kin" placeholder="Gombe" value={cZone} onChange={(e) => setCZone(e.target.value)} maxLength={60} />
-                    <datalist id="zones-kin">
-                      {ZONES_KIN.map((z) => <option key={z} value={z} />)}
-                    </datalist>
-                  </div>
+                  {activeZones.length === 0 && (
+                    <div className="space-y-1.5">
+                      <Label htmlFor="cZone">Zone / Commune</Label>
+                      <Input id="cZone" list="zones-kin" placeholder="Gombe" value={cZone} onChange={(e) => setCZone(e.target.value)} maxLength={60} />
+                      <datalist id="zones-kin">
+                        {ZONES_KIN.map((z) => <option key={z} value={z} />)}
+                      </datalist>
+                    </div>
+                  )}
                 </div>
+
+                {/* V6 — Zones de livraison tarifées configurées par le vendeur */}
+                {activeZones.length > 0 && (
+                  <div className="space-y-1.5">
+                    <Label>Zone de livraison *</Label>
+                    <div className="grid gap-2 max-h-44 overflow-y-auto scrollbar-thin pr-1">
+                      {activeZones.map((z) => (
+                        <button
+                          key={z.id}
+                          type="button"
+                          onClick={() => setCZoneId(z.id)}
+                          aria-pressed={cZoneId === z.id}
+                          className={`rounded-xl border-2 p-3 flex items-center justify-between text-left transition-all ${
+                            cZoneId === z.id ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"
+                          }`}
+                        >
+                          <span className="font-medium text-sm flex items-center gap-1.5">
+                            <Truck className="w-4 h-4 text-primary shrink-0" />
+                            {z.name}
+                          </span>
+                          <span className="text-sm font-bold text-primary shrink-0">
+                            {z.feeFC > 0 ? formatFC(z.feeFC) : "Gratuit"}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 <div className="space-y-1.5">
                   <Label>Mode de paiement</Label>
@@ -1047,6 +1408,47 @@ export function StoreView({ slug, onBack }: StoreViewProps) {
                   </div>
                 </div>
 
+                {/* V6 — Code promo */}
+                <div className="space-y-1.5">
+                  <Label htmlFor="cCoupon">Code promo</Label>
+                  {coupon ? (
+                    <div className="flex items-center justify-between gap-2 rounded-xl border border-emerald-300 bg-emerald-50 p-3">
+                      <div className="min-w-0">
+                        <p className="font-bold text-sm text-emerald-800 flex items-center gap-1.5">
+                          <TicketPercent className="w-4 h-4 shrink-0" />
+                          {coupon.code}
+                        </p>
+                        <p className="text-xs text-emerald-700">
+                          {coupon.label}
+                          {totalUSD > 0 && discountUSD <= 0 && " — panier minimum non atteint"}
+                        </p>
+                      </div>
+                      <Button variant="ghost" size="sm" className="shrink-0" onClick={() => setCoupon(null)}>
+                        Retirer
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="flex gap-2">
+                      <Input
+                        id="cCoupon"
+                        placeholder="Ex : BIENVENUE10"
+                        value={couponInput}
+                        onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
+                        maxLength={16}
+                        className="flex-1"
+                      />
+                      <Button
+                        variant="outline"
+                        className="shrink-0"
+                        onClick={applyCoupon}
+                        disabled={couponChecking || !couponInput.trim()}
+                      >
+                        {couponChecking ? <Loader2 className="w-4 h-4 animate-spin" /> : "Appliquer"}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+
                 <div className="space-y-1.5">
                   <Label htmlFor="cNote">Note (optionnel)</Label>
                   <Textarea
@@ -1057,6 +1459,35 @@ export function StoreView({ slug, onBack }: StoreViewProps) {
                     rows={2}
                     maxLength={300}
                   />
+                </div>
+
+                {/* V6 — Récap détaillé du total */}
+                <div className="rounded-xl border bg-muted/30 p-3 space-y-1.5 text-sm" aria-live="polite">
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Sous-total</span>
+                    <span className="font-medium">{formatFC(totalUSD * rate)}</span>
+                  </div>
+                  {discountUSD > 0 && coupon && (
+                    <div className="flex items-center justify-between text-emerald-700">
+                      <span>🏷️ Code {coupon.code}</span>
+                      <span className="font-medium">−{formatFC(discountUSD * rate)}</span>
+                    </div>
+                  )}
+                  {selectedZone && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground flex items-center gap-1">
+                        <Truck className="w-3.5 h-3.5" /> Livraison — {selectedZone.name}
+                      </span>
+                      <span className="font-medium">{selectedZone.feeFC > 0 ? formatFC(selectedZone.feeFC) : "Gratuite"}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between font-extrabold text-base pt-1.5 border-t">
+                    <span>Total à payer</span>
+                    <span className="text-primary">
+                      {formatFC(previewTotals.totalFC)}{" "}
+                      <span className="text-xs font-medium text-muted-foreground">({formatUSD(previewTotals.totalUSD)})</span>
+                    </span>
+                  </div>
                 </div>
               </div>
 

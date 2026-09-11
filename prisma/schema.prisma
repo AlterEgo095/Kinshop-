@@ -36,6 +36,10 @@ model Store {
   invoices    Invoice[]
   visits      StoreVisit[]
   notifications NotificationLog[]
+  // V6 — Confiance & Croissance
+  reviews       Review[]
+  coupons       Coupon[]
+  deliveryZones DeliveryZone[]
 }
 
 // V3 — KinFacture : factures professionnelles avec QR de paiement mobile money
@@ -89,6 +93,11 @@ model Order {
   paymentRef    String   @default("") // référence de transaction (agrégateur ou simulation)
   payerPhone    String   @default("") // numéro mobile money qui paie (peut différer du client)
   paidAt        DateTime?
+  // V6 — Récap commerce détaillé (sous-total − remise + livraison)
+  couponCode    String   @default("") // code promo appliqué ("" = aucun)
+  discountUSD   Float    @default(0) // remise accordée
+  deliveryZone  String   @default("") // nom de la zone de livraison
+  deliveryFeeFC Float    @default(0) // frais de livraison en FC
   note          String   @default("")
   status        String   @default("new")
   createdAt     DateTime @default(now())
@@ -128,6 +137,50 @@ model NotificationLog {
   status    String   @default("simulated") // simulated | sent | failed
   provider  String   @default("simulation")
   createdAt DateTime @default(now())
+}
+
+// V6 — Avis clients laissés sur une boutique (modérés par le vendeur)
+model Review {
+  id         String   @id @default(cuid())
+  storeId    String
+  store      Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  orderId    String   @default("") // commande liée (badge « Commande vérifiée »)
+  authorName String
+  rating     Int      // 1..5 étoiles
+  comment    String   @default("")
+  hidden     Boolean  @default(false) // modération vendeur (masquer/restaurer)
+  createdAt  DateTime @default(now())
+}
+
+// V6 — Code promo créé par le vendeur (valide côté serveur au checkout)
+model Coupon {
+  id          String   @id @default(cuid())
+  storeId     String
+  store       Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  code        String   // majuscules, unique par boutique
+  type        String   @default("percent") // percent | fixed
+  value       Float    // pourcentage (1..90) ou montant fixe USD
+  minTotalUSD Float    @default(0) // panier minimum pour être applicable
+  maxUses     Int      @default(0) // 0 = illimité
+  uses        Int      @default(0) // compteur d'utilisations
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([storeId, code])
+}
+
+// V6 — Zone de livraison tarifée (quartiers/communes desservies)
+model DeliveryZone {
+  id        String   @id @default(cuid())
+  storeId   String
+  store     Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  name      String
+  feeFC     Float    @default(0) // frais de livraison en FC (0 = gratuit)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@unique([storeId, name])
 }
 
 // Paramètres globaux de la plateforme (console admin)

@@ -9,6 +9,7 @@ import { PremiumSuccess } from "@/components/kinshop/premium-success"
 import { AdminConsole } from "@/components/kinshop/admin-console"
 import CvExpress from "@/components/kinshop/cv-express"
 import { InvoicePublicView } from "@/components/kinshop/facture-view"
+import { TrackOrderView } from "@/components/kinshop/track-order"
 import { PwaLayer } from "@/components/kinshop/pwa"
 import type { StoreData } from "@/lib/kinshop"
 
@@ -21,11 +22,19 @@ type View =
   | { name: "admin" }
   | { name: "cv" }
   | { name: "invoice-public"; number: string }
+  | { name: "track"; ref: string }
 
 const OWNER_KEY = "kinshop_owner_slug"
 const DEMO_SLUG = "maman-ngo"
 
-type HashTarget = { type: "store"; slug: string } | { type: "premium" } | { type: "admin" } | { type: "cv" } | { type: "invoice"; number: string } | null
+type HashTarget =
+  | { type: "store"; slug: string }
+  | { type: "premium" }
+  | { type: "admin" }
+  | { type: "cv" }
+  | { type: "invoice"; number: string }
+  | { type: "track"; ref: string }
+  | null
 
 function parseHash(): HashTarget {
   if (typeof window === "undefined") return null
@@ -36,6 +45,9 @@ function parseHash(): HashTarget {
   if (/^#\/cv/i.test(window.location.hash)) return { type: "cv" }
   const invoice = window.location.hash.match(/^#\/facture\/([A-Za-z0-9-]+)/)
   if (invoice) return { type: "invoice", number: invoice[1] }
+  // V6 — Suivi public de commande (#/suivi/KIN-XXXX)
+  const track = window.location.hash.match(/^#\/suivi\/([A-Za-z0-9-]+)/i)
+  if (track) return { type: "track", ref: track[1] }
   return null
 }
 
@@ -59,6 +71,7 @@ export function KinShopApp() {
       else if (hashTarget?.type === "admin") setView({ name: "admin" })
       else if (hashTarget?.type === "cv") setView({ name: "cv" })
       else if (hashTarget?.type === "invoice") setView({ name: "invoice-public", number: hashTarget.number })
+      else if (hashTarget?.type === "track") setView({ name: "track", ref: hashTarget.ref })
       setHydrated(true)
     })()
     return () => {
@@ -94,11 +107,17 @@ export function KinShopApp() {
       if (window.location.hash !== target) {
         window.history.pushState(null, "", target)
       }
+    } else if (view.name === "track") {
+      const target = `#/suivi/${view.ref}`
+      if (window.location.hash !== target) {
+        window.history.pushState(null, "", target)
+      }
     } else if (
       window.location.hash.startsWith("#/boutique/") ||
       window.location.hash.startsWith("#/premium/") ||
       window.location.hash.startsWith("#/admin") ||
       window.location.hash.startsWith("#/facture/") ||
+      window.location.hash.startsWith("#/suivi/") ||
       window.location.hash.startsWith("#/cv")
     ) {
       window.history.replaceState(null, "", window.location.pathname)
@@ -114,9 +133,10 @@ export function KinShopApp() {
       else if (hashTarget?.type === "admin") setView({ name: "admin" })
       else if (hashTarget?.type === "cv") setView({ name: "cv" })
       else if (hashTarget?.type === "invoice") setView({ name: "invoice-public", number: hashTarget.number })
+      else if (hashTarget?.type === "track") setView({ name: "track", ref: hashTarget.ref })
       else
         setView((v) =>
-          v.name === "store" || v.name === "premium-success" || v.name === "admin" || v.name === "cv" || v.name === "invoice-public"
+          v.name === "store" || v.name === "premium-success" || v.name === "admin" || v.name === "cv" || v.name === "invoice-public" || v.name === "track"
             ? { name: "landing" }
             : v,
         )
@@ -183,6 +203,9 @@ export function KinShopApp() {
       break
     case "invoice-public":
       content = <InvoicePublicView number={view.number} onHome={goHome} />
+      break
+    case "track":
+      content = <TrackOrderView initialRef={view.ref} onHome={goHome} />
       break
     default:
       content = (

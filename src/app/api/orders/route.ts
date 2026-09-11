@@ -4,9 +4,11 @@ import {
   PAYMENT_LABELS,
   buildOrderMessage,
   buildWhatsAppLink,
+  computeCouponDiscount,
+  computeOrderTotals,
   makeOrderRef,
   normalizePhone,
-  usdToFC,
+  type CouponType,
   type OrderItem,
   type PaymentMethod,
 } from "@/lib/kinshop"
@@ -41,19 +43,64 @@ export async function POST(req: NextRequest) {
     const map = new Map(dbProducts.map((p) => [p.id, p]))
 
     const items: OrderItem[] = []
-    let totalUSD = 0
+    let subtotalRaw = 0
     for (const r of requested) {
       const p = map.get(String(r.productId))
       if (!p) continue
       const qty = Math.max(1, Math.min(99, Number(r.qty) || 1))
       items.push({ productId: p.id, name: p.name, emoji: p.emoji, priceUSD: p.priceUSD, qty })
-      totalUSD += p.priceUSD * qty
+      subtotalRaw += p.priceUSD * qty
     }
     if (items.length === 0) {
       return NextResponse.json({ error: "Produits invalides ou introuvables." }, { status: 400 })
     }
+    const subtotalUSD = Math.round(subtotalRaw * 100) / 100
 
-    const totalFC = usdToFC(totalUSD, store.rateFC)
+    // V6 — Zone de livraison tarifée (si le vendeur en a configuré et qu'une zone est choisie)
+    let zoneName = String(body.zone || "").slice(0, 80)
+    let deliveryFeeFC = 0
+    const zoneId = String(body.zoneId || "")
+    if (zoneId) {
+      const zone = await db.deliveryZone.findFirst({ where: { id: zoneId, storeId: store.id, active: true } })
+      if (zone) {
+        zoneName = zone.name
+        deliveryFeeFC = zone.feeFC
+      }
+    }
+
+    // V6 — Code promo : validation serveur (jamais faire confiance au client)
+    let discountUSD = 0
+    let couponCode = ""
+    const requestedCode = String(body.couponCode || "").trim().toUpperCase()
+    if (requestedCode) {
+      const coupon = await db.coupon.findUnique({
+        where: { storeId_code: { storeId: store.id, code: requestedCode } },
+      })
+      if (!coupon || !coupon.active || (coupon.maxUses > 0 && coupon.uses >= coupon.maxUses)) {
+        return NextResponse.json({ error: `Code promo ${requestedCode} invalide ou expiré.` }, { status: 400 })
+      }
+      const d = computeCouponDiscount(
+        { type: coupon.type as CouponType, value: coupon.value, minTotalUSD: coupon.minTotalUSD },
+        subtotalUSD,
+      )
+      if (d <= 0) {
+        return NextResponse.json(
+          { error: `Ce code demande un panier minimum de $${coupon.minTotalUSD.toFixed(2)}.` },
+          { status: 400 },
+        )
+      }
+      discountUSD = d
+      couponCode = coupon.code
+    }
+
+    // V6 — Totaux calculés côté serveur (FC d'abord, USD dérivé)
+    const { totalUSD, totalFC } = computeOrderTotals({
+      subtotalUSD,
+      discountUSD,
+      deliveryFeeFC,
+      rate: store.rateFC,
+    })
+
     const paymentMethod: PaymentMethod = VALID_PAYMENTS.includes(body.paymentMethod)
       ? body.paymentMethod
       : "mpesa"
@@ -64,10 +111,15 @@ export async function POST(req: NextRequest) {
         storeId: store.id,
         customerName: customerName.slice(0, 80),
         customerPhone: normalizePhone(customerPhone),
-        zone: String(body.zone || "").slice(0, 80),
+        zone: zoneName,
         items: JSON.stringify(items),
         totalUSD,
         totalFC,
+        // V6 — récap commerce détaillé
+        couponCode,
+        discountUSD,
+        deliveryZone: zoneName,
+        deliveryFeeFC,
         paymentMethod,
         note: String(body.note || "").slice(0, 300),
         status: "new",
@@ -85,6 +137,9 @@ export async function POST(req: NextRequest) {
       totalFC,
       paymentMethod,
       note: order.note,
+      discountUSD,
+      couponCode,
+      deliveryFeeFC,
     })
 
     // V2 — Notification SMS vendeur + client (jamais bloquante, simulée si fournisseur absent)
@@ -101,6 +156,13 @@ export async function POST(req: NextRequest) {
       totalFC,
       paymentLabel: PAYMENT_LABELS[paymentMethod],
     })
+
+    // V6 — Incrémenter le compteur d'utilisation du code promo (jamais bloquant)
+    if (couponCode) {
+      db.coupon
+        .update({ where: { storeId_code: { storeId: store.id, code: couponCode } }, data: { uses: { increment: 1 } } })
+        .catch((err) => console.error("coupon uses increment", err))
+    }
 
     return NextResponse.json({ order, whatsappUrl: buildWhatsAppLink(store.whatsapp, message) }, { status: 201 })
   } catch (e) {
