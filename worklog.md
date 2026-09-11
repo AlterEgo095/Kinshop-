@@ -186,3 +186,28 @@ Stage Summary:
 - Décisions clés : rendu canvas A4 (pattern Statut Studio) plutôt que html2canvas (incompatible oklch/Tailwind 4), QR « texte universel » (marchand+montant+référence) — pas de standard QR mobile money en RDC, numéro de facture = clé d'accès publique (lien non listé), totaux facture TOUJOURS recalculés serveur, statuts draft/sent/paid avec paidAt.
 - Artifacts : prisma/schema.prisma (Invoice), src/lib/kinfacture.ts, src/app/api/invoices/route.ts, src/components/kinshop/{invoice-canvas,facture-view,cv-express,dashboard,kinshop-app,landing}.tsx, scripts/seed-v3-demo.ts, README.md.
 - Rappel sécurité récurrent : le PAT GitHub affiché en clair dans le chat doit être révoqué (GitHub → Settings → Developer settings).
+
+---
+Task ID: 7
+Agent: Z.ai Code (principal)
+Task: Version V4 — PWA installable (hors-ligne) + multi-images produits (le domaine personnalisé reporté à la V5)
+
+Work Log:
+- Périmètre confirmé par l'utilisateur : « PWA et le multi image, le domaine vient après ». État d'entrée : working tree propre, V2/V3 déjà poussées (9f4a158 sur origin/main).
+- Prisma : Product +champ images (JSON string[], défaut "[]"), imageUrl conservé = image principale (rétrocompatibilité). db:push OK + redémarrage serveur (setsid pour survie shell).
+- Assets générés par IA (z-ai CLI) : icône app 1024 (→ icon-192/512/180 + icon-maskable-512 via sharp, fond émeraude pleine zone) + 6 photos produits (sneakers ×2 angles, robe pagne ×2, smartphone/écouteurs, riz) optimisées JPEG 800 px (~25-145 Ko).
+- src/lib/kinshop.ts : ProductData +images string[], MAX_PRODUCT_IMAGES=5, normalizeImages (JSON string | array | fallback imageUrl, plafond 400 Ko/image).
+- src/lib/images.ts : compressImageFile (canvas, max 900 px, JPEG q0.72, data URL) + dataUrlSize.
+- API : POST /api/products accepte images[] (imageUrl synchronisé = images[0]) ; NOUVEAU PATCH /api/products (galerie remplacée + name/price/stock/emoji/category, vérif storeId → 403) ; GET /api/stores normalise products.images (fallback imageUrl).
+- product-images-editor.tsx : upload multiple compressé + ajout par lien (validation https?://|data:) + réordre ‹ › + badge « Principale » + compteur n/5 + retrait.
+- dashboard.tsx : dialog « Nouveau produit » avec éditeur ; NOUVEAU bouton crayon par carte → dialog « Modifier le produit » (infos + galerie) → PATCH ; carte produit = image principale + badge nombre de photos (icône Images).
+- store-view.tsx : cartes cliquables → fiche produit (dialog) : grande image animée (AnimatePresence), flèches ‹ ›, compteur 1/n, miniatures, prix FC/USD, « Ajouter au panier » ; badge photos sur cartes ; sr-only DialogTitle (fix a11y console).
+- PWA : src/app/manifest.ts (standalone, icônes maskable, thème #059669) ; public/sw.js (network-first API+pages → cache → offline.html, cache-first /icons /images /status, skip HMR) ; public/offline.html FR stylé ; pwa.tsx (register SW, carte installation Android via beforeinstallprompt + carte iOS « Partager → Sur l'écran d'accueil », dismiss 7 j, toasts online/offline) ; layout.tsx (manifest, icons, appleWebApp, viewportFit cover) ; kinshop-app.tsx monte <PwaLayer> global (masqué sur la vue boutique pour ne pas gêner le panier).
+- scripts/seed-v4-images.ts (idempotent) : galeries sur 6 produits démo (maman-ngo ×3 dont pagne 2 photos, diva-mode ×2 dont sandales 2 photos, kin-tech ×1). Corrigé au passage 3 erreurs TS préexistantes (paidAt dans les Pick<InvoiceData> d'invoice-canvas, body null webhook payments, statut "simulated" notifier.ts).
+- Tests E2E Agent Browser : manifest 200 + SW actif ; galerie boutique (fiche 1/2 → flèches → miniatures → ajout panier + toast) ; dashboard (ajout produit 2 photos par lien, réordre, création → badge 2 ; édition → retrait 1 photo → PATCH → DB vérifiée imageUrl=images[0]) ; upload fichier réel → data URL compressée 73 Ko ; carte installation (event simulé) visible + dismiss ; OFFLINE : reload boutique en mode offline → contenu servi depuis cache SW ; mobile 375 px fiche produit parfaite (screenshot) ; console admin Produits OK ; produit test supprimé (DB propre, 6 produits avec galerie) ; console navigateur propre après fix DialogTitle ; tsc 0 erreur (hors exemples), lint 0 erreur ; dev.log sans erreur.
+
+Stage Summary:
+- KinShop V4 est complète : l'app est une PWA installable (Android/iOS) avec consultation hors-ligne des boutiques déjà visitées, et chaque produit supporte jusqu'à 5 photos (upload compressé 3G-friendly, galerie publique fluide, édition complète) — la boucle virale statut WhatsApp s'enrichit de visuels produits pro.
+- Décisions clés : galerie stockée en JSON string (SQLite sans liste) avec imageUrl gardé = images[0] pour rétrocompat (Statut Studio, admin, seeds) ; compression client canvas (900 px/JPEG 0.72) avant stockage data URL ; SW network-first partout sauf images locales (cache-first) pour compat dev/HMR ; carte d'installation masquée dans la boutique publique (panier) ; domaine personnalisé explicitement repoussé V5 dans la roadmap README.
+- Artifacts : prisma/schema.prisma (Product.images), src/lib/{kinshop,images}.ts, src/app/api/products/route.ts (PATCH), src/app/api/stores/route.ts, src/app/manifest.ts, public/{sw.js,offline.html,icons/*,images/products/*}, src/components/kinshop/{product-images-editor,pwa,dashboard,store-view,kinshop-app}.tsx, scripts/seed-v4-images.ts, README.md.
+- Rappel sécurité récurrent : le PAT GitHub affiché en clair dans le chat doit être révoqué (GitHub → Settings → Developer settings).

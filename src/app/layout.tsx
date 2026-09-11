@@ -28,6 +28,8 @@ export const metadata: Metadata = {
     "e-commerce Kinshasa",
   ],
   authors: [{ name: "KinShop" }],
+  manifest: "/manifest.webmanifest",
+  applicationName: "KinShop",
   openGraph: {
     title: "KinShop — Ta boutique en ligne en 5 minutes",
     description:
@@ -36,10 +38,20 @@ export const metadata: Metadata = {
     type: "website",
     locale: "fr_CD",
   },
+  icons: {
+    icon: [{ url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" }],
+    apple: [{ url: "/icons/icon-180.png", sizes: "180x180", type: "image/png" }],
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "KinShop",
+  },
 };
 
 export const viewport: Viewport = {
   themeColor: "#059669",
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

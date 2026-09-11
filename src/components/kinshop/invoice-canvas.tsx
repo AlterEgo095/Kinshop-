@@ -75,7 +75,7 @@ function fmtDate(iso: string | Date): string {
 }
 
 export async function renderInvoiceCanvas(
-  invoice: Pick<InvoiceData, 'number' | 'clientName' | 'clientPhone' | 'totalFC' | 'totalUSD' | 'note' | 'dueDate' | 'status' | 'createdAt' | 'items'>,
+  invoice: Pick<InvoiceData, 'number' | 'clientName' | 'clientPhone' | 'totalFC' | 'totalUSD' | 'note' | 'dueDate' | 'status' | 'createdAt' | 'items' | 'paidAt'>,
   store: InvoiceStoreInfo,
 ): Promise<HTMLCanvasElement> {
   const canvas = document.createElement('canvas')
@@ -412,7 +412,7 @@ export function InvoiceCanvas({
   store,
   onRendered,
 }: {
-  invoice: Pick<InvoiceData, 'number' | 'clientName' | 'clientPhone' | 'totalFC' | 'totalUSD' | 'note' | 'dueDate' | 'status' | 'createdAt' | 'items'>
+  invoice: Pick<InvoiceData, 'number' | 'clientName' | 'clientPhone' | 'totalFC' | 'totalUSD' | 'note' | 'dueDate' | 'status' | 'createdAt' | 'items' | 'paidAt'>
   store: InvoiceStoreInfo
   onRendered?: (canvas: HTMLCanvasElement | null) => void
 }) {

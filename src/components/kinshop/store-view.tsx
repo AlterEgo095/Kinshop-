@@ -1,11 +1,14 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { motion } from "framer-motion"
+import { AnimatePresence, motion } from "framer-motion"
 import {
   AlertCircle,
   ArrowLeft,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Images,
   Loader2,
   MapPin,
   Minus,
@@ -100,6 +103,10 @@ export function StoreView({ slug, onBack }: StoreViewProps) {
   const [cPayment, setCPayment] = useState<PaymentMethod>("mpesa")
   const [cNote, setCNote] = useState("")
 
+  // V4 — Fiche produit avec galerie multi-photos
+  const [detail, setDetail] = useState<ProductData | null>(null)
+  const [detailIdx, setDetailIdx] = useState(0)
+
   useEffect(() => {
     let cancelled = false
     ;(async () => {
@@ -177,6 +184,15 @@ export function StoreView({ slug, onBack }: StoreViewProps) {
       action: { label: "Voir", onClick: () => setCartOpen(true) },
     })
   }
+
+  // V4 — Ouvre la fiche produit (galerie)
+  const openDetail = (p: ProductData) => {
+    setDetail(p)
+    setDetailIdx(0)
+  }
+
+  const detailGallery = detail && Array.isArray(detail.images) ? detail.images : []
+  const detailImage = detail ? detailGallery[detailIdx] || detail.imageUrl || "" : ""
 
   const setQty = (productId: string, qty: number) => {
     if (qty <= 0) {
@@ -474,17 +490,40 @@ export function StoreView({ slug, onBack }: StoreViewProps) {
               >
                 <Card className="h-full flex flex-col overflow-hidden group hover:shadow-lg hover:-translate-y-0.5 transition-all">
                   <CardContent className="p-3 md:p-4 flex flex-col flex-1">
-                    {p.imageUrl ? (
-                      <img src={p.imageUrl} alt={p.name} className="w-full h-32 md:h-36 object-cover rounded-xl mb-3" />
-                    ) : (
-                      <div className="w-full h-32 md:h-36 rounded-xl bg-emerald-50 flex items-center justify-center text-5xl md:text-6xl mb-3 group-hover:scale-105 transition-transform">
-                        {p.emoji}
-                      </div>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => openDetail(p)}
+                      className="relative rounded-xl mb-3 overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                      aria-label={`Voir ${p.name}`}
+                    >
+                      {p.images?.[0] || p.imageUrl ? (
+                        <img
+                          src={p.images?.[0] || p.imageUrl}
+                          alt={p.name}
+                          className="w-full h-32 md:h-36 object-cover group-hover:scale-105 transition-transform"
+                        />
+                      ) : (
+                        <div className="w-full h-32 md:h-36 rounded-xl bg-emerald-50 flex items-center justify-center text-5xl md:text-6xl group-hover:scale-105 transition-transform">
+                          {p.emoji}
+                        </div>
+                      )}
+                      {p.images && p.images.length > 1 && (
+                        <span className="absolute top-2 right-2 bg-black/60 text-white rounded-full px-2 py-0.5 text-[10px] font-bold flex items-center gap-1">
+                          <Images className="w-3 h-3" />
+                          {p.images.length}
+                        </span>
+                      )}
+                    </button>
                     <Badge variant="outline" className="text-[10px] w-fit mb-2 px-2 py-0">
                       {p.category}
                     </Badge>
-                    <p className="font-semibold text-sm leading-snug mb-1 line-clamp-2">{p.name}</p>
+                    <button
+                      type="button"
+                      onClick={() => openDetail(p)}
+                      className="text-left font-semibold text-sm leading-snug mb-1 line-clamp-2 hover:text-primary transition-colors"
+                    >
+                      {p.name}
+                    </button>
                     <div className="mt-auto">
                       <p className="font-extrabold text-primary text-lg leading-tight">
                         {formatFC(p.priceUSD * rate)}
@@ -551,6 +590,117 @@ export function StoreView({ slug, onBack }: StoreViewProps) {
           </div>
         </motion.div>
       )}
+
+      {/* V4 — Fiche produit avec galerie multi-photos */}
+      <Dialog open={!!detail} onOpenChange={(o) => !o && setDetail(null)}>
+        <DialogContent className="sm:max-w-md p-0 overflow-hidden gap-0" aria-describedby={undefined}>
+          {detail && (
+            <div>
+              {/* Titre accessible (invisible à l'écran, le h3 sert de titre visuel) */}
+              <DialogTitle className="sr-only">{detail.name}</DialogTitle>
+              {/* Grande image + navigation */}
+              <div className="relative bg-emerald-50">
+                <div className="aspect-square w-full overflow-hidden flex items-center justify-center">
+                  <AnimatePresence mode="wait" initial={false}>
+                    {detailImage ? (
+                      <motion.img
+                        key={detailImage.slice(0, 48) + detailIdx}
+                        src={detailImage}
+                        alt={`${detail.name} — photo ${detailIdx + 1}`}
+                        initial={{ opacity: 0, x: 24 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -24 }}
+                        transition={{ duration: 0.2 }}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <motion.span
+                        key="emoji"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="text-8xl"
+                      >
+                        {detail.emoji}
+                      </motion.span>
+                    )}
+                  </AnimatePresence>
+                </div>
+
+                {detailGallery.length > 1 && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setDetailIdx((i) => (i - 1 + detailGallery.length) % detailGallery.length)}
+                      className="absolute left-2 top-1/2 -translate-y-1/2 bg-white/90 border shadow rounded-full p-2 hover:bg-white transition-colors"
+                      aria-label="Photo précédente"
+                    >
+                      <ChevronLeft className="w-5 h-5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDetailIdx((i) => (i + 1) % detailGallery.length)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 bg-white/90 border shadow rounded-full p-2 hover:bg-white transition-colors"
+                      aria-label="Photo suivante"
+                    >
+                      <ChevronRight className="w-5 h-5" />
+                    </button>
+                    <span className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-black/60 text-white rounded-full px-2.5 py-0.5 text-[11px] font-bold">
+                      {detailIdx + 1}/{detailGallery.length}
+                    </span>
+                  </>
+                )}
+              </div>
+
+              {/* Miniatures */}
+              {detailGallery.length > 1 && (
+                <div className="flex gap-2 px-4 pt-3 overflow-x-auto scrollbar-thin">
+                  {detailGallery.map((img, i) => (
+                    <button
+                      key={`thumb-${i}`}
+                      type="button"
+                      onClick={() => setDetailIdx(i)}
+                      className={`shrink-0 rounded-lg overflow-hidden border-2 transition-all ${
+                        i === detailIdx ? "border-primary" : "border-transparent opacity-70 hover:opacity-100"
+                      }`}
+                      aria-label={`Voir la photo ${i + 1}`}
+                    >
+                      <img src={img} alt="" className="w-14 h-14 object-cover" />
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Infos + achat */}
+              <div className="p-4 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <Badge variant="outline" className="text-[10px] mb-1.5">
+                      {detail.category}
+                    </Badge>
+                    <h3 className="font-bold text-lg leading-snug">{detail.name}</h3>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="font-extrabold text-primary text-xl leading-tight">{formatFC(detail.priceUSD * rate)}</p>
+                    <p className="text-xs text-muted-foreground">{formatUSD(detail.priceUSD)}</p>
+                  </div>
+                </div>
+                <Button
+                  size="lg"
+                  className="w-full text-base"
+                  onClick={() => {
+                    addToCart(detail)
+                    setDetail(null)
+                  }}
+                >
+                  <ShoppingCart className="w-5 h-5 mr-2" />
+                  Ajouter au panier
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Sheet panier */}
       <Sheet open={cartOpen} onOpenChange={setCartOpen}>

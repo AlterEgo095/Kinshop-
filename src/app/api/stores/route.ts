@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
-import { slugify } from "@/lib/kinshop"
+import { normalizeImages, slugify } from "@/lib/kinshop"
 import { getPlatformSettings } from "@/lib/admin"
 
 // POST /api/stores — Créer une boutique
@@ -70,7 +70,13 @@ export async function GET(req: NextRequest) {
 
     // Réponse publique : on masque les champs internes Chariow
     const { chariowEmail, chariowPhone, chariowSaleId, ...publicStore } = store
-    return NextResponse.json({ store: publicStore })
+    return NextResponse.json({
+      store: {
+        ...publicStore,
+        // V4 — galerie multi-photos normalisée (retombe sur imageUrl si vide)
+        products: publicStore.products.map((p) => ({ ...p, images: normalizeImages(p.images, p.imageUrl) })),
+      },
+    })
   } catch (e) {
     console.error("GET /api/stores", e)
     return NextResponse.json({ error: "Erreur serveur." }, { status: 500 })

@@ -9,6 +9,7 @@ import { PremiumSuccess } from "@/components/kinshop/premium-success"
 import { AdminConsole } from "@/components/kinshop/admin-console"
 import CvExpress from "@/components/kinshop/cv-express"
 import { InvoicePublicView } from "@/components/kinshop/facture-view"
+import { PwaLayer } from "@/components/kinshop/pwa"
 import type { StoreData } from "@/lib/kinshop"
 
 type View =
@@ -160,23 +161,31 @@ export function KinShopApp() {
     }
   }, [openStore])
 
+  let content: React.ReactNode
   switch (view.name) {
     case "create":
-      return <CreateWizard onCreated={handleCreated} onCancel={goHome} />
+      content = <CreateWizard onCreated={handleCreated} onCancel={goHome} />
+      break
     case "dashboard":
-      return <Dashboard slug={view.slug} onBack={goHome} onViewStore={openStore} />
+      content = <Dashboard slug={view.slug} onBack={goHome} onViewStore={openStore} />
+      break
     case "store":
-      return <StoreView slug={view.slug} onBack={goHome} />
+      content = <StoreView slug={view.slug} onBack={goHome} />
+      break
     case "premium-success":
-      return <PremiumSuccess ownerSlug={ownerSlug} onGoDashboard={openDashboard} onGoHome={goHome} />
+      content = <PremiumSuccess ownerSlug={ownerSlug} onGoDashboard={openDashboard} onGoHome={goHome} />
+      break
     case "admin":
-      return <AdminConsole onBack={goHome} onOpenStore={openStore} />
+      content = <AdminConsole onBack={goHome} onOpenStore={openStore} />
+      break
     case "cv":
-      return <CvExpress onHome={goHome} onCreateStore={() => setView({ name: "create" })} />
+      content = <CvExpress onHome={goHome} onCreateStore={() => setView({ name: "create" })} />
+      break
     case "invoice-public":
-      return <InvoicePublicView number={view.number} onHome={goHome} />
+      content = <InvoicePublicView number={view.number} onHome={goHome} />
+      break
     default:
-      return (
+      content = (
         <Landing
           ownerSlug={ownerSlug}
           onCreateStore={() => setView({ name: "create" })}
@@ -187,4 +196,12 @@ export function KinShopApp() {
         />
       )
   }
+
+  // PWA V4 : couche installation + hors-ligne (masquée dans la boutique publique pour ne pas gêner le panier)
+  return (
+    <>
+      {content}
+      <PwaLayer visible={view.name !== "store"} />
+    </>
+  )
 }

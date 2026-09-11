@@ -13,10 +13,12 @@ import {
   Crown,
   ExternalLink,
   Eye,
+  Images,
   Loader2,
   MessageCircle,
   Package,
   Percent,
+  Pencil,
   Plus,
   Receipt,
   Settings,
@@ -85,6 +87,7 @@ import {
   type VendorStats,
 } from "@/lib/kinshop"
 import { StatusStudio } from "@/components/kinshop/status-studio"
+import { ProductImagesEditor } from "@/components/kinshop/product-images-editor"
 import {
   buildInvoiceMessage,
   INVOICE_STATUS_LABELS,
@@ -130,7 +133,19 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
   const [pEmoji, setPEmoji] = useState("📦")
   const [pPrice, setPPrice] = useState("")
   const [pCategory, setPCategory] = useState("Divers")
+  const [pImages, setPImages] = useState<string[]>([])
   const [adding, setAdding] = useState(false)
+
+  // V4 — Édition produit (galerie multi-photos)
+  const [editTarget, setEditTarget] = useState<ProductData | null>(null)
+  const [editOpen, setEditOpen] = useState(false)
+  const [editName, setEditName] = useState("")
+  const [editEmoji, setEditEmoji] = useState("📦")
+  const [editPrice, setEditPrice] = useState("")
+  const [editCategory, setEditCategory] = useState("Divers")
+  const [editStock, setEditStock] = useState("99")
+  const [editImages, setEditImages] = useState<string[]>([])
+  const [savingEdit, setSavingEdit] = useState(false)
 
   // Réglages
   const [sName, setSName] = useState("")
@@ -282,6 +297,7 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
           emoji: pEmoji || "📦",
           priceUSD: price,
           category: pCategory,
+          images: pImages,
         }),
       })
       const data = await res.json()
@@ -290,12 +306,59 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
       setPName("")
       setPPrice("")
       setPEmoji("📦")
+      setPImages([])
       setAddOpen(false)
       toast.success("Produit ajouté ✅")
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Erreur")
     } finally {
       setAdding(false)
+    }
+  }
+
+  // V4 — Ouvre le dialog d'édition produit
+  const openEditProduct = (p: ProductData) => {
+    setEditTarget(p)
+    setEditName(p.name)
+    setEditEmoji(p.emoji || "📦")
+    setEditPrice(String(p.priceUSD))
+    setEditCategory(p.category || "Divers")
+    setEditStock(String(p.stock ?? 99))
+    setEditImages(Array.isArray(p.images) ? [...p.images] : [])
+    setEditOpen(true)
+  }
+
+  const saveEditProduct = async () => {
+    if (!store || !editTarget) return
+    const price = Number(editPrice.replace(",", "."))
+    if (!editName.trim()) return toast.error("Le nom du produit est requis.")
+    if (!price || price <= 0) return toast.error("Indique un prix en dollars.")
+    setSavingEdit(true)
+    try {
+      const res = await fetch("/api/products", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: editTarget.id,
+          storeId: store.id,
+          name: editName.trim(),
+          emoji: editEmoji || "📦",
+          priceUSD: price,
+          category: editCategory,
+          stock: Number(editStock) >= 0 ? Number(editStock) : 99,
+          images: editImages,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setProducts((ps) => ps.map((x) => (x.id === editTarget.id ? data.product : x)))
+      setEditOpen(false)
+      setEditTarget(null)
+      toast.success("Produit mis à jour ✅")
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur")
+    } finally {
+      setSavingEdit(false)
     }
   }
 
@@ -810,17 +873,34 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
                 {products.map((p) => (
                   <Card key={p.id} className="group relative overflow-hidden">
                     <CardContent className="p-4">
-                      {p.imageUrl ? (
-                        <img src={p.imageUrl} alt={p.name} className="w-full h-28 object-cover rounded-lg mb-3" />
+                      {(p.images?.[0] || p.imageUrl) ? (
+                        <img
+                          src={p.images?.[0] || p.imageUrl}
+                          alt={p.name}
+                          className="w-full h-28 object-cover rounded-lg mb-3"
+                        />
                       ) : (
                         <div className="w-full h-28 rounded-lg bg-emerald-50 flex items-center justify-center text-5xl mb-3">
                           {p.emoji}
                         </div>
                       )}
+                      {p.images && p.images.length > 1 && (
+                        <span className="absolute top-2 left-2 bg-black/60 text-white rounded-full px-2 py-0.5 text-[10px] font-bold flex items-center gap-1">
+                          <Images className="w-3 h-3" />
+                          {p.images.length}
+                        </span>
+                      )}
                       <p className="font-semibold text-sm truncate">{p.name}</p>
                       <p className="text-xs text-muted-foreground mb-1">{p.category}</p>
                       <p className="font-bold text-primary">{formatFC(p.priceUSD * store.rateFC)}</p>
                       <p className="text-xs text-muted-foreground">{formatUSD(p.priceUSD)}</p>
+                      <button
+                        onClick={() => openEditProduct(p)}
+                        className="absolute top-2 right-10 w-8 h-8 rounded-lg bg-white/90 border shadow-sm flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-emerald-50"
+                        aria-label={`Modifier ${p.name}`}
+                      >
+                        <Pencil className="w-4 h-4 text-primary" />
+                      </button>
                       <button
                         onClick={() => setDeleteTarget(p)}
                         className="absolute top-2 right-2 w-8 h-8 rounded-lg bg-white/90 border shadow-sm flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-50"
@@ -1324,10 +1404,10 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
 
       {/* Dialog : ajout produit */}
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto scrollbar-thin">
           <DialogHeader>
             <DialogTitle>Nouveau produit</DialogTitle>
-            <DialogDescription>Ajoute un article à ton catalogue.</DialogDescription>
+            <DialogDescription>Ajoute un article à ton catalogue, avec ses photos.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-[70px_1fr] gap-3">
@@ -1362,12 +1442,72 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
                 </Select>
               </div>
             </div>
+
+            {/* V4 — Galerie multi-photos */}
+            <ProductImagesEditor images={pImages} onChange={setPImages} />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setAddOpen(false)}>Annuler</Button>
             <Button onClick={addProduct} disabled={adding}>
               {adding ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Plus className="w-4 h-4 mr-1" />}
               Ajouter
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog : édition produit (V4) */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto scrollbar-thin">
+          <DialogHeader>
+            <DialogTitle>Modifier le produit</DialogTitle>
+            <DialogDescription>Mets à jour les infos et les photos de ton article.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-[70px_1fr] gap-3">
+              <div className="space-y-2">
+                <Label>Emoji</Label>
+                <Input className="text-center text-xl" value={editEmoji} onChange={(e) => setEditEmoji(e.target.value)} maxLength={4} />
+              </div>
+              <div className="space-y-2">
+                <Label>Nom du produit *</Label>
+                <Input value={editName} onChange={(e) => setEditName(e.target.value)} maxLength={80} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Prix ($) *</Label>
+                <Input type="number" min="0" step="0.5" value={editPrice} onChange={(e) => setEditPrice(e.target.value)} />
+                <p className="text-xs text-muted-foreground">
+                  {editPrice && Number(editPrice) > 0 ? `≈ ${formatFC(Number(editPrice) * store.rateFC)}` : " "}
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label>Stock</Label>
+                <Input type="number" min="0" value={editStock} onChange={(e) => setEditStock(e.target.value)} />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Catégorie</Label>
+              <Select value={editCategory} onValueChange={setEditCategory}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {CATEGORIES.map((c) => (
+                    <SelectItem key={c} value={c}>{c}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <ProductImagesEditor images={editImages} onChange={setEditImages} />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditOpen(false)}>Annuler</Button>
+            <Button onClick={saveEditProduct} disabled={savingEdit}>
+              {savingEdit ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <CheckCircle2 className="w-4 h-4 mr-1" />}
+              Enregistrer
             </Button>
           </DialogFooter>
         </DialogContent>

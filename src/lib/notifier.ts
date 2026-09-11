@@ -30,7 +30,7 @@ export function isSmsLive(): boolean {
 }
 
 /** Envoi réel via le fournisseur (format Africa's Talking par défaut). Renvoie sent | failed. */
-async function deliverSms(to: string, body: string): Promise<{ status: "sent" | "failed"; provider: string }> {
+async function deliverSms(to: string, body: string): Promise<{ status: "sent" | "failed" | "simulated"; provider: string }> {
   const cfg = getSmsConfig()
   if (!cfg) return { status: "simulated", provider: "simulation" }
   try {

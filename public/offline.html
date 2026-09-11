@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>KinShop — Hors ligne</title>
+    <link rel="icon" href="/logo.svg" type="image/svg+xml" />
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body {
+        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: linear-gradient(180deg, #ecfdf5 0%, #ffffff 100%);
+        color: #064e3b;
+        padding: 24px;
+        text-align: center;
+      }
+      .card {
+        max-width: 380px;
+        background: #fff;
+        border: 1px solid #d1fae5;
+        border-radius: 24px;
+        padding: 40px 28px;
+        box-shadow: 0 20px 40px rgba(6, 78, 59, 0.08);
+      }
+      .emoji { font-size: 64px; }
+      h1 { font-size: 22px; font-weight: 800; margin: 16px 0 8px; }
+      p { font-size: 14px; color: #6b7280; line-height: 1.6; margin-bottom: 24px; }
+      button {
+        background: #059669;
+        color: #fff;
+        border: none;
+        border-radius: 14px;
+        padding: 14px 28px;
+        font-size: 15px;
+        font-weight: 700;
+        cursor: pointer;
+        min-height: 44px;
+      }
+      button:hover { background: #047857; }
+      .brand { margin-top: 20px; font-size: 12px; color: #9ca3af; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="emoji">📡</div>
+      <h1>Tu es hors ligne</h1>
+      <p>
+        Impossible de charger cette page pour le moment. Vérifie ta connexion 3G/4G ou Wi-Fi,
+        puis réessaie — les pages déjà visitées restent accessibles.
+      </p>
+      <button onclick="location.reload()">Réessayer</button>
+      <p class="brand">Propulsé par KinShop 🇨🇩</p>
+    </div>
+  </body>
+</html>

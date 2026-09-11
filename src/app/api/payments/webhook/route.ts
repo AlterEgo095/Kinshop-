@@ -8,12 +8,13 @@ import { isWebhookAuthorized } from "@/lib/mobile-money"
 export async function POST(req: NextRequest) {
   try {
     const raw = await req.text()
-    let body: Record<string, unknown> | null = null
+    let parsed: unknown
     try {
-      body = JSON.parse(raw)
+      parsed = JSON.parse(raw)
     } catch {
       return NextResponse.json({ error: "JSON invalide." }, { status: 400 })
     }
+    const body = (parsed && typeof parsed === "object" ? parsed : {}) as Record<string, unknown>
 
     // Authentification du callback (token configuré via MOMO_CALLBACK_TOKEN)
     const tokenInBody = typeof body.callbackToken === "string" ? body.callbackToken : null

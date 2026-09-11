@@ -46,6 +46,11 @@ Chaque boutique KinShop affiche fièrement **« Propulsé par KinShop »**. Chaq
 - 📄 **CV Express RDC** (`#/cv`) — générateur de CV professionnel 100 % gratuit : 2 modèles canvas A4 (« Kin Classique » & « Kin Moderne » avec timeline), photo optionnelle, compétences/langues/références, exports **PNG + PDF + partage WhatsApp**, brouillon auto-sauvegardé. Outil d'acquisition ouvert à tous les demandeurs d'emploi congolais.
 - 🧾 **KinFacture** — factures professionnelles dans le dashboard vendeur (onglet « Factures ») : lignes détaillées (saisie libre ou import du catalogue avec conversion FC automatique), totaux FC/USD recalculés côté serveur, **QR de paiement mobile money** imprimé sur la facture (M-Pesa / Airtel / Orange + référence), statuts brouillon → envoyée → payée, export **PDF A4 / PNG**, envoi WhatsApp avec **lien de facture publique** (`#/facture/KF-XXX`) où le client trouve les instructions de paiement.
 
+## 📲 Fonctionnalités V4
+
+- 🖼️ **Multi-images produits** — jusqu'à **5 photos par produit** : upload depuis l'appareil (compression automatique JPEG ~900 px, idéal réseau 3G), ajout par lien, réordre glissé par flèches, image principale mise en avant. Fiche produit publique avec **galerie** : grande image, flèches ‹ ›, compteur 1/5, miniatures cliquables, badge photos sur les cartes du catalogue. Édition produit complète (photos, prix, stock, catégorie).
+- 📲 **PWA installable** — KinShop s'installe sur l'écran d'accueil (Android/Chrome via `beforeinstallprompt`, iOS via instructions Partager → Sur l'écran d'accueil). **Consultation hors-ligne** : service worker (network-first API + cache pages, cache-first pour les icônes/images), page `offline.html` dédiée, manifest standalone avec icônes maskable. Toasts connexion perdue/rétabl.
+
 ## 🧰 Stack technique
 
 | Technologie | Usage |
@@ -56,6 +61,7 @@ Chaque boutique KinShop affiche fièrement **« Propulsé par KinShop »**. Chaq
 | **shadcn/ui** | Composants UI accessibles |
 | **Prisma + SQLite** | Persistance (Store, Product, Order, Invoice, PulseDelivery, StoreVisit, NotificationLog, PlatformSetting, AdminAction) |
 | **Canvas + jsPDF + qrcode** | V3 : rendu A4 du CV et des factures, export PDF/PNG, QR de paiement mobile money |
+| **Service Worker + manifest** | V4 : PWA installable, cache hors-ligne, page offline |
 | **Framer Motion** | Animations fluides |
 | **wa.me deep links** | Confirmation de commande via WhatsApp |
 
@@ -88,6 +94,7 @@ Ouvrez l'application → créez votre boutique → partagez votre lien sur votre
 | `#/admin` | Console d'administration (PIN) |
 | `#/cv` | CV Express RDC (V3, gratuit, sans compte) |
 | `#/facture/{number}` | Facture publique KinFacture (V3) |
+| `/manifest.webmanifest` · `/sw.js` | PWA V4 : manifest + service worker |
 
 ## 📁 Structure du projet
 
@@ -97,7 +104,7 @@ src/
 │   ├── page.tsx              # Point d'entrée (route unique)
 │   └── api/
 │       ├── stores/           # Création / lecture / réglages boutique
-│       ├── products/         # Ajout / suppression produits
+│       ├── products/         # Ajout / édition (galerie V4) / suppression produits
 │       ├── orders/           # Commandes (totaux recalculés côté serveur)
 │       ├── payments/         # V2 : initiate · status · webhook · simulate-confirm
 │       ├── invoices/         # V3 : factures KinFacture (créer · lister · statut · lecture publique)
@@ -109,10 +116,12 @@ src/
 │   ├── create-wizard.tsx     # Assistant création boutique (3 étapes)
 │   ├── dashboard.tsx         # Tableau de bord vendeur (+ Stats & Alertes V2)
 │   ├── store-view.tsx        # Boutique publique + panier + checkout + paiement USSD
+│   ├── product-images-editor.tsx # V4 : éditeur galerie photos (upload compressé + lien + réordre)
 │   ├── status-studio.tsx     # Générateur d'image statut WhatsApp (QR code)
 │   ├── cv-express.tsx        # V3 : générateur de CV Express RDC (canvas A4, 2 modèles)
 │   ├── invoice-canvas.tsx    # V3 : rendu facture A4 + QR paiement + exports PDF/PNG
 │   ├── facture-view.tsx      # V3 : vue publique d'une facture (#/facture/KF-XXX)
+│   ├── pwa.tsx               # V4 : couche PWA (SW, installation, toasts connexion)
 │   ├── admin-console.tsx     # Console d'administration (#/admin, PIN)
 │   └── kinshop-app.tsx       # Routeur à états + deep-linking
 └── lib/
@@ -120,6 +129,7 @@ src/
     ├── chariow.ts            # Checkout + webhook Chariow (Pulses)
     ├── mobile-money.ts       # V2 : paiement commandes (agrégateur FlexPay/simulation)
     ├── kinfacture.ts         # V3 : types & helpers factures (numéro KF, QR, message WhatsApp)
+    ├── images.ts             # V4 : compression images côté client (data URL JPEG)
     └── notifier.ts           # V2 : SMS vendeur/client (Africa's Talking/simulation)
 prisma/schema.prisma          # Models : Store, Product, Order, PulseDelivery, StoreVisit, NotificationLog, PlatformSetting, AdminAction
 ```
@@ -193,6 +203,10 @@ Accessible depuis la landing (« Bien plus qu'une boutique ») ou `#/cv` — **a
 - [x] ~~V2 : Statistiques avancées~~ ✅ vues boutique, conversion, produits stars, clients fidèles
 - [x] ~~V3 : Générateur de CV Express RDC~~ ✅ `#/cv` — 2 modèles canvas A4, PDF/PNG/partage
 - [x] ~~V3 : KinFacture — factures pro avec QR de paiement~~ ✅ onglet Factures + lien public `#/facture/KF-XXX`
+- [x] ~~V4 : PWA installable + hors-ligne~~ ✅ service worker, manifest, carte d'installation (Android & iOS)
+- [x] ~~V4 : Multi-images produits~~ ✅ galerie 5 photos, upload compressé, fiche produit publique
+- [ ] V5 : **Domaine personnalisé** pour chaque boutique (`maboutique.kinshop.cd`)
+- [ ] V5 : partage produit individuel (lien `#/produit/{id}`), avis clients
 
 ## 📄 Licence
 

@@ -63,7 +63,8 @@ model Product {
   store     Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
   name      String
   emoji     String   @default("📦")
-  imageUrl  String   @default("")
+  imageUrl  String   @default("") // image principale (rétrocompat, = images[0])
+  images    String   @default("[]") // V4 — galerie multi-photos (JSON string[])
   priceUSD  Float
   category  String   @default("Divers")
   stock     Int      @default(99)

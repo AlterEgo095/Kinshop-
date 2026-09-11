@@ -6,9 +6,42 @@ export interface ProductData {
   name: string
   emoji: string
   imageUrl: string
+  images: string[] // V4 — galerie multi-photos (1re = image principale)
   priceUSD: number
   category: string
   stock: number
+}
+
+/* ─────────── V4 — Multi-images produits ─────────── */
+
+export const MAX_PRODUCT_IMAGES = 5
+
+/**
+ * Normalise la liste d'images d'un produit.
+ * Accepte : un tableau JS, une chaîne JSON (stockage SQLite) ou rien —
+ * retombe sur imageUrl (rétrocompatibilité) si la galerie est vide.
+ */
+export function normalizeImages(raw: unknown, fallback?: string): string[] {
+  let arr: unknown[] = []
+  if (typeof raw === "string" && raw.trim()) {
+    try {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) arr = parsed
+    } catch {
+      // pas un JSON valide : on ignore
+    }
+  } else if (Array.isArray(raw)) {
+    arr = raw
+  }
+  const clean = arr
+    .filter((x): x is string => typeof x === "string")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0 && s.length <= 400_000) // data URL compressée max ~300 Ko + marge
+    .slice(0, MAX_PRODUCT_IMAGES)
+  if (!clean.length && typeof fallback === "string" && fallback.trim()) {
+    clean.push(fallback.trim())
+  }
+  return clean
 }
 
 export interface OrderItem {
