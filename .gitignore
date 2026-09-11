@@ -61,3 +61,4 @@ server.log
 # scripts internes du sandbox
 /.zscripts
 /agent-ctx
+/download
