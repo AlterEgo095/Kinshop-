@@ -11,18 +11,24 @@ datasource db {
 }
 
 model Store {
-  id          String   @id @default(cuid())
-  slug        String   @unique
+  id          String    @id @default(cuid())
+  slug        String    @unique
   name        String
   ownerName   String
   whatsapp    String
-  description String   @default("")
-  city        String   @default("Kinshasa")
-  logoEmoji   String   @default("🛍️")
-  colorTheme  String   @default("emerald")
-  rateFC      Float    @default(2850)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  description String    @default("")
+  city        String    @default("Kinshasa")
+  logoEmoji   String    @default("🛍️")
+  colorTheme  String    @default("emerald")
+  rateFC      Float     @default(2850)
+  // Premium Chariow
+  isPremium   Boolean   @default(false)
+  premiumUntil DateTime?
+  chariowEmail String   @default("")
+  chariowPhone String   @default("")
+  chariowSaleId String  @default("")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
   products    Product[]
   orders      Order[]
 }
@@ -57,4 +63,13 @@ model Order {
   status        String   @default("new")
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+}
+
+// Idempotence des webhooks Chariow (Pulses)
+model PulseDelivery {
+  id         String   @id @default(cuid())
+  deliveryId String   @unique
+  event      String
+  saleId     String   @default("")
+  createdAt  DateTime @default(now())
 }

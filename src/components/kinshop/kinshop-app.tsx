@@ -5,6 +5,7 @@ import { Landing } from "@/components/kinshop/landing"
 import { CreateWizard } from "@/components/kinshop/create-wizard"
 import { Dashboard } from "@/components/kinshop/dashboard"
 import { StoreView } from "@/components/kinshop/store-view"
+import { PremiumSuccess } from "@/components/kinshop/premium-success"
 import type { StoreData } from "@/lib/kinshop"
 
 type View =
@@ -12,14 +13,19 @@ type View =
   | { name: "create" }
   | { name: "dashboard"; slug: string }
   | { name: "store"; slug: string }
+  | { name: "premium-success" }
 
 const OWNER_KEY = "kinshop_owner_slug"
 const DEMO_SLUG = "maman-ngo"
 
-function parseHash(): { slug: string } | null {
+type HashTarget = { type: "store"; slug: string } | { type: "premium" } | null
+
+function parseHash(): HashTarget {
   if (typeof window === "undefined") return null
-  const m = window.location.hash.match(/^#\/boutique\/([a-z0-9-]+)/i)
-  return m ? { slug: m[1] } : null
+  const store = window.location.hash.match(/^#\/boutique\/([a-z0-9-]+)/i)
+  if (store) return { type: "store", slug: store[1] }
+  if (/^#\/premium\/succes/i.test(window.location.hash)) return { type: "premium" }
+  return null
 }
 
 export function KinShopApp() {
@@ -36,8 +42,9 @@ export function KinShopApp() {
       if (cancelled) return
       const saved = localStorage.getItem(OWNER_KEY)
       if (saved) setOwnerSlug(saved)
-      const hashStore = parseHash()
-      if (hashStore) setView({ name: "store", slug: hashStore.slug })
+      const hashTarget = parseHash()
+      if (hashTarget?.type === "store") setView({ name: "store", slug: hashTarget.slug })
+      else if (hashTarget?.type === "premium") setView({ name: "premium-success" })
       setHydrated(true)
     })()
     return () => {
@@ -45,7 +52,7 @@ export function KinShopApp() {
     }
   }, [])
 
-  // Synchroniser le hash avec la vue boutique (liens partageables)
+  // Synchroniser le hash avec la vue boutique / succès premium (liens partageables)
   useEffect(() => {
     if (!hydrated) return
     if (view.name === "store") {
@@ -53,7 +60,15 @@ export function KinShopApp() {
       if (window.location.hash !== target) {
         window.history.pushState(null, "", target)
       }
-    } else if (window.location.hash.startsWith("#/boutique/")) {
+    } else if (view.name === "premium-success") {
+      const target = "#/premium/succes"
+      if (window.location.hash !== target) {
+        window.history.pushState(null, "", target)
+      }
+    } else if (
+      window.location.hash.startsWith("#/boutique/") ||
+      window.location.hash.startsWith("#/premium/")
+    ) {
       window.history.replaceState(null, "", window.location.pathname)
     }
   }, [view, hydrated])
@@ -61,9 +76,13 @@ export function KinShopApp() {
   // Bouton retour navigateur pendant qu'on est dans une boutique
   useEffect(() => {
     const onPop = () => {
-      const hashStore = parseHash()
-      if (hashStore) setView({ name: "store", slug: hashStore.slug })
-      else setView((v) => (v.name === "store" ? { name: "landing" } : v))
+      const hashTarget = parseHash()
+      if (hashTarget?.type === "store") setView({ name: "store", slug: hashTarget.slug })
+      else if (hashTarget?.type === "premium") setView({ name: "premium-success" })
+      else
+        setView((v) =>
+          v.name === "store" || v.name === "premium-success" ? { name: "landing" } : v,
+        )
     }
     window.addEventListener("popstate", onPop)
     return () => window.removeEventListener("popstate", onPop)
@@ -85,6 +104,10 @@ export function KinShopApp() {
   }, [])
 
   const goHome = useCallback(() => setView({ name: "landing" }), [])
+
+  const openDashboard = useCallback((slug: string) => {
+    setView({ name: "dashboard", slug })
+  }, [])
 
   // Préchargement silencieux de la démo pour éviter l'écran vide si non seedée
   const openDemo = useCallback(async () => {
@@ -108,13 +131,15 @@ export function KinShopApp() {
       return <Dashboard slug={view.slug} onBack={goHome} onViewStore={openStore} />
     case "store":
       return <StoreView slug={view.slug} onBack={goHome} />
+    case "premium-success":
+      return <PremiumSuccess ownerSlug={ownerSlug} onGoDashboard={openDashboard} onGoHome={goHome} />
     default:
       return (
         <Landing
           ownerSlug={ownerSlug}
           onCreateStore={() => setView({ name: "create" })}
           onDemo={openDemo}
-          onOpenDashboard={(slug) => setView({ name: "dashboard", slug })}
+          onOpenDashboard={openDashboard}
         />
       )
   }

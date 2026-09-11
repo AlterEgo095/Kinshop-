@@ -6,6 +6,7 @@ import {
   ArrowLeft,
   CheckCircle2,
   Copy,
+  Crown,
   ExternalLink,
   Loader2,
   MessageCircle,
@@ -14,6 +15,7 @@ import {
   Settings,
   Share2,
   ShoppingCart,
+  Sparkles,
   Trash2,
   XCircle,
   PackageCheck,
@@ -65,6 +67,7 @@ import {
   type ProductData,
   type StoreData,
 } from "@/lib/kinshop"
+import { StatusStudio } from "@/components/kinshop/status-studio"
 
 interface DashboardProps {
   slug: string
@@ -74,6 +77,7 @@ interface DashboardProps {
 
 const STATUS_CONFIG: Record<OrderStatus, { label: string; variant: "default" | "secondary" | "destructive" | "outline"; className: string }> = {
   new: { label: "Nouvelle", variant: "outline", className: "bg-amber-100 text-amber-800 border-amber-300" },
+  paid: { label: "Payée en ligne", variant: "outline", className: "bg-emerald-50 text-emerald-700 border-emerald-400" },
   confirmed: { label: "Confirmée", variant: "outline", className: "bg-emerald-100 text-emerald-800 border-emerald-300" },
   delivered: { label: "Livrée", variant: "default", className: "bg-emerald-600 text-white border-emerald-600" },
   cancelled: { label: "Annulée", variant: "destructive", className: "" },
@@ -106,6 +110,16 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
   const [sEmoji, setSEmoji] = useState("🛍️")
   const [savingSettings, setSavingSettings] = useState(false)
   const [copied, setCopied] = useState(false)
+
+  // Premium Chariow
+  const [premiumOpen, setPremiumOpen] = useState(false)
+  const [simOpen, setSimOpen] = useState(false)
+  const [premEmail, setPremEmail] = useState("")
+  const [premFirst, setPremFirst] = useState("")
+  const [premLast, setPremLast] = useState("")
+  const [premPhone, setPremPhone] = useState("")
+  const [submitting, setSubmitting] = useState(false)
+  const [simPaying, setSimPaying] = useState(false)
 
   const loadOrders = useCallback(async () => {
     try {
@@ -257,6 +271,84 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
     }
   }
 
+  const refreshStore = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/stores?slug=${encodeURIComponent(slug)}`)
+      const data = await res.json()
+      if (res.ok) setStore(data.store)
+    } catch {
+      // silencieux
+    }
+  }, [slug])
+
+  const openPremiumDialog = (open: boolean) => {
+    setPremiumOpen(open)
+    if (open && store) {
+      // Pré-remplissage avec les infos de la boutique
+      if (!premFirst) {
+        const parts = store.ownerName.trim().split(/\s+/)
+        setPremFirst(parts[0] || "")
+        setPremLast(parts.slice(1).join(" "))
+      }
+      if (!premPhone) setPremPhone(formatPhoneDisplay(store.whatsapp))
+    }
+  }
+
+  const startPremiumCheckout = async () => {
+    if (!store) return
+    if (!premEmail.trim()) return toast.error("Ton email est requis.")
+    if (!premFirst.trim()) return toast.error("Ton prénom est requis.")
+    setSubmitting(true)
+    try {
+      const res = await fetch("/api/premium/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          slug: store.slug,
+          email: premEmail,
+          firstName: premFirst,
+          lastName: premLast,
+          phone: premPhone,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      if (data.mode === "live" && data.url) {
+        // Paiement réel Chariow (mobile money) — redirection
+        window.location.href = data.url
+      } else {
+        // Mode simulation
+        setPremiumOpen(false)
+        setSimOpen(true)
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur")
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const confirmSim = async () => {
+    if (!store) return
+    setSimPaying(true)
+    try {
+      const res = await fetch("/api/premium/simulate-confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slug: store.slug }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setSimOpen(false)
+      await refreshStore()
+      toast.success("Premium activé ! ✨ (paiement simulé)")
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur")
+    } finally {
+      setSimPaying(false)
+    }
+  }
+
   const contactClient = (order: OrderData) => {
     const msg = `Bonjour ${order.customerName} 👋\nC'est ${store?.name ?? "la boutique"} (KinShop).\nTa commande ${order.ref} d'un montant de ${formatFC(order.totalFC)} a bien été reçue !\nNous revenons vers toi très vite pour la livraison. 🚚`
     window.open(buildWhatsAppLink(order.customerPhone, msg), "_blank")
@@ -303,7 +395,15 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
               {store.logoEmoji}
             </div>
             <div className="min-w-0">
-              <p className="font-bold truncate leading-tight">{store.name}</p>
+              <div className="flex items-center gap-2">
+                <p className="font-bold truncate leading-tight">{store.name}</p>
+                {store.isPremium && (
+                  <Badge className="shrink-0 bg-amber-400 hover:bg-amber-400 text-amber-950 border-0 h-5 px-1.5 text-[10px] gap-0.5">
+                    <Crown className="w-3 h-3" />
+                    Premium
+                  </Badge>
+                )}
+              </div>
               <p className="text-xs text-muted-foreground truncate">kinshop.cd/{store.slug}</p>
             </div>
           </div>
@@ -345,6 +445,53 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
           ))}
         </div>
 
+        {/* Bandeau Premium Chariow */}
+        {!store.isPremium ? (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.15 }}
+            className="mb-6"
+          >
+            <div className="rounded-2xl border border-amber-300 bg-gradient-to-r from-amber-50 via-white to-emerald-50 p-4 md:p-5 flex flex-col sm:flex-row sm:items-center gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-amber-400 flex items-center justify-center shrink-0 shadow-md shadow-amber-200">
+                <Crown className="w-6 h-6 text-amber-950" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-bold">
+                  Passe en Premium — 3 $/mois{" "}
+                  <Badge className="ml-1 bg-emerald-600 hover:bg-emerald-600 text-[10px]">Paiement mobile money via Chariow</Badge>
+                </p>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  Badge vérifié ✨ mise en avant de ta boutique, priorité support WhatsApp et plus.
+                </p>
+              </div>
+              <Button onClick={() => openPremiumDialog(true)} className="shrink-0 bg-amber-500 hover:bg-amber-600 text-amber-950 font-bold">
+                <Crown className="w-4 h-4 mr-1" />
+                Activer Premium
+              </Button>
+            </div>
+          </motion.div>
+        ) : (
+          <div className="mb-6 rounded-2xl border border-emerald-300 bg-emerald-50/70 p-4 flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-400 flex items-center justify-center shrink-0">
+              <Crown className="w-5 h-5 text-amber-950" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-bold text-emerald-900 flex items-center gap-2">
+                Premium actif ✨
+                {store.premiumUntil && (
+                  <span className="text-xs font-medium text-emerald-700 bg-white border border-emerald-200 rounded-full px-2 py-0.5">
+                    jusqu&apos;au{" "}
+                    {new Date(store.premiumUntil).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}
+                  </span>
+                )}
+              </p>
+              <p className="text-xs text-muted-foreground">Paiements sécurisés via Chariow — merci de soutenir KinShop ! 💚</p>
+            </div>
+          </div>
+        )}
+
         <Tabs defaultValue="produits">
           <TabsList className="mb-5 h-11">
             <TabsTrigger value="produits" className="px-4">
@@ -357,6 +504,10 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
               {newOrders > 0 && (
                 <Badge className="ml-2 h-5 px-1.5 bg-amber-500 hover:bg-amber-500">{newOrders}</Badge>
               )}
+            </TabsTrigger>
+            <TabsTrigger value="statut" className="px-4">
+              <Sparkles className="w-4 h-4 mr-1.5 text-amber-500" />
+              Statut
             </TabsTrigger>
             <TabsTrigger value="reglages" className="px-4">
               <Settings className="w-4 h-4 mr-1.5" />
@@ -505,6 +656,11 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
             )}
           </TabsContent>
 
+          {/* ─── STATUT (image WhatsApp) ─── */}
+          <TabsContent value="statut">
+            <StatusStudio store={store} storeLink={storeLink} />
+          </TabsContent>
+
           {/* ─── RÉGLAGES ─── */}
           <TabsContent value="reglages">
             <Card className="max-w-2xl">
@@ -636,6 +792,96 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
               </p>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog : formulaire Premium */}
+      <Dialog open={premiumOpen} onOpenChange={openPremiumDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Crown className="w-5 h-5 text-amber-500" />
+              Passer Premium — 3 $/mois
+            </DialogTitle>
+            <DialogDescription>
+              Paiement sécurisé par mobile money via Chariow (M-Pesa, Airtel Money, Orange Money).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Email *</Label>
+              <Input
+                type="email"
+                placeholder="toi@exemple.com"
+                value={premEmail}
+                onChange={(e) => setPremEmail(e.target.value)}
+                maxLength={120}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Prénom *</Label>
+                <Input value={premFirst} onChange={(e) => setPremFirst(e.target.value)} maxLength={50} />
+              </div>
+              <div className="space-y-2">
+                <Label>Nom</Label>
+                <Input value={premLast} onChange={(e) => setPremLast(e.target.value)} maxLength={50} />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Téléphone (mobile money) *</Label>
+              <Input placeholder="0812345678" value={premPhone} onChange={(e) => setPremPhone(e.target.value)} maxLength={20} />
+            </div>
+            <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 text-xs text-muted-foreground">
+              Tu recevras une notification sur ton téléphone pour valider le paiement avec ton code PIN.
+              Ton Premium s&apos;active automatiquement dès confirmation.
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPremiumOpen(false)}>
+              Annuler
+            </Button>
+            <Button onClick={startPremiumCheckout} disabled={submitting} className="bg-amber-500 hover:bg-amber-600 text-amber-950 font-bold">
+              {submitting ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Crown className="w-4 h-4 mr-1" />}
+              Payer 3 $/mois
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog : paiement simulé (mode démo sans clés Chariow) */}
+      <Dialog open={simOpen} onOpenChange={setSimOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-amber-500" />
+              Paiement Chariow (démo)
+            </DialogTitle>
+            <DialogDescription>
+              Les clés Chariow ne sont pas encore configurées — on simule l&apos;étape de paiement mobile
+              money pour tester le parcours complet.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-2xl border bg-muted/50 p-4 space-y-3 text-center">
+            <p className="text-4xl">📱</p>
+            <p className="text-sm">
+              Sur ton téléphone, une notification <strong>M-Pesa / Airtel / Orange</strong> te demanderait
+              de valider <strong>3 $</strong> avec ton code PIN.
+            </p>
+          </div>
+          <DialogFooter className="flex-col gap-2 sm:flex-col">
+            <Button onClick={confirmSim} disabled={simPaying} className="w-full">
+              {simPaying ? (
+                <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+              ) : (
+                <CheckCircle2 className="w-4 h-4 mr-1" />
+              )}
+              Simuler la validation du paiement
+            </Button>
+            <Button variant="ghost" className="w-full" onClick={() => setSimOpen(false)}>
+              Annuler
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

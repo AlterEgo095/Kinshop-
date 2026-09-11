@@ -41,3 +41,26 @@ Stage Summary:
 - Base de données : db/custom.db (SQLite), 2 boutiques (maman-ngo démo avec 12 produits/3 commandes ; jm-electronique de test avec 2 produits).
 - Artifacts : prisma/schema.prisma, src/lib/kinshop.ts, src/app/api/{stores,products,orders}/route.ts, src/components/kinshop/{kinshop-app,landing,create-wizard,dashboard,store-view}.tsx, public/images/hero-kinshop.png, scripts/seed-kinshop.ts.
 - Piste V2 : intégration paiement mobile money réel, domaines perso, stats avancées, partage image statut WhatsApp générée.
+
+---
+Task ID: 2
+Agent: Z.ai Code (principal)
+Task: Intégration paiement réel Chariow (mobile money) + générateur d'image statut WhatsApp
+
+Work Log:
+- Identification du service : « Charow » = Chariow (chariow.com), plateforme e-commerce créateurs africains. Docs API lues via llms.txt Mintlify : init checkout (POST api.chariow.com/v1/checkout, Bearer sk_live_), réponse data.payment.checkout_url, webhooks « Pulses » (HMAC-SHA256 du raw body, secret whsec_, x-chariow-signature, idempotence x-pulse-delivery-id, event successful.sale, payload sale.custom_metadata).
+- Prisma : Store +isPremium/premiumUntil/chariowEmail/chariowPhone/chariowSaleId ; nouvelle table PulseDelivery (deliveryId unique pour l'idempotence). db:push OK.
+- src/lib/chariow.ts : getChariowConfig (.env : CHARIOW_API_KEY/CHARIOW_PRODUCT_ID/CHARIOW_PULSE_SECRET/APP_URL), isChariowLive, initiateCheckout (custom_metadata max 10 clés, phone {number, country_code:"CD"}), verifyPulseSignature (HMAC timingSafeEqual sur raw body), buildPremiumRedirectUrl.
+- API routes : POST /api/premium/checkout (validation email/tél, mémorise facturation, mode live → checkout_url Chariow, mode sim sinon), POST /api/premium/simulate-confirm (refusé 403 si clés configurées, active premium +30j prolongeable), POST /api/chariow/pulse (signature HMAC obligatoire → 401, idempotence, successful.sale : store_slug → premium +30j prolongé depuis la fin actuelle ; order_ref → commande status "paid"). GET /api/stores assaini (champs chariow masqués).
+- Types : OrderStatus + "paid", StoreData +isPremium/premiumUntil.
+- Statut Studio (src/components/kinshop/status-studio.tsx) : canvas 1080×1920, 3 fonds IA générés (public/status/fond-1/2/3.png, 768×1344, cover), voile dégradé, badge « Propulsé par KinShop », pastille emoji, nom boutique (wrap 2 lignes), slogan, pastille WhatsApp, carte QR (lib qrcode, vert #065f46), footer prix FC/USD + mobile money. Download PNG (toBlob) + navigator.share avec fichier. Layout vertical recalculé pour zéro chevauchement (vérifié en pleine résolution via export toDataURL).
+- Dashboard : bandeau Premium (CTA ambre si non premium / carte active + date si premium), badge couronne header, onglet « Statut », dialogs formulaire premium (pré-rempli ownerName/whatsapp) + paiement simulé, refreshStore, STATUS_CONFIG + paid « Payée en ligne ».
+- Router : vue premium-success + deep-link #/premium/succes (parseHash HashTarget union, hash sync, popstate).
+- PremiumSuccess : fetch état réel, écran « Bienvenue chez les Premium » avec date d'expiration, ou état « en attente de confirmation » avec bouton vérifier.
+- .env : config Chariow documentée (valeurs vides par défaut → mode simulation). README à jour.
+- Tests E2E Agent Browser : landing OK, session vendeur démo, dialog premium pré-rempli, checkout sim → dialog simulation → activation (badge Crown + bandeau « Premium actif jusqu'au 11 octobre 2026 »), statut studio rendu parfait, webhook testé via curl : signature valide → premium prolongé 11/10→10/11/2026 + chariowSaleId enregistré, duplicate → duplicate:true, signature invalide → 401, order_ref KIN-DEMO01 → status paid (vérifié en DB). Vue succès avec données réelles. Mobile 375px OK. Lint propre. Démo réinitialisée après tests.
+
+Stage Summary:
+- Parcours de paiement complet opérationnel en mode simulation ; passage en réel par simple remplissage de CHARIOW_API_KEY + CHARIOW_PRODUCT_ID (+ APP_URL, + Pulse whsec_ vers /api/chariow/pulse dans le dashboard Chariow).
+- Boucle virale renforcée : image statut QR code générée en 1 clic, téléchargeable/partageable, prête pour le statut WhatsApp.
+- Sécurité webhook : HMAC strict sur raw body + idempotence DB. Aucune donnée Chariow exposée côté public.

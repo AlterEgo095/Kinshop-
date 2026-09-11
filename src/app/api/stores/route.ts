@@ -64,7 +64,9 @@ export async function GET(req: NextRequest) {
     })
     if (!store) return NextResponse.json({ error: "Boutique introuvable." }, { status: 404 })
 
-    return NextResponse.json({ store })
+    // Réponse publique : on masque les champs internes Chariow
+    const { chariowEmail, chariowPhone, chariowSaleId, ...publicStore } = store
+    return NextResponse.json({ store: publicStore })
   } catch (e) {
     console.error("GET /api/stores", e)
     return NextResponse.json({ error: "Erreur serveur." }, { status: 500 })

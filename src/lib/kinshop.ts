@@ -20,7 +20,7 @@ export interface OrderItem {
 }
 
 export type PaymentMethod = "mpesa" | "airtel" | "orange" | "cash"
-export type OrderStatus = "new" | "confirmed" | "delivered" | "cancelled"
+export type OrderStatus = "new" | "paid" | "confirmed" | "delivered" | "cancelled"
 
 export interface OrderData {
   id: string
@@ -49,6 +49,8 @@ export interface StoreData {
   logoEmoji: string
   colorTheme: string
   rateFC: number
+  isPremium: boolean
+  premiumUntil: string | null
   createdAt: string
   products?: ProductData[]
   orders?: OrderData[]
