@@ -53,7 +53,8 @@ export function PwaLayer({ visible = true }: { visible?: boolean }) {
   useEffect(() => {
     const onBeforeInstall = (e: Event) => {
       e.preventDefault()
-      setDeferredPrompt(e as BeforeInstallPromptEvent)
+      // L'utilisateur a fermé la carte récemment : on ne la ré-affiche pas (7 j)
+      if (!recentlyDismissed()) setDeferredPrompt(e as BeforeInstallPromptEvent)
     }
     const onInstalled = () => {
       setDeferredPrompt(null)
