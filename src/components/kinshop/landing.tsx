@@ -32,11 +32,12 @@ interface LandingProps {
   onCreateStore: () => void
   onDemo: () => void
   onOpenDashboard: (slug: string) => void
+  onAdmin: () => void
 }
 
 const DEMO_SLUG = "maman-ngo"
 
-export function Landing({ ownerSlug, onCreateStore, onDemo, onOpenDashboard }: LandingProps) {
+export function Landing({ ownerSlug, onCreateStore, onDemo, onOpenDashboard, onAdmin }: LandingProps) {
   return (
     <div className="min-h-screen flex flex-col bg-background">
       {/* Header sticky */}
@@ -459,7 +460,16 @@ export function Landing({ ownerSlug, onCreateStore, onDemo, onOpenDashboard }: L
           <p className="text-sm text-muted-foreground text-center">
             Fait avec ❤️ à Kinshasa pour les entrepreneurs de la RDC
           </p>
-          <p className="text-xs text-muted-foreground">© 2025 KinShop · M-Pesa, Airtel Money et Orange Money sont des marques de leurs propriétaires</p>
+          <div className="flex flex-col items-center sm:items-end gap-1">
+            <p className="text-xs text-muted-foreground">© 2025 KinShop · M-Pesa, Airtel Money et Orange Money sont des marques de leurs propriétaires</p>
+            <button
+              onClick={onAdmin}
+              className="text-[11px] text-muted-foreground/50 hover:text-foreground transition-colors underline underline-offset-2"
+              aria-label="Accéder à la console d'administration"
+            >
+              Espace admin
+            </button>
+          </div>
         </div>
       </footer>
     </div>

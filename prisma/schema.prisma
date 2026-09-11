@@ -27,6 +27,8 @@ model Store {
   chariowEmail String   @default("")
   chariowPhone String   @default("")
   chariowSaleId String  @default("")
+  // Statut de modération (console admin)
+  status      String    @default("active") // active | suspended
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   products    Product[]
@@ -72,4 +74,20 @@ model PulseDelivery {
   event      String
   saleId     String   @default("")
   createdAt  DateTime @default(now())
+}
+
+// Paramètres globaux de la plateforme (console admin)
+model PlatformSetting {
+  key       String   @id
+  value     String   @default("")
+  updatedAt DateTime @updatedAt
+}
+
+// Journal d'audit des actions administrateur
+model AdminAction {
+  id        String   @id @default(cuid())
+  action    String
+  target    String
+  detail    String   @default("")
+  createdAt DateTime @default(now())
 }

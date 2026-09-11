@@ -81,21 +81,40 @@ src/
 │   ├── create-wizard.tsx     # Assistant création boutique (3 étapes)
 │   ├── dashboard.tsx         # Tableau de bord vendeur
 │   ├── store-view.tsx        # Boutique publique + panier + checkout
+│   ├── status-studio.tsx     # Générateur d'image statut WhatsApp (QR code)
+│   ├── admin-console.tsx     # Console d'administration (#/admin, PIN)
 │   └── kinshop-app.tsx       # Routeur à états + deep-linking
 └── lib/
-    └── kinshop.ts            # Helpers : format FC/USD, liens WhatsApp, slugs
-prisma/schema.prisma          # Models : Store, Product, Order
+    ├── kinshop.ts            # Helpers : format FC/USD, liens WhatsApp, slugs
+    └── chariow.ts            # Checkout + webhook Chariow (Pulses)
+prisma/schema.prisma          # Models : Store, Product, Order, PulseDelivery, PlatformSetting, AdminAction
 ```
+
+## 🛡️ Console d'administration
+
+Accessible via le lien discret « Espace admin » en pied de page ou directement sur `#/admin` :
+
+- **Authentification par PIN** (`ADMIN_PIN` dans `.env`, par défaut `243243` en démo)
+- **Vue d'ensemble** : KPIs temps réel (boutiques, premium, GMV), graphique des commandes sur 14 jours, répartition des moyens de paiement, top boutiques, alertes premium expirants
+- **Boutiques** : recherche/filtres, suspendre · réactiver, accorder/révoquer le Premium (+30 j/+90 j/+1 an), contact WhatsApp propriétaire, suppression cascade
+- **Commandes** : filtres, changement de statut, détail complet, contact client, suppression
+- **Produits** : filtres par boutique/catégorie, ajustement du stock, suppression
+- **Paramètres plateforme** : mode maintenance global, bandeau d'annonce (affiché sur toutes les boutiques), taux FC/USD par défaut des nouvelles boutiques
+- **Journaux** : audit de toutes les actions admin + livraisons des webhooks Chariow (Pulses)
 
 ## 🔒 Points de sécurité
 
 - Les **totaux des commandes sont recalculés côté serveur** à partir de la base de données (jamais de confiance aux prix envoyés par le client)
 - Numéros de téléphone normalisés au format international `+243`
 - Slug de boutique unique et validé côté API
+- Console admin protégée par **PIN vérifié côté serveur** sur chaque requête (`x-admin-pin`), avec **journal d'audit** de toutes les actions
+- Webhooks Chariow signés **HMAC-SHA256** + idempotence en base
 
 ## 🗺️ Roadmap
 
-- [ ] V2 : Paiement mobile money intégré (API opérateurs)
+- [x] ~~V2 : Paiement mobile money intégré~~ ✅ via Chariow (M-Pesa, Airtel Money, Orange Money)
+- [x] ~~V2 : Générateur d'image statut WhatsApp~~ ✅ Studio Statut avec QR code
+- [x] ~~V2 : Console d'administration plateforme~~ ✅ `#/admin`
 - [ ] V2 : Notifications commandes par SMS
 - [ ] V2 : Statistiques avancées (vues boutique, produits stars)
 - [ ] V3 : Générateur de CV Express RDC

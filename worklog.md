@@ -64,3 +64,43 @@ Stage Summary:
 - Parcours de paiement complet opérationnel en mode simulation ; passage en réel par simple remplissage de CHARIOW_API_KEY + CHARIOW_PRODUCT_ID (+ APP_URL, + Pulse whsec_ vers /api/chariow/pulse dans le dashboard Chariow).
 - Boucle virale renforcée : image statut QR code générée en 1 clic, téléchargeable/partageable, prête pour le statut WhatsApp.
 - Sécurité webhook : HMAC strict sur raw body + idempotence DB. Aucune donnée Chariow exposée côté public.
+
+---
+Task ID: 3
+Agent: Z.ai Code (principal)
+Task: Implémentation de la console d'administration (admin) gérant la globalité de la plateforme KinShop
+
+Work Log:
+- Schéma Prisma étendu : Store.status ("active"|"suspended", défaut "active") + 2 nouvelles tables PlatformSetting (key/value) et AdminAction (journal d'audit). `bun run db:push` OK.
+- src/lib/admin.ts (server-only) : getAdminPin (env ADMIN_PIN, défaut démo 243243), guardAdmin/isAdminRequest (header x-admin-pin), adminUnauthorized, logAdminAction (audit non bloquant), getPlatformSettings/setPlatformSetting (maintenance, announcement, defaultRateFC).
+- 7 nouvelles routes API /api/admin/* toutes protégées par PIN serveur : auth (POST, valide + journalise la connexion), overview (GET : KPIs, série 14 j, byPayment, topStores, recentOrders/Stores, expiringPremium, GMV, webhooks), stores (GET filtres q/status/premium + compteurs & CA par boutique ; PATCH suspend|activate|grant-premium (30/90/365 j cumulables)|revoke-premium ; DELETE cascade), orders (GET filtres, PATCH statut, DELETE), products (GET filtres, PATCH stock/prix, DELETE), settings (GET/PATCH avec journalisation), logs (?type=pulse|audit). Bug corrigé en cours de route : variable day7 non définie dans overview (500) → fix + redémarrage serveur.
+- Nouvelle route publique GET /api/platform : { maintenance, announcement } — consommée par la boutique publique.
+- POST /api/stores : le taux FC par défaut des nouvelles boutiques vient maintenant de PlatformSetting.defaultRateFC (paramétrable depuis l'admin).
+- store-view.tsx : fetch parallèle /api/platform → écran « Boutique indisponible » si status=suspended, écran « KinShop en maintenance » si maintenance=on, bandeau ambre d'annonce globale au-dessus du header. StoreData +status.
+- kinshop-app.tsx : vue "admin" + deep-link #/admin (parseHash, hash sync, popstate) — cohérent avec les deep-links boutique/premium existants.
+- landing.tsx : lien discret « Espace admin » dans le footer (onAdmin prop).
+- admin-console.tsx (~1600 lignes) : écran login PIN (auto-vérification de session localStorage kinshop_admin_pin, hint PIN démo), onglets : Vue d'ensemble (6 KPI cards + alerte premium expirant < 7 j + graphique barres commandes 14 j + répartition paiements + top boutiques cliquables + dernières commandes/boutiques), Boutiques (recherche debouncée, filtres statut/premium, dropdown Actions complet), Commandes (filtres, Select statut inline, dialogue détail avec items JSON parsés + contact WhatsApp client), Produits (filtres boutique/catégorie, stepper stock +/− avec commit onBlur, suppression), Paramètres (switch maintenance avec avertissement, annonce 280 car., taux FC, journal d'audit + webhooks Chariow en ScrollArea). Tous les écritures → maj optimiste locale + toast + entrée d'audit.
+- .env : ADMIN_PIN=243243 documenté. README : section « Console d'administration » + sécurité + roadmap à jour.
+- scripts/seed-admin-demo.ts (additif, idempotent, exécuté) : 3 boutiques (Diva Mode Kin premium exp. +20 j→ajusté +5 j pour l'alerte, Kin Tech Gadgets premium, Frais & Bon Kin gratuite), 27 produits, 32 commandes KIN-ADMxxx réparties sur 14 jours (statuts/paiements variés), PlatformSetting par défaut, audit initial. Total DB : 5 boutiques · 27 produits · 35 commandes.
+- Tests E2E Agent Browser complets : login mauvais PIN (erreur affichée) → login 243243 OK ; KPIs exacts (5/2/27/24/$749) ; alerte Diva Mode expirant ; suspension Frais & Bon Kin (toast + KPI Suspendues=1 + écran public « Boutique indisponible » vérifié) puis réactivation ; détail commande KIN-ADM008 + statut → Livrée (synchronisé dialog+table+toast) ; stock 25→26 (audit enregistré) ; annonce publiée → bandeau ambre visible sur #/boutique/maman-ngo ; maintenance ON → écran public vérifié → OFF ; annonce vidée ; reload #/admin (session persistée) ; lien footer « Espace admin » → console ; mobile 375px OK (KPIs 2 col., tabs scrollables, tableaux scroll horizontal) ; logout OK. Session à froid : console navigateur propre (artefact HMR radis IDs seulement, connu). Lint final : 0 erreur.
+- Réglages remis à l'état neutre après tests (maintenance off, annonce vide, taux 2850).
+
+Stage Summary:
+- La Console Admin ( accessible via #/admin ou le lien footer, PIN 243243 par défaut modifiable via ADMIN_PIN) gère la globalité de KinShop : KPIs plateforme, modération des boutiques (suspend/réactiver/supprimer), gestion Premium manuelle (+30/90/365 j ou révocation), supervision de toutes les commandes et produits, maintenance globale, annonces, taux de change par défaut, journal d'audit intégral et suivi des webhooks Chariow.
+- Décisions clés : auth par PIN simple (header x-admin-pin vérifié à CHAQUE requête serveur, jamais de role en base — une vraie table AdminUser avec hash pourrait remplacer plus tard), audit log systématique côté serveur, actions admin jamais exposées côté vendeur/public (status=suspended géré par la vue publique), maintenance/annonce centralisées dans PlatformSetting.
+- Artifacts : prisma/schema.prisma (Store.status, PlatformSetting, AdminAction), src/lib/admin.ts, src/app/api/admin/{auth,overview,stores,orders,products,settings,logs}/route.ts, src/app/api/platform/route.ts, src/components/kinshop/admin-console.tsx, scripts/seed-admin-demo.ts, README.md mis à jour.
+
+---
+Task ID: 4
+Agent: Z.ai Code (principal)
+Task: Publication sur GitHub du commit contenant la console d'administration
+
+Work Log:
+- État vérifié : branche main en avance de 1 sur origin/main — commit local 83f880c (message UUID auto-généré) contenant l'intégralité de la console admin (19 fichiers, +3055 lignes) ; working tree propre ; Chariow + Statut Studio déjà poussés (d192682).
+- Vérification navigateur post-session : landing rendue OK, #/admin → login PIN 243243 OK, Vue d'ensemble avec KPIs exacts (5 boutiques, 2 premium, 27 produits, 35 commandes, $749 GMV), alerte premium expirant, graphique 14 j, répartition paiements — zéro erreur page/console.
+- Message de commit amendé (UUID → message descriptif « feat: console d'administration globale ») avec worklog inclus.
+- Push effectué sur origin/main via URL inline avec PAT (aucune persistance du token dans .git/config ou ~/.git-credentials).
+
+Stage Summary:
+- origin/main synchronisé avec la V1 complète : boutiques WhatsApp + Chariow premium + Statut Studio + console admin.
+- Rappel sécurité : PAT affiché en clair dans le chat → à révoquer depuis GitHub Settings après usage.

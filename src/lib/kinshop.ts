@@ -51,6 +51,7 @@ export interface StoreData {
   rateFC: number
   isPremium: boolean
   premiumUntil: string | null
+  status: string
   createdAt: string
   products?: ProductData[]
   orders?: OrderData[]

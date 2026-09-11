@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { slugify } from "@/lib/kinshop"
+import { getPlatformSettings } from "@/lib/admin"
 
 // POST /api/stores — Créer une boutique
 export async function POST(req: NextRequest) {
@@ -32,6 +33,9 @@ export async function POST(req: NextRequest) {
       slug = `${base}-${i}`
     }
 
+    // Taux FC par défaut : paramétrable depuis la console admin (PlatformSetting)
+    const settings = await getPlatformSettings()
+
     const store = await db.store.create({
       data: {
         slug,
@@ -41,7 +45,7 @@ export async function POST(req: NextRequest) {
         description: String(body.description || "").slice(0, 300),
         city: String(body.city || "Kinshasa"),
         logoEmoji: String(body.logoEmoji || "🛍️").slice(0, 8),
-        rateFC: Number(body.rateFC) > 0 ? Number(body.rateFC) : 2850,
+        rateFC: Number(body.rateFC) > 0 ? Number(body.rateFC) : settings.defaultRateFC,
       },
     })
 

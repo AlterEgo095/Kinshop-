@@ -6,6 +6,7 @@ import { CreateWizard } from "@/components/kinshop/create-wizard"
 import { Dashboard } from "@/components/kinshop/dashboard"
 import { StoreView } from "@/components/kinshop/store-view"
 import { PremiumSuccess } from "@/components/kinshop/premium-success"
+import { AdminConsole } from "@/components/kinshop/admin-console"
 import type { StoreData } from "@/lib/kinshop"
 
 type View =
@@ -14,17 +15,19 @@ type View =
   | { name: "dashboard"; slug: string }
   | { name: "store"; slug: string }
   | { name: "premium-success" }
+  | { name: "admin" }
 
 const OWNER_KEY = "kinshop_owner_slug"
 const DEMO_SLUG = "maman-ngo"
 
-type HashTarget = { type: "store"; slug: string } | { type: "premium" } | null
+type HashTarget = { type: "store"; slug: string } | { type: "premium" } | { type: "admin" } | null
 
 function parseHash(): HashTarget {
   if (typeof window === "undefined") return null
   const store = window.location.hash.match(/^#\/boutique\/([a-z0-9-]+)/i)
   if (store) return { type: "store", slug: store[1] }
   if (/^#\/premium\/succes/i.test(window.location.hash)) return { type: "premium" }
+  if (/^#\/admin/i.test(window.location.hash)) return { type: "admin" }
   return null
 }
 
@@ -45,6 +48,7 @@ export function KinShopApp() {
       const hashTarget = parseHash()
       if (hashTarget?.type === "store") setView({ name: "store", slug: hashTarget.slug })
       else if (hashTarget?.type === "premium") setView({ name: "premium-success" })
+      else if (hashTarget?.type === "admin") setView({ name: "admin" })
       setHydrated(true)
     })()
     return () => {
@@ -65,9 +69,15 @@ export function KinShopApp() {
       if (window.location.hash !== target) {
         window.history.pushState(null, "", target)
       }
+    } else if (view.name === "admin") {
+      const target = "#/admin"
+      if (window.location.hash !== target) {
+        window.history.pushState(null, "", target)
+      }
     } else if (
       window.location.hash.startsWith("#/boutique/") ||
-      window.location.hash.startsWith("#/premium/")
+      window.location.hash.startsWith("#/premium/") ||
+      window.location.hash.startsWith("#/admin")
     ) {
       window.history.replaceState(null, "", window.location.pathname)
     }
@@ -79,9 +89,12 @@ export function KinShopApp() {
       const hashTarget = parseHash()
       if (hashTarget?.type === "store") setView({ name: "store", slug: hashTarget.slug })
       else if (hashTarget?.type === "premium") setView({ name: "premium-success" })
+      else if (hashTarget?.type === "admin") setView({ name: "admin" })
       else
         setView((v) =>
-          v.name === "store" || v.name === "premium-success" ? { name: "landing" } : v,
+          v.name === "store" || v.name === "premium-success" || v.name === "admin"
+            ? { name: "landing" }
+            : v,
         )
     }
     window.addEventListener("popstate", onPop)
@@ -133,6 +146,8 @@ export function KinShopApp() {
       return <StoreView slug={view.slug} onBack={goHome} />
     case "premium-success":
       return <PremiumSuccess ownerSlug={ownerSlug} onGoDashboard={openDashboard} onGoHome={goHome} />
+    case "admin":
+      return <AdminConsole onBack={goHome} onOpenStore={openStore} />
     default:
       return (
         <Landing
@@ -140,6 +155,7 @@ export function KinShopApp() {
           onCreateStore={() => setView({ name: "create" })}
           onDemo={openDemo}
           onOpenDashboard={openDashboard}
+          onAdmin={() => setView({ name: "admin" })}
         />
       )
   }

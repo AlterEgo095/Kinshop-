@@ -61,6 +61,10 @@ export function StoreView({ slug, onBack }: StoreViewProps) {
   const [store, setStore] = useState<StoreData | null>(null)
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
+  const [platform, setPlatform] = useState<{ maintenance: boolean; announcement: string }>({
+    maintenance: false,
+    announcement: "",
+  })
 
   const [search, setSearch] = useState("")
   const [category, setCategory] = useState<string>("Tout")
@@ -82,10 +86,19 @@ export function StoreView({ slug, onBack }: StoreViewProps) {
     let cancelled = false
     ;(async () => {
       try {
-        const res = await fetch(`/api/stores?slug=${encodeURIComponent(slug)}`)
-        const data = await res.json()
+        const [resStore, resPlatform] = await Promise.all([
+          fetch(`/api/stores?slug=${encodeURIComponent(slug)}`),
+          fetch("/api/platform"),
+        ])
+        const [data, dataPlatform] = await Promise.all([resStore.json(), resPlatform.json().catch(() => null)])
         if (cancelled) return
-        if (!res.ok) setFailed(true)
+        if (dataPlatform && typeof dataPlatform.maintenance === "boolean") {
+          setPlatform({
+            maintenance: dataPlatform.maintenance,
+            announcement: dataPlatform.announcement || "",
+          })
+        }
+        if (!resStore.ok) setFailed(true)
         else setStore(data.store)
       } catch {
         if (!cancelled) setFailed(true)
@@ -208,10 +221,51 @@ export function StoreView({ slug, onBack }: StoreViewProps) {
     )
   }
 
+  // Boutique suspendue par l'administration de la plateforme
+  if (store.status === "suspended") {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4">
+        <div className="text-center space-y-4 max-w-md">
+          <p className="text-6xl">⛔</p>
+          <h1 className="text-2xl font-bold">Boutique indisponible</h1>
+          <p className="text-muted-foreground">
+            Cette boutique a été temporairement désactivée par l&apos;équipe KinShop. Si tu es le propriétaire,
+            contacte le support pour la réactiver.
+          </p>
+          <Button onClick={onBack}>Aller sur KinShop</Button>
+        </div>
+      </div>
+    )
+  }
+
+  // Mode maintenance global de la plateforme
+  if (platform.maintenance) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4">
+        <div className="text-center space-y-4 max-w-md">
+          <p className="text-6xl">🛠️</p>
+          <h1 className="text-2xl font-bold">KinShop en maintenance</h1>
+          <p className="text-muted-foreground">
+            La plateforme est momentanément en maintenance. Reviens dans quelques minutes — toutes les
+            boutiques seront de retour très vite&nbsp;!
+          </p>
+          <Button onClick={onBack}>Retour à l&apos;accueil</Button>
+        </div>
+      </div>
+    )
+  }
+
   const rate = store.rateFC
 
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-b from-emerald-50/50 to-background pb-24">
+      {/* Bandeau d'annonce globale (console admin) */}
+      {platform.announcement && (
+        <div className="bg-amber-100 border-b border-amber-200 text-amber-900 text-sm px-4 py-2.5 text-center font-medium">
+          📣 {platform.announcement}
+        </div>
+      )}
+
       {/* Barre supérieure */}
       <header className="border-b bg-background/80 backdrop-blur-md sticky top-0 z-30">
         <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
