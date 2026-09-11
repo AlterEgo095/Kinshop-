@@ -368,11 +368,11 @@ export function buildOrderMessage(params: {
   }
   lines.push("━━━━━━━━━━━━━━━━")
   // V6 — remise et livraison détaillées avant le total
-  if (params.discountUSD > 0) {
-    lines.push(`🏷️ Code ${params.couponCode || "PROMO"} : −${formatUSD(params.discountUSD)}`)
+  if ((params.discountUSD ?? 0) > 0) {
+    lines.push(`🏷️ Code ${params.couponCode || "PROMO"} : −${formatUSD(params.discountUSD ?? 0)}`)
   }
-  if (params.deliveryFeeFC > 0) {
-    lines.push(`🚚 Livraison : ${formatFC(params.deliveryFeeFC)}`)
+  if ((params.deliveryFeeFC ?? 0) > 0) {
+    lines.push(`🚚 Livraison : ${formatFC(params.deliveryFeeFC ?? 0)}`)
   }
   lines.push(`💰 TOTAL : ${formatUSD(params.totalUSD)} (${formatFC(params.totalFC)})`)
   lines.push(`💳 Paiement : ${PAYMENT_LABELS[params.paymentMethod]}`)

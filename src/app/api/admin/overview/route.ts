@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
   if (denied) return denied
 
   try {
-    const [stores, productsCount, orders, pulseCount] = await Promise.all([
+    const [stores, productsCount, orders, pulseCount, invoicesTotal, reviewsTotal, reviewsHidden, couponsTotal, couponsActive, visitsAgg] = await Promise.all([
       db.store.findMany({
         select: {
           id: true, slug: true, name: true, logoEmoji: true, ownerName: true,
@@ -28,6 +28,15 @@ export async function GET(req: NextRequest) {
         orderBy: { createdAt: "desc" },
       }),
       db.pulseDelivery.count(),
+      db.invoice.count(),
+      db.review.count(),
+      db.review.count({ where: { hidden: true } }),
+      db.coupon.count(),
+      db.coupon.count({ where: { active: true } }),
+      db.storeVisit.aggregate({
+        _sum: { count: true },
+        where: { day: { gte: new Date(Date.now() - 7 * 86400_000) } },
+      }),
     ])
 
     const now = Date.now()
@@ -151,6 +160,12 @@ export async function GET(req: NextRequest) {
       expiringPremium: expiringSoon,
       series,
       webhookDeliveries: pulseCount,
+      invoicesTotal,
+      reviewsTotal,
+      reviewsHidden,
+      couponsTotal,
+      couponsActive,
+      visitsLast7d: visitsAgg._sum.count ?? 0,
     })
   } catch (e) {
     console.error("GET /api/admin/overview", e)

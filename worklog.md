@@ -235,3 +235,24 @@ Stage Summary:
 - Décisions clés : prix total centré FC (devise d'affichage RDC) avec USD dérivé ; validation coupon autoritaire côté serveur au POST (la prévalidation checkout n'est qu'indicative) ; avis modérables par le vendeur avec badge « Commande vérifiée » ancré sur une vraie commande ; page suivi publique sans données sensibles ; domaine personnalisé toujours différé (prochaine étape possible).
 - Artifacts : prisma/schema.prisma, src/lib/kinshop.ts, src/app/api/{coupons,coupons/validate,delivery-zones,reviews,orders,orders/track}/route.ts, src/components/kinshop/{store-view,dashboard,kinshop-app,track-order}.tsx, scripts/seed-v6-demo.ts.
 - Rappel sécurité récurrent : le PAT GitHub affiché en clair dans le chat doit être révoqué (GitHub → Settings → Developer settings).
+
+---
+Task ID: 8
+Agent: Z.ai Code (principal)
+Task: Audit de complétude de la console d'administration + extension pour couvrir la totalité de la plateforme (dont fonctionnalités V6)
+
+Work Log:
+- Audit complet de l'existant : admin-console.tsx (5 onglets), 7 routes API /api/admin/* toutes protégées par guardAdmin (x-admin-pin), helpers src/lib/admin.ts (PIN via ADMIN_PIN, défaut 243243, journal d'audit logAdminAction).
+- Constat : l'admin datait de la V3 et ne couvrait PAS les nouveautés V6 — aucun onglet pour modérer les avis clients globalement, aucune vue des codes promo et zones de livraison, détail commande sans récap remise/livraison, overview sans KPIs factures/avis/coupons/visites.
+- Backend — nouvelle route /api/admin/reviews : GET (tous les avis + infos boutique, filtres q/storeId/hidden), PATCH (masquer/restaurer), DELETE — guardAdmin + logAdminAction sur chaque mutation.
+- Backend — nouvelle route /api/admin/growth : GET (coupons + zones avec infos boutique + stats agrégées), PATCH (activer/désactiver un code promo), DELETE (code promo) — guardAdmin + logAdminAction.
+- Backend — /api/admin/overview enrichi : invoicesTotal, reviewsTotal, reviewsHidden, couponsTotal, couponsActive, visitsLast7d (agrégat StoreVisit 7 j).
+- Frontend admin-console.tsx (2 383 lignes) : type AdminTab + "reviews"/"growth" ; interfaces AdminReviewRow/AdminCouponRow/AdminZoneRow/GrowthStats ; composant Stars (étoiles accessibles aria-label) ; loaders debounce 280 ms + storeOptions partagé ; onglet « Avis » (recherche, filtre boutique, filtre visibilité, badge « Vérifié », masquer/restaurer/supprimer avec dialogs de confirmation) ; onglet « Croissance » (codes promo : recherche, filtre boutique, remise couponLabel, condition, utilisations n/max, statut Actif/Épuisé/Désactivé, toggle + suppression ; zones de livraison en lecture seule avec badge « Configurées par les vendeurs ») ; KPIs V6 dans la Vue d'ensemble (Avis clients, Codes promo actifs, Factures KinFacture, Visites 7 j) ; détail commande enrichi du récap V6 (Sous-total, Remise CODE −$, Livraison zone + frais FC, Total) avec fallback zone legacy.
+- Correctif TS préexistant (V6) : buildOrderMessage — params.discountUSD/deliveryFeeFC optionnels gérés avec ?? 0 (3 erreurs TS18048/TS2345).
+- Vérification : lint 0 erreur, tsc 0 erreur (hors exemples skills/), API testées (401 sans PIN, données complètes avec PIN) ; Agent Browser E2E : login PIN → 7 onglets ; Vue d'ensemble avec KPIs V6 ; Avis : 6 avis, masquage Bosco T. → « Masqué » → restauration → « Visible », filtres Masqués=0/Visibles=6 ; Croissance : 2 coupons (NGOMA2 toggle Désactivé→Actif, BIENVENUE10), stats 2 actifs/2 utilisation(s), 6 zones actives ; détail KIN-I5C5NP avec récap exact ($10.68 − $1.05 + 500 FC = $9.63 / 27 432 FC) ; journal d'audit capture admin.login, review-hide, review-restore, coupon-deactivate, coupon-activate ; non-régression Boutiques (1) et Produits (12) ; mobile 375 px onglets Avis/Croissance avec table scrollable ; console navigateur et dev.log sans erreur.
+
+Stage Summary:
+- La console d'administration est AU COMPLET : elle couvre désormais 100 % des modèles de la plateforme — Boutiques (suspension/premium/suppression), Commandes (statuts, paiement, récap V6), Produits (stock, suppression), Avis (modération globale), Croissance (codes promo + zones), Paramètres (maintenance, annonce, taux, journaux audit + webhooks Chariow).
+- Décisions clés : modération admin des avis séparée de la modération vendeur (route PIN-guardée dédiée, traçée dans le journal d'audit) ; zones de livraison en lecture seule côté admin (domaine vendeur, visibilité plateforme suffisante) ; toggle coupon admin pour couper un code abusé sans le supprimer.
+- Artifacts : src/app/api/admin/{reviews,growth}/route.ts (nouveaux), src/app/api/admin/overview/route.ts (enrichi), src/components/kinshop/admin-console.tsx (2 nouveaux onglets + KPIs + récap commande), src/lib/kinshop.ts (fix TS optionnels).
+- Reste connu : /api/reviews PATCH/DELETE publics ne sont PAS authentifiés (choix de conception V6 : dashboard vendeur sans auth — à durcir si besoin un jour) ; PAT GitHub toujours à révoquer.

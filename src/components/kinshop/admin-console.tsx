@@ -13,6 +13,8 @@ import {
   Crown,
   ExternalLink,
   Eye,
+  EyeOff,
+  FileText,
   History,
   Loader2,
   Lock,
@@ -26,9 +28,12 @@ import {
   ShieldCheck,
   ShoppingBag,
   ShoppingCart,
+  Star,
   Store as StoreIcon,
+  Tag,
   Trash2,
   TrendingUp,
+  Truck,
   Wrench,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -83,10 +88,12 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   buildWhatsAppLink,
+  couponLabel,
   formatFC,
   formatPhoneDisplay,
   formatUSD,
   timeAgo,
+  type CouponType,
   type OrderStatus,
   type PaymentMethod,
 } from "@/lib/kinshop"
@@ -95,7 +102,14 @@ import {
 
 const PIN_KEY = "kinshop_admin_pin"
 
-type AdminTab = "overview" | "stores" | "orders" | "products" | "settings"
+type AdminTab =
+  | "overview"
+  | "stores"
+  | "orders"
+  | "products"
+  | "reviews"
+  | "growth"
+  | "settings"
 
 interface SeriesPoint {
   date: string
@@ -140,6 +154,13 @@ interface OverviewData {
   expiringPremium: { slug: string; name: string; emoji: string; premiumUntil: string }[]
   series: SeriesPoint[]
   webhookDeliveries: number
+  // V6 — Confiance & Croissance
+  invoicesTotal: number
+  reviewsTotal: number
+  reviewsHidden: number
+  couponsTotal: number
+  couponsActive: number
+  visitsLast7d: number
 }
 
 interface AdminStoreRow {
@@ -169,6 +190,11 @@ interface AdminOrderRow {
   customerName: string
   customerPhone: string
   zone: string
+  // V6 — récap commerce détaillé
+  couponCode: string
+  discountUSD: number
+  deliveryZone: string
+  deliveryFeeFC: number
   items: string
   totalUSD: number
   totalFC: number
@@ -201,6 +227,49 @@ interface StoreOption {
   slug: string
   name: string
   emoji: string
+}
+
+interface AdminReviewRow {
+  id: string
+  storeId: string
+  orderId: string
+  authorName: string
+  rating: number
+  comment: string
+  hidden: boolean
+  createdAt: string
+  store: { name: string; slug: string; logoEmoji: string }
+}
+
+interface AdminCouponRow {
+  id: string
+  storeId: string
+  code: string
+  type: string
+  value: number
+  minTotalUSD: number
+  maxUses: number
+  uses: number
+  active: boolean
+  createdAt: string
+  store: { name: string; slug: string; logoEmoji: string }
+}
+
+interface AdminZoneRow {
+  id: string
+  storeId: string
+  name: string
+  feeFC: number
+  active: boolean
+  store: { name: string; slug: string; logoEmoji: string }
+}
+
+interface GrowthStats {
+  couponsActive: number
+  couponsTotal: number
+  usesTotal: number
+  zonesActive: number
+  zonesTotal: number
 }
 
 interface SettingsData {
@@ -280,6 +349,20 @@ function parseItems(itemsJson: string): { name: string; qty: number; priceUSD: n
 }
 
 /* ─────────── Petits composants ─────────── */
+
+function Stars({ n, className = "" }: { n: number; className?: string }) {
+  const filled = Math.min(5, Math.max(1, Math.round(n)))
+  return (
+    <span
+      className={`text-amber-500 whitespace-nowrap tracking-tight ${className}`}
+      role="img"
+      aria-label={`${n} étoile(s) sur 5`}
+    >
+      {"★".repeat(filled)}
+      <span className="text-muted-foreground/40">{"★".repeat(5 - filled)}</span>
+    </span>
+  )
+}
 
 function OrderStatusBadge({ status }: { status: string }) {
   const meta = ORDER_STATUS_META[status as OrderStatus]
@@ -370,6 +453,25 @@ export function AdminConsole({
   const [productsCat, setProductsCat] = useState("all")
   const [stockEdits, setStockEdits] = useState<Record<string, string>>({})
   const [deleteProduct, setDeleteProduct] = useState<AdminProductRow | null>(null)
+
+  /* ── Avis (modération globale) ── */
+  const [reviews, setReviews] = useState<AdminReviewRow[]>([])
+  const [reviewsLoading, setReviewsLoading] = useState(false)
+  const [reviewsQ, setReviewsQ] = useState("")
+  const [reviewsStore, setReviewsStore] = useState("all")
+  const [reviewsVisibility, setReviewsVisibility] = useState("all")
+  const [deleteReview, setDeleteReview] = useState<AdminReviewRow | null>(null)
+  const [reviewBusy, setReviewBusy] = useState<string | null>(null)
+
+  /* ── Croissance (coupons & zones) ── */
+  const [coupons, setCoupons] = useState<AdminCouponRow[]>([])
+  const [zones, setZones] = useState<AdminZoneRow[]>([])
+  const [growthStats, setGrowthStats] = useState<GrowthStats | null>(null)
+  const [growthLoading, setGrowthLoading] = useState(false)
+  const [couponsQ, setCouponsQ] = useState("")
+  const [couponsStore, setCouponsStore] = useState("all")
+  const [deleteCoupon, setDeleteCoupon] = useState<AdminCouponRow | null>(null)
+  const [couponBusy, setCouponBusy] = useState<string | null>(null)
 
   /* ── Options boutiques pour les filtres ── */
   const [storeOptions, setStoreOptions] = useState<StoreOption[]>([])
@@ -474,6 +576,39 @@ export function AdminConsole({
     }
   }, [adminFetch, productsQ, productsStore, productsCat])
 
+  const loadReviews = useCallback(async () => {
+    setReviewsLoading(true)
+    try {
+      const res = await adminFetch(
+        `/api/admin/reviews?q=${encodeURIComponent(reviewsQ)}&storeId=${reviewsStore === "all" ? "" : reviewsStore}&hidden=${reviewsVisibility}`,
+      )
+      const data = await res.json()
+      if (res.ok) setReviews(data.reviews)
+      else toast.error(await readError(res))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur réseau")
+    } finally {
+      setReviewsLoading(false)
+    }
+  }, [adminFetch, reviewsQ, reviewsStore, reviewsVisibility])
+
+  const loadGrowth = useCallback(async () => {
+    setGrowthLoading(true)
+    try {
+      const res = await adminFetch("/api/admin/growth")
+      const data = await res.json()
+      if (res.ok) {
+        setCoupons(data.coupons)
+        setZones(data.zones)
+        setGrowthStats(data.stats)
+      } else toast.error(await readError(res))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur réseau")
+    } finally {
+      setGrowthLoading(false)
+    }
+  }, [adminFetch])
+
   const loadSettings = useCallback(async () => {
     try {
       const res = await adminFetch("/api/admin/settings")
@@ -577,7 +712,18 @@ export function AdminConsole({
   }, [authed, tab, loadProducts])
 
   useEffect(() => {
-    if (!authed || (tab !== "orders" && tab !== "products")) return
+    if (!authed || tab !== "reviews") return
+    const t = setTimeout(() => void loadReviews(), 280)
+    return () => clearTimeout(t)
+  }, [authed, tab, loadReviews])
+
+  useEffect(() => {
+    if (!authed || tab !== "growth") return
+    void loadGrowth()
+  }, [authed, tab, loadGrowth])
+
+  useEffect(() => {
+    if (!authed || (tab !== "orders" && tab !== "products" && tab !== "reviews" && tab !== "growth")) return
     void loadStoreOptions()
   }, [authed, tab, loadStoreOptions])
 
@@ -812,6 +958,99 @@ export function AdminConsole({
     }
   }
 
+  const toggleReviewHidden = async (r: AdminReviewRow) => {
+    setReviewBusy(r.id)
+    try {
+      const res = await adminFetch("/api/admin/reviews", {
+        method: "PATCH",
+        body: JSON.stringify({ id: r.id, hidden: !r.hidden }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        toast.error(await readError(res))
+        return
+      }
+      setReviews((list) => list.map((x) => (x.id === r.id ? { ...x, hidden: data.review.hidden } : x)))
+      toast.success(data.review.hidden ? "Avis masqué" : "Avis restauré")
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur réseau")
+    } finally {
+      setReviewBusy(null)
+    }
+  }
+
+  const confirmDeleteReview = async () => {
+    if (!deleteReview) return
+    const target = deleteReview
+    setDeleteReview(null)
+    try {
+      const res = await adminFetch(`/api/admin/reviews?id=${target.id}`, { method: "DELETE" })
+      if (!res.ok) {
+        toast.error(await readError(res))
+        return
+      }
+      setReviews((list) => list.filter((x) => x.id !== target.id))
+      toast.success(`Avis de « ${target.authorName} » supprimé`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur réseau")
+    }
+  }
+
+  const toggleCouponActive = async (c: AdminCouponRow) => {
+    setCouponBusy(c.id)
+    try {
+      const res = await adminFetch("/api/admin/growth", {
+        method: "PATCH",
+        body: JSON.stringify({ id: c.id, active: !c.active }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        toast.error(await readError(res))
+        return
+      }
+      setCoupons((list) => list.map((x) => (x.id === c.id ? { ...x, active: data.coupon.active } : x)))
+      setGrowthStats((s) =>
+        s
+          ? {
+              ...s,
+              couponsActive: s.couponsActive + (data.coupon.active ? 1 : -1),
+            }
+          : s,
+      )
+      toast.success(data.coupon.active ? "Code promo réactivé" : "Code promo désactivé")
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur réseau")
+    } finally {
+      setCouponBusy(null)
+    }
+  }
+
+  const confirmDeleteCoupon = async () => {
+    if (!deleteCoupon) return
+    const target = deleteCoupon
+    setDeleteCoupon(null)
+    try {
+      const res = await adminFetch(`/api/admin/growth?id=${target.id}`, { method: "DELETE" })
+      if (!res.ok) {
+        toast.error(await readError(res))
+        return
+      }
+      setCoupons((list) => list.filter((x) => x.id !== target.id))
+      setGrowthStats((s) =>
+        s
+          ? {
+              ...s,
+              couponsTotal: Math.max(0, s.couponsTotal - 1),
+              couponsActive: target.active ? Math.max(0, s.couponsActive - 1) : s.couponsActive,
+            }
+          : s,
+      )
+      toast.success(`Code promo « ${target.code} » supprimé`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur réseau")
+    }
+  }
+
   const saveSettings = async (patch: Record<string, unknown>, label: string) => {
     setSavingSettings(true)
     try {
@@ -841,6 +1080,8 @@ export function AdminConsole({
     else if (tab === "stores") void loadStores()
     else if (tab === "orders") void loadOrders()
     else if (tab === "products") void loadProducts()
+    else if (tab === "reviews") void loadReviews()
+    else if (tab === "growth") void loadGrowth()
     else {
       void loadSettings()
       void loadLogs()
@@ -984,6 +1225,12 @@ export function AdminConsole({
             <TabsTrigger value="products" className="gap-1.5 shrink-0">
               <Package className="w-4 h-4" /> Produits
             </TabsTrigger>
+            <TabsTrigger value="reviews" className="gap-1.5 shrink-0">
+              <Star className="w-4 h-4" /> Avis
+            </TabsTrigger>
+            <TabsTrigger value="growth" className="gap-1.5 shrink-0">
+              <Tag className="w-4 h-4" /> Croissance
+            </TabsTrigger>
             <TabsTrigger value="settings" className="gap-1.5 shrink-0">
               <Settings2 className="w-4 h-4" /> Paramètres
             </TabsTrigger>
@@ -1044,6 +1291,38 @@ export function AdminConsole({
                     value={String(ov.storesSuspended)}
                     sub={`${ov.webhookDeliveries} webhook(s) Chariow`}
                     tone="bg-rose-100 text-rose-700"
+                  />
+                </div>
+
+                {/* V6 — KPIs Confiance & Croissance */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <Kpi
+                    icon={Star}
+                    label="Avis clients"
+                    value={String(ov.reviewsTotal)}
+                    sub={ov.reviewsHidden > 0 ? `${ov.reviewsHidden} masqué(s)` : "tous visibles"}
+                    tone="bg-amber-100 text-amber-700"
+                  />
+                  <Kpi
+                    icon={Tag}
+                    label="Codes promo actifs"
+                    value={String(ov.couponsActive)}
+                    sub={`${ov.couponsTotal} créé(s)`}
+                    tone="bg-teal-100 text-teal-700"
+                  />
+                  <Kpi
+                    icon={FileText}
+                    label="Factures KinFacture"
+                    value={String(ov.invoicesTotal)}
+                    sub="émises via la plateforme"
+                    tone="bg-emerald-100 text-emerald-700"
+                  />
+                  <Kpi
+                    icon={Eye}
+                    label="Visites · 7 j"
+                    value={String(ov.visitsLast7d)}
+                    sub="toutes boutiques"
+                    tone="bg-amber-100 text-amber-700"
                   />
                 </div>
 
@@ -1704,6 +1983,366 @@ export function AdminConsole({
             <p className="text-xs text-muted-foreground text-center">{products.length} produit(s) affiché(s)</p>
           </TabsContent>
 
+          {/* ════ AVIS (V6 — modération globale) ════ */}
+          <TabsContent value="reviews" className="space-y-4">
+            <div className="flex flex-col md:flex-row gap-2 md:items-center">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Rechercher (auteur, commentaire, boutique)…"
+                  value={reviewsQ}
+                  onChange={(e) => setReviewsQ(e.target.value)}
+                  className="pl-9"
+                  aria-label="Rechercher un avis"
+                />
+              </div>
+              <Select value={reviewsStore} onValueChange={setReviewsStore}>
+                <SelectTrigger className="md:w-52" aria-label="Filtrer par boutique">
+                  <SelectValue placeholder="Boutique" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Toutes les boutiques</SelectItem>
+                  {storeOptions.map((o) => (
+                    <SelectItem key={o.id} value={o.id}>
+                      {o.emoji} {o.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={reviewsVisibility} onValueChange={setReviewsVisibility}>
+                <SelectTrigger className="md:w-44" aria-label="Filtrer par visibilité">
+                  <SelectValue placeholder="Visibilité" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Tous les avis</SelectItem>
+                  <SelectItem value="visible">Visibles</SelectItem>
+                  <SelectItem value="hidden">Masqués</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <Card>
+              <CardContent className="p-0">
+                {reviewsLoading && reviews.length === 0 ? (
+                  <div className="p-4 space-y-2">
+                    {Array.from({ length: 4 }).map((_, i) => (
+                      <Skeleton key={i} className="h-14 rounded-lg" />
+                    ))}
+                  </div>
+                ) : reviews.length === 0 ? (
+                  <p className="text-center text-muted-foreground py-12">Aucun avis ne correspond aux filtres.</p>
+                ) : (
+                  <div className="overflow-x-auto max-h-[70vh] overflow-y-auto">
+                    <Table className="min-w-[880px]">
+                      <TableHeader className="sticky top-0 bg-background z-10">
+                        <TableRow>
+                          <TableHead>Boutique</TableHead>
+                          <TableHead>Auteur</TableHead>
+                          <TableHead>Note</TableHead>
+                          <TableHead>Commentaire</TableHead>
+                          <TableHead>Statut</TableHead>
+                          <TableHead>Date</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {reviews.map((r) => (
+                          <TableRow key={r.id} className={r.hidden ? "opacity-70" : ""}>
+                            <TableCell>
+                              <button
+                                onClick={() => onOpenStore(r.store.slug)}
+                                className="flex items-center gap-2 text-left hover:underline underline-offset-2"
+                                aria-label={`Voir la boutique ${r.store.name}`}
+                              >
+                                <span className="text-lg">{r.store.logoEmoji}</span>
+                                <span className="text-sm font-medium whitespace-nowrap">{r.store.name}</span>
+                              </button>
+                            </TableCell>
+                            <TableCell>
+                              <p className="text-sm">{r.authorName}</p>
+                              {r.orderId && (
+                                <Badge variant="outline" className="mt-0.5 bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px]">
+                                  <ShieldCheck className="w-3 h-3 mr-1" /> Vérifié
+                                </Badge>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <Stars n={r.rating} />
+                            </TableCell>
+                            <TableCell className="max-w-[280px]">
+                              <p className="text-sm text-muted-foreground">{r.comment || "—"}</p>
+                            </TableCell>
+                            <TableCell>
+                              {r.hidden ? (
+                                <Badge variant="outline" className="bg-rose-100 text-rose-700 border-rose-200 whitespace-nowrap">Masqué</Badge>
+                              ) : (
+                                <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 whitespace-nowrap">Visible</Badge>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <span
+                                className="text-xs text-muted-foreground whitespace-nowrap"
+                                title={new Date(r.createdAt).toLocaleString("fr-FR")}
+                              >
+                                {timeAgo(r.createdAt)}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex items-center justify-end gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8"
+                                  disabled={reviewBusy === r.id}
+                                  onClick={() => toggleReviewHidden(r)}
+                                  aria-label={r.hidden ? `Restaurer l'avis de ${r.authorName}` : `Masquer l'avis de ${r.authorName}`}
+                                >
+                                  {reviewBusy === r.id ? (
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                  ) : r.hidden ? (
+                                    <Eye className="w-4 h-4" />
+                                  ) : (
+                                    <EyeOff className="w-4 h-4" />
+                                  )}
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-rose-600 hover:text-rose-700 hover:bg-rose-50"
+                                  onClick={() => setDeleteReview(r)}
+                                  aria-label={`Supprimer l'avis de ${r.authorName}`}
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+            <p className="text-xs text-muted-foreground text-center">{reviews.length} avis affiché(s)</p>
+          </TabsContent>
+
+          {/* ════ CROISSANCE (V6 — codes promo & zones de livraison) ════ */}
+          <TabsContent value="growth" className="space-y-4">
+            {/* Codes promo — filtres */}
+            <div className="flex flex-col md:flex-row gap-2 md:items-center">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Rechercher un code (code, boutique)…"
+                  value={couponsQ}
+                  onChange={(e) => setCouponsQ(e.target.value)}
+                  className="pl-9"
+                  aria-label="Rechercher un code promo"
+                />
+              </div>
+              <Select value={couponsStore} onValueChange={setCouponsStore}>
+                <SelectTrigger className="md:w-52" aria-label="Filtrer par boutique">
+                  <SelectValue placeholder="Boutique" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Toutes les boutiques</SelectItem>
+                  {storeOptions.map((o) => (
+                    <SelectItem key={o.id} value={o.id}>
+                      {o.emoji} {o.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <Card>
+              <CardHeader className="pb-2 flex-row items-center justify-between space-y-0">
+                <CardTitle className="text-base flex items-center gap-2 flex-wrap">
+                  <Tag className="w-4 h-4 text-primary" /> Codes promo
+                  {growthStats && (
+                    <Badge variant="secondary" className="text-[10px] font-normal">
+                      {growthStats.couponsActive} actif(s) / {growthStats.couponsTotal} · {growthStats.usesTotal} utilisation(s)
+                    </Badge>
+                  )}
+                </CardTitle>
+                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => void loadGrowth()} aria-label="Rafraîchir les codes promo">
+                  <RefreshCw className={`w-4 h-4 ${growthLoading ? "animate-spin" : ""}`} />
+                </Button>
+              </CardHeader>
+              <CardContent className="p-0">
+                {coupons.length === 0 ? (
+                  <p className="text-center text-muted-foreground py-10">Aucun code promo sur la plateforme.</p>
+                ) : (
+                  <div className="overflow-x-auto max-h-96 overflow-y-auto">
+                    <Table className="min-w-[860px]">
+                      <TableHeader className="sticky top-0 bg-background z-10">
+                        <TableRow>
+                          <TableHead>Code</TableHead>
+                          <TableHead>Boutique</TableHead>
+                          <TableHead>Remise</TableHead>
+                          <TableHead>Condition</TableHead>
+                          <TableHead className="text-center">Utilisations</TableHead>
+                          <TableHead>Statut</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {coupons
+                          .filter((c) => couponsStore === "all" || c.storeId === couponsStore)
+                          .filter((c) => {
+                            const q = couponsQ.toLowerCase().trim()
+                            if (!q) return true
+                            return c.code.toLowerCase().includes(q) || c.store.name.toLowerCase().includes(q)
+                          })
+                          .map((c) => {
+                            const exhausted = c.maxUses > 0 && c.uses >= c.maxUses
+                            return (
+                              <TableRow key={c.id} className={!c.active ? "opacity-70" : ""}>
+                                <TableCell>
+                                  <span className="font-mono text-sm font-bold">{c.code}</span>
+                                </TableCell>
+                                <TableCell>
+                                  <button
+                                    onClick={() => onOpenStore(c.store.slug)}
+                                    className="flex items-center gap-2 text-left hover:underline underline-offset-2"
+                                    aria-label={`Voir la boutique ${c.store.name}`}
+                                  >
+                                    <span className="text-lg">{c.store.logoEmoji}</span>
+                                    <span className="text-sm whitespace-nowrap">{c.store.name}</span>
+                                  </button>
+                                </TableCell>
+                                <TableCell>
+                                  <span className="text-sm font-semibold text-primary whitespace-nowrap">
+                                    {couponLabel(c.type as CouponType, c.value)}
+                                  </span>
+                                </TableCell>
+                                <TableCell>
+                                  <span className="text-xs text-muted-foreground whitespace-nowrap">
+                                    {c.minTotalUSD > 0 ? `Dès ${formatUSD(c.minTotalUSD)}` : "Sans minimum"}
+                                    {c.maxUses > 0 ? ` · max ${c.maxUses}` : " · illimité"}
+                                  </span>
+                                </TableCell>
+                                <TableCell className="text-center">
+                                  <span className={`text-sm font-semibold ${exhausted ? "text-rose-600" : ""}`}>
+                                    {c.uses}/{c.maxUses > 0 ? c.maxUses : "∞"}
+                                  </span>
+                                </TableCell>
+                                <TableCell>
+                                  {!c.active ? (
+                                    <Badge variant="outline" className="bg-rose-100 text-rose-700 border-rose-200 whitespace-nowrap">Désactivé</Badge>
+                                  ) : exhausted ? (
+                                    <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-200 whitespace-nowrap">Épuisé</Badge>
+                                  ) : (
+                                    <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 whitespace-nowrap">Actif</Badge>
+                                  )}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <div className="flex items-center justify-end gap-1">
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-8 w-8"
+                                      disabled={couponBusy === c.id}
+                                      onClick={() => toggleCouponActive(c)}
+                                      aria-label={c.active ? `Désactiver le code ${c.code}` : `Réactiver le code ${c.code}`}
+                                    >
+                                      {couponBusy === c.id ? (
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                      ) : c.active ? (
+                                        <Ban className="w-4 h-4" />
+                                      ) : (
+                                        <CheckCircle2 className="w-4 h-4" />
+                                      )}
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-8 w-8 text-rose-600 hover:text-rose-700 hover:bg-rose-50"
+                                      onClick={() => setDeleteCoupon(c)}
+                                      aria-label={`Supprimer le code ${c.code}`}
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            )
+                          })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Zones de livraison — visibilité globale (gérées par les vendeurs) */}
+            <Card>
+              <CardHeader className="pb-2 flex-row items-center justify-between space-y-0">
+                <CardTitle className="text-base flex items-center gap-2 flex-wrap">
+                  <Truck className="w-4 h-4 text-teal-600" /> Zones de livraison
+                  {growthStats && (
+                    <Badge variant="secondary" className="text-[10px] font-normal">
+                      {growthStats.zonesActive} active(s) / {growthStats.zonesTotal}
+                    </Badge>
+                  )}
+                </CardTitle>
+                <Badge variant="outline" className="text-[10px] text-muted-foreground font-normal">
+                  Configurées par les vendeurs
+                </Badge>
+              </CardHeader>
+              <CardContent className="p-0">
+                {zones.length === 0 ? (
+                  <p className="text-center text-muted-foreground py-10">Aucune zone de livraison configurée.</p>
+                ) : (
+                  <div className="overflow-x-auto max-h-96 overflow-y-auto">
+                    <Table className="min-w-[720px]">
+                      <TableHeader className="sticky top-0 bg-background z-10">
+                        <TableRow>
+                          <TableHead>Boutique</TableHead>
+                          <TableHead>Zone</TableHead>
+                          <TableHead className="text-right">Frais</TableHead>
+                          <TableHead>Statut</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {zones.map((z) => (
+                          <TableRow key={z.id} className={!z.active ? "opacity-70" : ""}>
+                            <TableCell>
+                              <button
+                                onClick={() => onOpenStore(z.store.slug)}
+                                className="flex items-center gap-2 text-left hover:underline underline-offset-2"
+                                aria-label={`Voir la boutique ${z.store.name}`}
+                              >
+                                <span className="text-lg">{z.store.logoEmoji}</span>
+                                <span className="text-sm whitespace-nowrap">{z.store.name}</span>
+                              </button>
+                            </TableCell>
+                            <TableCell>
+                              <span className="text-sm">{z.name}</span>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <span className="text-sm font-semibold whitespace-nowrap">
+                                {z.feeFC > 0 ? formatFC(z.feeFC) : "Gratuite"}
+                              </span>
+                            </TableCell>
+                            <TableCell>
+                              {z.active ? (
+                                <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 whitespace-nowrap">Active</Badge>
+                              ) : (
+                                <Badge variant="outline" className="bg-muted text-muted-foreground border-border whitespace-nowrap">Masquée</Badge>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
           {/* ════ PARAMÈTRES ════ */}
           <TabsContent value="settings" className="space-y-6">
             <div className="grid md:grid-cols-3 gap-4">
@@ -1896,7 +2535,7 @@ export function AdminConsole({
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Zone de livraison</p>
-                    <p className="font-medium">{detailOrder.zone || "—"}</p>
+                    <p className="font-medium">{detailOrder.deliveryZone || detailOrder.zone || "—"}</p>
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Paiement</p>
@@ -1927,6 +2566,29 @@ export function AdminConsole({
                     ))}
                   </div>
                 </div>
+                {/* V6 — récap sous-total / remise / livraison */}
+                {(detailOrder.couponCode || detailOrder.deliveryZone || detailOrder.deliveryFeeFC > 0) && (
+                  <div className="rounded-lg border divide-y text-sm">
+                    <div className="flex items-center justify-between px-3 py-2">
+                      <span>Sous-total</span>
+                      <span className="font-medium">{formatUSD(detailOrder.totalUSD + detailOrder.discountUSD)}</span>
+                    </div>
+                    {detailOrder.couponCode && detailOrder.discountUSD > 0 && (
+                      <div className="flex items-center justify-between px-3 py-2 text-emerald-700">
+                        <span>Remise {detailOrder.couponCode}</span>
+                        <span className="font-medium">−{formatUSD(detailOrder.discountUSD)}</span>
+                      </div>
+                    )}
+                    {(detailOrder.deliveryZone || detailOrder.deliveryFeeFC > 0) && (
+                      <div className="flex items-center justify-between px-3 py-2">
+                        <span>Livraison{detailOrder.deliveryZone ? ` · ${detailOrder.deliveryZone}` : ""}</span>
+                        <span className="font-medium">
+                          {detailOrder.deliveryFeeFC > 0 ? formatFC(detailOrder.deliveryFeeFC) : "Gratuite"}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
                 {detailOrder.note && (
                   <div>
                     <p className="text-xs text-muted-foreground">Note du client</p>
@@ -2032,6 +2694,44 @@ export function AdminConsole({
           <AlertDialogFooter>
             <AlertDialogCancel>Annuler</AlertDialogCancel>
             <AlertDialogAction onClick={confirmDeleteProduct} className="bg-rose-600 hover:bg-rose-700 text-white">
+              <Trash2 className="w-4 h-4 mr-1.5" /> Supprimer
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Confirmation suppression avis */}
+      <AlertDialog open={!!deleteReview} onOpenChange={(open) => !open && setDeleteReview(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Supprimer cet avis ?</AlertDialogTitle>
+            <AlertDialogDescription>
+              L&apos;avis de {deleteReview?.authorName} ({deleteReview?.rating}/5 ★, boutique {deleteReview?.store.name})
+              sera supprimé définitivement de la vitrine.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annuler</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDeleteReview} className="bg-rose-600 hover:bg-rose-700 text-white">
+              <Trash2 className="w-4 h-4 mr-1.5" /> Supprimer
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Confirmation suppression code promo */}
+      <AlertDialog open={!!deleteCoupon} onOpenChange={(open) => !open && setDeleteCoupon(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Supprimer le code « {deleteCoupon?.code} » ?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Ce code promo de la boutique {deleteCoupon?.store.name} sera supprimé définitivement. Les clients ne
+              pourront plus l&apos;utiliser au checkout.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annuler</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDeleteCoupon} className="bg-rose-600 hover:bg-rose-700 text-white">
               <Trash2 className="w-4 h-4 mr-1.5" /> Supprimer
             </AlertDialogAction>
           </AlertDialogFooter>
