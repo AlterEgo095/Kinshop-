@@ -6,17 +6,27 @@
 
 import { useEffect, useState } from "react"
 import { motion } from "framer-motion"
-import { Flame, Sparkles, Megaphone, Package } from "lucide-react"
+import { Flame, Loader2, Sparkles, Megaphone, Package } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { formatUSD } from "@/lib/kinshop"
+
+interface HomeCategory {
+  id: string
+  name: string
+  slug: string
+  icon: string
+}
 
 interface HomeData {
   sponsored: { campaignId: string; slug: string; name: string; logoEmoji: string; city: string; description: string }[]
   popular: { slug: string; name: string; logoEmoji: string; city: string; description: string; visits30d: number }[]
   newest: { slug: string; name: string; logoEmoji: string; city: string; description: string }[]
   products: { id: string; name: string; emoji: string; imageUrl: string; priceUSD: number; category: string; store: { name: string; slug: string } }[]
+  // P2 — navigation par catégories globales (barre d'icônes + filtre actif)
+  categories?: HomeCategory[]
+  category?: HomeCategory | null
 }
 
 function StoreCard({
@@ -60,26 +70,34 @@ function StoreCard({
 export function MarketplaceHome({ onOpenStore }: { onOpenStore: (slug: string) => void }) {
   const [data, setData] = useState<HomeData | null>(null)
   const [loaded, setLoaded] = useState(false)
+  // P2 — catégorie globale active (slug) ; null = toutes catégories
+  const [cat, setCat] = useState<string | null>(null)
+  const [catLoading, setCatLoading] = useState(false)
 
   useEffect(() => {
     let cancelled = false
     ;(async () => {
+      if (cat) setCatLoading(true)
       await Promise.resolve()
       if (cancelled) return
       try {
-        const res = await fetch("/api/home", { cache: "no-store" })
+        const res = await fetch(`/api/home${cat ? `?cat=${encodeURIComponent(cat)}` : ""}`, { cache: "no-store" })
         const d = await res.json()
         if (!cancelled && res.ok) setData(d)
+        else if (!cancelled && !res.ok) setData(null)
       } catch {
         // silencieux : la section reste masquée si le service est indisponible
       } finally {
-        if (!cancelled) setLoaded(true)
+        if (!cancelled) {
+          setLoaded(true)
+          setCatLoading(false)
+        }
       }
     })()
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [cat])
 
   const trackClick = (campaignId: string) => {
     fetch("/api/boost/click", {
@@ -89,12 +107,58 @@ export function MarketplaceHome({ onOpenStore }: { onOpenStore: (slug: string) =
     }).catch(() => {})
   }
 
-  if (loaded && (!data || (data.sponsored.length === 0 && data.popular.length === 0 && data.newest.length === 0 && data.products.length === 0))) {
+  if (loaded && (!data || (data.sponsored.length === 0 && data.popular.length === 0 && data.newest.length === 0 && data.products.length === 0 && !(data.categories && data.categories.length > 0)))) {
     return null // rien à montrer — aucune donnée fabriquée
   }
 
   return (
     <section className="max-w-6xl mx-auto px-4 py-10 space-y-8" aria-label="Marketplace KinShop">
+      {/* P2 — Navigation par catégories (catalogue réel, navigation honnête) */}
+      {data && data.categories && data.categories.length > 0 && (
+        <div className="space-y-3">
+          <p className="font-extrabold text-lg flex items-center gap-2">
+            <Package className="w-5 h-5 text-primary" /> Explorer par catégorie
+          </p>
+          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin">
+            <button
+              onClick={() => setCat(null)}
+              aria-pressed={!cat}
+              className={`px-4 py-2 rounded-full text-sm font-medium border whitespace-nowrap transition-all ${
+                !cat
+                  ? "bg-primary text-white border-primary shadow-sm"
+                  : "bg-white border-border hover:border-primary/50"
+              }`}
+            >
+              ✨ Tout
+            </button>
+            {data.categories.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => setCat(cat === c.slug ? null : c.slug)}
+                aria-pressed={cat === c.slug}
+                className={`px-4 py-2 rounded-full text-sm font-medium border whitespace-nowrap transition-all ${
+                  cat === c.slug
+                    ? "bg-primary text-white border-primary shadow-sm"
+                    : "bg-white border-border hover:border-primary/50"
+                }`}
+              >
+                {c.icon} {c.name}
+              </button>
+            ))}
+          </div>
+          {catLoading && (
+            <div className="flex gap-2 items-center text-xs text-muted-foreground">
+              <Loader2 className="w-3 h-3 animate-spin" /> Filtrage…
+            </div>
+          )}
+          {data.category && !catLoading && (
+            <p className="text-xs text-muted-foreground">
+              Catégorie sélectionnée : <span className="font-semibold text-foreground">{data.category.icon} {data.category.name}</span>
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Sponsorisé — campagnes Boost payées, clairement étiquetées */}
       {data && data.sponsored.length > 0 && (
         <div className="space-y-3">

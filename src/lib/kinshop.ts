@@ -9,6 +9,8 @@ export interface ProductData {
   images: string[] // V4 — galerie multi-photos (1re = image principale)
   priceUSD: number
   category: string
+  // P2 — catégorie structurée de boutique (rattache le produit à la navigation vitrine)
+  storeCategoryId?: string | null
   stock: number
 }
 
@@ -82,6 +84,19 @@ export interface OrderData {
   createdAt: string
 }
 
+/* ─────────── P2 — Catégories structurées ─────────── */
+
+/** Catégorie propre à une boutique (vue publique vitrine, actives uniquement). */
+export interface StoreCategoryData {
+  id: string
+  name: string
+  slug: string
+  order: number
+  /** Icône + nom de la catégorie globale rattachée (navigation marketplace), si définis */
+  globalIcon?: string | null
+  globalName?: string | null
+}
+
 export interface StoreData {
   id: string
   slug: string
@@ -99,6 +114,8 @@ export interface StoreData {
   createdAt: string
   products?: ProductData[]
   orders?: OrderData[]
+  // P2 — catégories structurées de la boutique (public : actives, ordonnées)
+  storeCategories?: StoreCategoryData[]
 }
 
 /* ─────────── V2 — Statistiques & Notifications ─────────── */

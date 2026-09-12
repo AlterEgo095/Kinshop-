@@ -7,9 +7,47 @@ import { db } from "@/lib/db"
 // - sponsorisé   = campagnes Boost PAYÉES et actives uniquement — clairement étiquetées ;
 // - populaire    = classement RÉEL (visites cumulées 30 j) — jamais fabriqué ;
 // - nouveautés   = boutiques les plus récentes.
-export async function GET(_req: NextRequest) {
+//
+// P2 — NAVIGATION PAR CATÉGORIES GLOBALES :
+// ?cat=<slug d'une GlobalCategory> filtre TOUTES les sections (sponsorisés,
+// populaires, nouveautés, produits) sur les boutiques/produits rattachés à
+// cette catégorie via StoreCategory.globalCategoryId. Sans ?cat, comportement
+// historique (toutes catégories). La liste des catégories actives est renvoyée
+// systématiquement pour construire la barre de navigation.
+export async function GET(req: NextRequest) {
   try {
     const now = new Date()
+
+    // ── P2 — résolution du filtre catégorie (optionnel) ──
+    const catSlug = req.nextUrl.searchParams.get("cat")
+    let selectedCategory: { id: string; name: string; slug: string; icon: string } | null = null
+    let catStoreCategoryIds: string[] = []
+    let catStoreIds: string[] = []
+    if (catSlug) {
+      const gc = await db.globalCategory.findUnique({ where: { slug: catSlug } })
+      if (!gc || !gc.active) {
+        return NextResponse.json({ error: "Catégorie introuvable." }, { status: 404 })
+      }
+      selectedCategory = { id: gc.id, name: gc.name, slug: gc.slug, icon: gc.icon }
+      // Rayons de boutiques rattachés à cette catégorie globale
+      const linkedCats = await db.storeCategory.findMany({
+        where: { active: true, globalCategoryId: gc.id },
+        select: { id: true, storeId: true },
+      })
+      catStoreCategoryIds = linkedCats.map((c) => c.id)
+      // Seules les boutiques ayant AU MOINS UN produit dans la catégorie ressortent
+      const withProducts = await db.storeCategory.findMany({
+        where: { id: { in: catStoreCategoryIds }, products: { some: {} } },
+        select: { storeId: true },
+      })
+      catStoreIds = Array.from(new Set(withProducts.map((c) => c.storeId)))
+    }
+
+    const categories = await db.globalCategory.findMany({
+      where: { active: true },
+      orderBy: [{ order: "asc" }, { name: "asc" }],
+      select: { id: true, name: true, slug: true, icon: true },
+    })
 
     // 1) Boutiques sponsorisées (campagnes actives payées)
     const activeBoosts = await db.boostCampaign.findMany({
@@ -21,6 +59,7 @@ export async function GET(_req: NextRequest) {
     const sponsored = activeBoosts
       .map((b) => ({ campaignId: b.id, store: b.store }))
       .filter((x) => x.store.status === "active")
+      .filter((x) => !selectedCategory || catStoreIds.includes(x.store.id))
 
     // 2) Boutiques populaires : visites cumulées sur 30 jours (données réelles)
     const since = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
@@ -31,7 +70,11 @@ export async function GET(_req: NextRequest) {
     })
     const visitMap = new Map(visits.map((v) => [v.storeId, v._sum.count ?? 0]))
     const stores = await db.store.findMany({
-      where: { status: "active" },
+      where: {
+        status: "active",
+        // P2 — sous filtre catégorie : la boutique doit exposer la catégorie
+        ...(selectedCategory ? { id: { in: catStoreIds } } : {}),
+      },
       select: { id: true, slug: true, name: true, logoEmoji: true, city: true, description: true, isPremium: true, premiumUntil: true, createdAt: true },
     })
     const popular = stores
@@ -48,6 +91,8 @@ export async function GET(_req: NextRequest) {
     // 4) Produits récents (nouveautés catalogue) — prix réels, pas de classement inventé
     const latestProducts = await db.product.findMany({
       orderBy: { createdAt: "desc" },
+      // P2 — sous filtre catégorie : produits rattachés à un rayon de la catégorie
+      ...(selectedCategory ? { where: { storeCategoryId: { in: catStoreCategoryIds } } } : {}),
       take: 8,
       include: { store: { select: { name: true, slug: true, status: true } } },
     })
@@ -99,6 +144,9 @@ export async function GET(_req: NextRequest) {
           isPremium: s.isPremium,
         })),
         products,
+        // P2 — navigation catégories
+        categories,
+        category: selectedCategory,
       },
       { headers: { "Cache-Control": "no-store" } },
     )

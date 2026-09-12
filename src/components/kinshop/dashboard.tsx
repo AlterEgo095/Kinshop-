@@ -96,6 +96,7 @@ import {
   type PaymentMethod,
   type ProductData,
   type ReviewData,
+  type StoreCategoryData,
   type StoreData,
   type VendorStats,
 } from "@/lib/kinshop"
@@ -165,6 +166,9 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
   const [pEmoji, setPEmoji] = useState("📦")
   const [pPrice, setPPrice] = useState("")
   const [pCategory, setPCategory] = useState("Divers")
+  // P2 — catégorie structurée de boutique (rattachement produit → navigation vitrine)
+  const [storeCats, setStoreCats] = useState<StoreCategoryData[]>([])
+  const [pStoreCatId, setPStoreCatId] = useState("")
   const [pImages, setPImages] = useState<string[]>([])
   const [adding, setAdding] = useState(false)
 
@@ -175,6 +179,7 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
   const [editEmoji, setEditEmoji] = useState("📦")
   const [editPrice, setEditPrice] = useState("")
   const [editCategory, setEditCategory] = useState("Divers")
+  const [editStoreCatId, setEditStoreCatId] = useState("")
   const [editStock, setEditStock] = useState("99")
   const [editImages, setEditImages] = useState<string[]>([])
   const [savingEdit, setSavingEdit] = useState(false)
@@ -587,6 +592,13 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
           setSPhone(formatPhoneDisplay(data.store.whatsapp))
           setSCity(data.store.city)
           setSEmoji(data.store.logoEmoji)
+          // P2 — catégories structurées de la boutique (sélecteur du formulaire produit)
+          fetch(`/api/store-categories?slug=${encodeURIComponent(slug)}`)
+            .then((r) => (r.ok ? r.json() : null))
+            .then((d) => {
+              if (!cancelled && d && Array.isArray(d.categories)) setStoreCats(d.categories)
+            })
+            .catch(() => {})
           await Promise.all([loadOrders(), loadStats(), loadNotifications(), loadInvoices()])
         }
       } catch {
@@ -658,6 +670,8 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
           emoji: pEmoji || "📦",
           priceUSD: price,
           category: pCategory,
+          // P2 — rattachement structuré optionnel (le serveur valide l'appartenance)
+          ...(pStoreCatId ? { storeCategoryId: pStoreCatId } : {}),
           images: pImages,
         }),
       })
@@ -667,6 +681,7 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
       setPName("")
       setPPrice("")
       setPEmoji("📦")
+      setPStoreCatId("")
       setPImages([])
       setAddOpen(false)
       toast.success("Produit ajouté ✅")
@@ -684,6 +699,7 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
     setEditEmoji(p.emoji || "📦")
     setEditPrice(String(p.priceUSD))
     setEditCategory(p.category || "Divers")
+    setEditStoreCatId(p.storeCategoryId ?? "")
     setEditStock(String(p.stock ?? 99))
     setEditImages(Array.isArray(p.images) ? [...p.images] : [])
     setEditOpen(true)
@@ -706,6 +722,8 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
           emoji: editEmoji || "📦",
           priceUSD: price,
           category: editCategory,
+          // P2 — rattachement structuré ("" = détacher : le serveur accepte null)
+          storeCategoryId: editStoreCatId || null,
           stock: Number(editStock) >= 0 ? Number(editStock) : 99,
           images: editImages,
         }),
@@ -1360,7 +1378,11 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
                         </span>
                       )}
                       <p className="font-semibold text-sm truncate">{p.name}</p>
-                      <p className="text-xs text-muted-foreground mb-1">{p.category}</p>
+                      <p className="text-xs text-muted-foreground mb-1">
+                        {p.storeCategoryId
+                          ? storeCats.find((c) => c.id === p.storeCategoryId)?.name ?? p.category
+                          : p.category}
+                      </p>
                       <p className="font-bold text-primary">{formatFC(p.priceUSD * store.rateFC)}</p>
                       <p className="text-xs text-muted-foreground">{formatUSD(p.priceUSD)}</p>
                       <button
@@ -2380,6 +2402,29 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
                 </Select>
               </div>
             </div>
+            {/* P2 — catégorie structurée (affichée en navigation vitrine) */}
+            {storeCats.length > 0 && (
+              <div className="space-y-2">
+                <Label>
+                  Rayon de la vitrine{" "}
+                  <span className="text-xs text-muted-foreground">(optionnel — classe le produit dans tes catégories)</span>
+                </Label>
+                <Select
+                  value={pStoreCatId || "— Aucun rayon —"}
+                  onValueChange={(v) => setPStoreCatId(v === "— Aucun rayon —" ? "" : v)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="— Aucun rayon —" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="— Aucun rayon —">— Aucun rayon —</SelectItem>
+                    {storeCats.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             {/* V4 — Galerie multi-photos */}
             <ProductImagesEditor images={pImages} onChange={setPImages} />
@@ -2438,6 +2483,29 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
                 </SelectContent>
               </Select>
             </div>
+            {/* P2 — catégorie structurée (affichée en navigation vitrine) */}
+            {storeCats.length > 0 && (
+              <div className="space-y-2">
+                <Label>
+                  Rayon de la vitrine{" "}
+                  <span className="text-xs text-muted-foreground">(optionnel — classe le produit dans tes catégories)</span>
+                </Label>
+                <Select
+                  value={editStoreCatId || "— Aucun rayon —"}
+                  onValueChange={(v) => setEditStoreCatId(v === "— Aucun rayon —" ? "" : v)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="— Aucun rayon —" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="— Aucun rayon —">— Aucun rayon —</SelectItem>
+                    {storeCats.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             <ProductImagesEditor images={editImages} onChange={setEditImages} />
           </div>

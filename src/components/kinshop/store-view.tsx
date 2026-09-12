@@ -145,6 +145,10 @@ export function StoreView({ slug, onBack, platformRate, config = {}, authUser = 
 
   const [search, setSearch] = useState("")
   const [category, setCategory] = useState<string>("Tout")
+  // P2 — catégorie structurée sélectionnée (id StoreCategory) ; null = « Tout »
+  // ou filtre legacy. Si la boutique définit des catégories structurées, CE
+  // filtre prime sur l'ancien champ texte libre Product.category.
+  const [storeCatId, setStoreCatId] = useState<string | null>(null)
 
   const [cart, setCart] = useState<CartLine[]>([])
   const [cartOpen, setCartOpen] = useState(false)
@@ -328,6 +332,22 @@ export function StoreView({ slug, onBack, platformRate, config = {}, authUser = 
     return Array.from(new Set(store.products.map((p) => p.category)))
   }, [store])
 
+  // P2 — catégories structurées (gérées par le propriétaire) + id réellement
+  // actif (auto-réparant : une catégorie supprimée en cours de session retombe
+  // sur « Tout » sans effet de bord).
+  const storeCats = store?.storeCategories ?? []
+  const effectiveStoreCatId =
+    storeCatId && storeCats.some((c) => c.id === storeCatId) ? storeCatId : null
+
+  // P2 — effectif par catégorie structurée (compteur des puces vitrine)
+  const storeCatCounts = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const p of store?.products ?? []) {
+      if (p.storeCategoryId) m.set(p.storeCategoryId, (m.get(p.storeCategoryId) ?? 0) + 1)
+    }
+    return m
+  }, [store])
+
   // V9 — Paiements actifs + libellés (console admin → Configuration · Paiements).
   // Le serveur revalide à la commande : ce filtre n'est qu'une adaptation d'UI.
   const payMethods = useMemo(
@@ -348,11 +368,15 @@ export function StoreView({ slug, onBack, platformRate, config = {}, authUser = 
   const filtered = useMemo(() => {
     if (!store?.products) return []
     return store.products.filter((p) => {
-      const matchCat = category === "Tout" || p.category === category
+      // P2 — filtre structuré prioritaire dès que la boutique en définit ;
+      // sans catégories structurées, on garde le filtre legacy par texte libre.
+      const matchCat = effectiveStoreCatId
+        ? p.storeCategoryId === effectiveStoreCatId
+        : category === "Tout" || p.category === category
       const matchSearch = p.name.toLowerCase().includes(search.toLowerCase())
       return matchCat && matchSearch
     })
-  }, [store, category, search])
+  }, [store, category, effectiveStoreCatId, search])
 
   const cartCount = cart.reduce((s, l) => s + l.qty, 0)
   const totalUSD = cart.reduce((s, l) => s + l.product.priceUSD * l.qty, 0)
@@ -732,19 +756,44 @@ export function StoreView({ slug, onBack, platformRate, config = {}, authUser = 
             />
           </div>
           <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin">
-            {["Tout", ...categories].map((c) => (
-              <button
-                key={c}
-                onClick={() => setCategory(c)}
-                className={`px-4 py-2 rounded-full text-sm font-medium border whitespace-nowrap transition-all ${
-                  category === c
-                    ? "bg-primary text-white border-primary shadow-sm"
-                    : "bg-white border-border hover:border-primary/50"
-                }`}
-              >
-                {c}
-              </button>
-            ))}
+            {(storeCats.length > 0
+              ? [
+                  { id: null as string | null, label: "Tout", icon: "✨", count: store?.products?.length ?? 0 },
+                  ...storeCats.map((c) => ({
+                    id: c.id as string | null,
+                    label: c.name,
+                    icon: c.globalIcon || "🏷️",
+                    count: storeCatCounts.get(c.id) ?? 0,
+                  })),
+                ]
+              : ["Tout", ...categories].map((c) => ({ id: null as string | null, label: c, icon: "", count: 0 }))
+            ).map((c) => {
+              const structured = storeCats.length > 0
+              const active = structured ? storeCatId === c.id : category === c.label
+              return (
+                <button
+                  key={c.label}
+                  onClick={() => {
+                    if (structured) {
+                      setStoreCatId(c.id)
+                      setCategory("Tout")
+                    } else {
+                      setCategory(c.label)
+                      setStoreCatId(null)
+                    }
+                  }}
+                  className={`px-4 py-2 rounded-full text-sm font-medium border whitespace-nowrap transition-all ${
+                    active
+                      ? "bg-primary text-white border-primary shadow-sm"
+                      : "bg-white border-border hover:border-primary/50"
+                  }`}
+                >
+                  {c.icon ? `${c.icon} ` : ""}
+                  {c.label}
+                  {structured ? ` (${c.count})` : ""}
+                </button>
+              )
+            })}
           </div>
         </section>
 

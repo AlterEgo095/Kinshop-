@@ -93,7 +93,23 @@ export async function GET(req: NextRequest) {
 
     const store = await db.store.findUnique({
       where: { slug },
-      include: { products: { orderBy: { createdAt: "desc" } } },
+      include: {
+        products: { orderBy: { createdAt: "desc" } },
+        // P2 — catégories structurées de la boutique (publiques : actives,
+        // ordonnées, avec l'icône/nom de la catégorie globale rattachée).
+        // Le champ legacy Product.category (texte libre) reste servi tel quel.
+        storeCategories: {
+          where: { active: true },
+          orderBy: [{ order: "asc" }, { name: "asc" }],
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            order: true,
+            globalCategory: { select: { icon: true, name: true } },
+          },
+        },
+      },
     })
     if (!store) return NextResponse.json({ error: "Boutique introuvable." }, { status: 404 })
 
@@ -123,6 +139,15 @@ export async function GET(req: NextRequest) {
       {
         store: {
           ...publicStore,
+          // P2 — catégories structurées publiques (forme StoreCategoryData)
+          storeCategories: (publicStore.storeCategories ?? []).map((c) => ({
+            id: c.id,
+            name: c.name,
+            slug: c.slug,
+            order: c.order,
+            globalIcon: c.globalCategory?.icon ?? null,
+            globalName: c.globalCategory?.name ?? null,
+          })),
           // V4 — galerie multi-photos normalisée (retombe sur imageUrl si vide)
           products: publicStore.products.map((p) => ({ ...p, images: normalizeImages(p.images, p.imageUrl) })),
         },
