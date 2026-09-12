@@ -171,6 +171,75 @@ export async function initiateCheckout(params: ChariowCheckoutParams): Promise<C
   }
 }
 
+/* ─────────── Ventes (vérification de paiement) ─────────── */
+
+export interface ChariowSale {
+  id: string
+  status: string
+  paymentStatus: string | null
+  completedAt: string | null
+  customerEmail: string | null
+  productId: string | null
+}
+
+interface ChariowSaleRaw {
+  id?: string
+  status?: string
+  completed_at?: string | null
+  payment?: { status?: string | null } | null
+  customer?: { email?: string | null } | null
+  product?: { id?: string | null } | null
+}
+
+function mapSale(s: ChariowSaleRaw): ChariowSale {
+  return {
+    id: String(s.id || ""),
+    status: String(s.status || ""),
+    paymentStatus: s.payment?.status ?? null,
+    completedAt: s.completed_at ?? null,
+    customerEmail: (s.customer?.email || "").toLowerCase() || null,
+    productId: s.product?.id ?? null,
+  }
+}
+
+/**
+ * Récupère une vente précise — GET /v1/sales/{id}.
+ * L'ID provient de checkout (data.purchase.id, format SALE...).
+ */
+export async function fetchSale(saleId: string): Promise<ChariowSale | null> {
+  const cfg = getChariowConfig()
+  if (!cfg.apiKey || !saleId) return null
+  try {
+    const res = await fetch(`${CHARIOW_API_URL}/sales/${encodeURIComponent(saleId)}`, {
+      headers: { Authorization: `Bearer ${cfg.apiKey}`, Accept: "application/json" },
+      signal: AbortSignal.timeout(10_000),
+    })
+    if (!res.ok) return null
+    const json = (await res.json().catch(() => null)) as { data?: ChariowSaleRaw } | null
+    return json?.data ? mapSale(json.data) : null
+  } catch {
+    return null
+  }
+}
+
+/** Ventes récentes d'un produit — GET /v1/sales?product_id=...&per_page=N */
+export async function fetchRecentSales(productId: string, perPage = 20): Promise<ChariowSale[]> {
+  const cfg = getChariowConfig()
+  if (!cfg.apiKey || !productId) return []
+  try {
+    const url = `${CHARIOW_API_URL}/sales?per_page=${perPage}&product_id=${encodeURIComponent(productId)}`
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${cfg.apiKey}`, Accept: "application/json" },
+      signal: AbortSignal.timeout(10_000),
+    })
+    if (!res.ok) return []
+    const json = (await res.json().catch(() => null)) as { data?: ChariowSaleRaw[] } | null
+    return (json?.data || []).map(mapSale)
+  } catch {
+    return []
+  }
+}
+
 /* ─────────── Webhook (Pulses) ─────────── */
 
 export interface ChariowPulsePayload {

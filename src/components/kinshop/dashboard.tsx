@@ -858,9 +858,25 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
-      if (data.mode === "live" && data.url) {
+      if (data.mode === "already_paid") {
+        // Vente Chariow déjà payée détectée (ex : popup fermée avant la page de
+        // retour) → Premium activé sans nouvelle session de paiement.
+        setPremiumOpen(false)
+        await refreshStore()
+        toast.success("Paiement confirmé — Premium activé ! ✨", {
+          description: data.premiumUntil
+            ? `Actif jusqu'au ${new Date(data.premiumUntil).toLocaleDateString("fr-FR")}`
+            : undefined,
+        })
+      } else if (data.mode === "live" && data.url) {
         // Paiement réel Chariow (mobile money) — POPUP : l'utilisateur reste
         // sur son tableau de bord KinShop pendant le paiement.
+        try {
+          if (data.saleId) localStorage.setItem(`kinshop_prem_sale_${store.slug}`, String(data.saleId))
+          else localStorage.removeItem(`kinshop_prem_sale_${store.slug}`)
+        } catch {
+          // localStorage indisponible → la vérification par email reste possible
+        }
         setPremiumOpen(false)
         const popup = window.open(
           data.url,

@@ -18,6 +18,7 @@ import {
 import { normalizePhone } from "@/lib/kinshop"
 import { requireStoreOwner, forbidden, unauthorized } from "@/lib/auth"
 import { isFeatureOn } from "@/lib/config-registry"
+import { verifyAndApplyPremium } from "@/lib/premium"
 
 export async function POST(req: NextRequest) {
   try {
@@ -60,6 +61,25 @@ export async function POST(req: NextRequest) {
       where: { id: store.id },
       data: { chariowEmail: email, chariowPhone: digits },
     })
+
+    // ─── PRÉ-CHECK LIVE : vente déjà payée non encore appliquée ? ───
+    // Couvre le cas « popup fermée avant la page de retour » : au lieu de
+    // créer une nouvelle session, on active le Premium de la vente existante.
+    // (Ne s'applique que si le paiement réel est branché — sinon no-op.)
+    const precheck = await verifyAndApplyPremium(store)
+    if (precheck.activated) {
+      const fresh = await db.store.findUnique({
+        where: { slug },
+        select: { isPremium: true, premiumUntil: true },
+      })
+      return NextResponse.json({
+        mode: "already_paid" as const,
+        slug,
+        saleId: precheck.saleId ?? null,
+        isPremium: fresh?.isPremium ?? true,
+        premiumUntil: fresh?.premiumUntil ?? null,
+      })
+    }
 
     // ─── MODE SIMULATION ───
     // Paiement réel = clé API (.env) + produit résolu dynamiquement (console admin ou .env)

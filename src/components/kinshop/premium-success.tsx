@@ -38,6 +38,21 @@ export function PremiumSuccess({ ownerSlug, onGoDashboard, onGoHome }: PremiumSu
     }
     setChecking(true)
     try {
+      // 1. Demande au serveur de vérifier le paiement réel auprès de Chariow
+      //    (fallback si le webhook Pulse n'a pas encore activé le Premium).
+      let hintSaleId: string | undefined
+      try {
+        hintSaleId = localStorage.getItem(`kinshop_prem_sale_${ownerSlug}`) || undefined
+      } catch {
+        // localStorage indisponible → vérification par email uniquement
+      }
+      await fetch("/api/premium/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slug: ownerSlug, saleId: hintSaleId }),
+      }).catch(() => null)
+
+      // 2. Relit l'état réel de l'abonnement (source de vérité : base de données)
       const res = await fetch(`/api/stores?slug=${encodeURIComponent(ownerSlug)}`)
       const data = await res.json()
       if (res.ok && data.store) {
