@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json(
       {
-        valid: hashMatch && !cancelled,
+        valid: (hashMatch || legacy) && !cancelled,
         hashMatch,
         legacy,
         cancelled,
