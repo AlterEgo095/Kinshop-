@@ -3,6 +3,7 @@ import { db } from "@/lib/db"
 import { forbidden, requireStoreOwner, quotaExceeded } from "@/lib/auth"
 import { planOf } from "@/lib/plans"
 import { getPlanQuotas, isFeatureOn } from "@/lib/config-registry"
+import { withStoreQuotaWrite } from "@/lib/quota-guard"
 import { DELIVERY_KINDS } from "@/lib/order-workflow"
 
 // GET /api/delivery-zones?slug=xxx — Zones de livraison (public : la vitrine affiche les frais)
@@ -45,7 +46,7 @@ export async function POST(req: NextRequest) {
     if (!guard.ok) return guard.response
     const plan = planOf(guard.store)
 
-    // ── Feature flag + quota zones de livraison (serveur, paramétrables admin) ──
+    // ── Feature flag + quota zones de livraison (pré-check UX — vérification FAIS FOI atomique ci-dessous) ──
     if (!(await isFeatureOn("deliveryZones"))) {
       return forbidden("Les zones de livraison sont momentanément désactivées sur la plateforme.")
     }
@@ -60,10 +61,24 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-      const zone = await db.deliveryZone.create({
-        data: { storeId: guard.store.id, name, feeFC, kind, etaLabel, active: true },
+      // F-07 (audit) — quota revérifié + création dans UNE transaction atomique
+      // (mutex boutique + transaction Prisma) : pas de dépassement possible.
+      const result = await withStoreQuotaWrite(guard.store.id, async (tx) => {
+        const n = await tx.deliveryZone.count({ where: { storeId: guard.store.id } })
+        if (n >= quotas.maxDeliveryZones) return { overQuota: true as const, zone: null }
+        const zone = await tx.deliveryZone.create({
+          data: { storeId: guard.store.id, name, feeFC, kind, etaLabel, active: true },
+        })
+        return { overQuota: false as const, zone }
       })
-      return NextResponse.json({ zone }, { status: 201 })
+      if (result.overQuota) {
+        return quotaExceeded(
+          plan.id === "free"
+            ? `Limite du plan Free atteinte (${quotas.maxDeliveryZones} zones). Passe Premium pour desservir davantage de quartiers.`
+            : `Limite de ${quotas.maxDeliveryZones} zones atteinte.`,
+        )
+      }
+      return NextResponse.json({ zone: result.zone }, { status: 201 })
     } catch {
       // viol de l'unicité @@unique([storeId, name])
       return NextResponse.json({ error: `La zone « ${name} » existe déjà.` }, { status: 409 })

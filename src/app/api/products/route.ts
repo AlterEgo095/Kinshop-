@@ -4,6 +4,7 @@ import { normalizeImages } from "@/lib/kinshop"
 import { requireStoreOwner, quotaExceeded } from "@/lib/auth"
 import { planOf } from "@/lib/plans"
 import { getPlanQuotas } from "@/lib/config-registry"
+import { withStoreQuotaWrite } from "@/lib/quota-guard"
 
 // POST /api/products — Ajouter un produit (V8 : propriétaire + quota du plan)
 export async function POST(req: NextRequest) {
@@ -27,7 +28,7 @@ export async function POST(req: NextRequest) {
     // Quotas dynamiques (paramétrables dans la console admin → appliqués côté serveur)
     const quotas = await getPlanQuotas(plan.id)
 
-    // ── Quota produits (appliqué côté serveur, jamais côté client seul) ──
+    // ── Quota produits (pré-check UX — la vérification FAIS FOI est atomique ci-dessous) ──
     const count = await db.product.count({ where: { storeId: store.id } })
     if (count >= quotas.maxProducts) {
       return quotaExceeded(
@@ -59,20 +60,36 @@ export async function POST(req: NextRequest) {
       storeCategoryId = cat.id
     }
 
-    const product = await db.product.create({
-      data: {
-        storeId,
-        name: name.slice(0, 120),
-        emoji: String(body.emoji || "📦").slice(0, 8),
-        imageUrl: images[0] || "",
-        images: JSON.stringify(images),
-        priceUSD,
-        category: String(body.category || "Divers").slice(0, 40),
-        stock: Number.isInteger(Number(body.stock)) && Number(body.stock) > 0 ? Number(body.stock) : 99,
-        // V10 — catégorie de boutique (validée : appartient bien à CETTE boutique)
-        ...(storeCategoryId ? { storeCategoryId } : {}),
-      },
+    // F-07 (audit) — création atomique : le quota est revérifié DANS la même
+    // transaction que le create (mutex boutique + transaction Prisma) — deux
+    // requêtes concurrentes ne peuvent plus dépasser le quota du plan.
+    const result = await withStoreQuotaWrite(store.id, async (tx) => {
+      const n = await tx.product.count({ where: { storeId: store.id } })
+      if (n >= quotas.maxProducts) return { overQuota: true as const, product: null }
+      const product = await tx.product.create({
+        data: {
+          storeId,
+          name: name.slice(0, 120),
+          emoji: String(body.emoji || "📦").slice(0, 8),
+          imageUrl: images[0] || "",
+          images: JSON.stringify(images),
+          priceUSD,
+          category: String(body.category || "Divers").slice(0, 40),
+          stock: Number.isInteger(Number(body.stock)) && Number(body.stock) > 0 ? Number(body.stock) : 99,
+          // V10 — catégorie de boutique (validée : appartient bien à CETTE boutique)
+          ...(storeCategoryId ? { storeCategoryId } : {}),
+        },
+      })
+      return { overQuota: false as const, product }
     })
+    if (result.overQuota) {
+      return quotaExceeded(
+        plan.id === "free"
+          ? `Limite du plan Free atteinte (${quotas.maxProducts} produits). Passe Premium pour en ajouter davantage.`
+          : `Limite de ${quotas.maxProducts} produits atteinte.`,
+      )
+    }
+    const product = result.product
 
     return NextResponse.json(
       { product: { ...product, images: normalizeImages(product.images) } },

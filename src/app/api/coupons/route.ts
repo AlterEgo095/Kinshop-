@@ -4,6 +4,7 @@ import type { CouponType } from "@/lib/kinshop"
 import { requireStoreOwner, forbidden, quotaExceeded } from "@/lib/auth"
 import { planOf } from "@/lib/plans"
 import { getPlanQuotas, isFeatureOn } from "@/lib/config-registry"
+import { withStoreQuotaWrite } from "@/lib/quota-guard"
 
 const CODE_RE = /^[A-Z0-9]{3,16}$/
 
@@ -50,7 +51,7 @@ export async function POST(req: NextRequest) {
     if (!guard.ok) return guard.response
     const plan = planOf(guard.store)
 
-    // ── Feature flag + quota codes promo (serveur, paramétrables admin) ──
+    // ── Feature flag + quota codes promo (pré-check UX — vérification FAIS FOI atomique ci-dessous) ──
     if (!(await isFeatureOn("coupons"))) {
       return forbidden("Les codes promo sont momentanément désactivés sur la plateforme.")
     }
@@ -76,10 +77,24 @@ export async function POST(req: NextRequest) {
     const maxUses = Math.max(0, Math.floor(Number(body.maxUses) || 0))
 
     try {
-      const coupon = await db.coupon.create({
-        data: { storeId: guard.store.id, code, type, value, minTotalUSD, maxUses, active: true },
+      // F-07 (audit) — quota revérifié + création dans UNE transaction atomique
+      // (mutex boutique + transaction Prisma) : pas de dépassement possible.
+      const result = await withStoreQuotaWrite(guard.store.id, async (tx) => {
+        const n = await tx.coupon.count({ where: { storeId: guard.store.id } })
+        if (n >= quotas.maxCoupons) return { overQuota: true as const, coupon: null }
+        const coupon = await tx.coupon.create({
+          data: { storeId: guard.store.id, code, type, value, minTotalUSD, maxUses, active: true },
+        })
+        return { overQuota: false as const, coupon }
       })
-      return NextResponse.json({ coupon }, { status: 201 })
+      if (result.overQuota) {
+        return quotaExceeded(
+          plan.id === "free"
+            ? `Limite du plan Free atteinte (${quotas.maxCoupons} codes promo). Passe Premium pour en créer davantage.`
+            : `Limite de ${quotas.maxCoupons} codes promo atteinte.`,
+        )
+      }
+      return NextResponse.json({ coupon: result.coupon }, { status: 201 })
     } catch {
       // viol de l'unicité @@unique([storeId, code])
       return NextResponse.json({ error: `Le code ${code} existe déjà pour cette boutique.` }, { status: 409 })

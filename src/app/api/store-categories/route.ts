@@ -6,6 +6,7 @@ import { getPlanQuotas } from "@/lib/config-registry"
 import { rateLimit, clientIp } from "@/lib/ratelimit"
 import { slugify } from "@/lib/kinshop"
 import { logAudit } from "@/lib/audit"
+import { withStoreQuotaWrite } from "@/lib/quota-guard"
 
 // Catégories PROPRES À UNE BOUTIQUE — propriétaire uniquement (V10)
 // Anti-abus : quota par plan, déduplication par boutique, longueur bornée,
@@ -39,7 +40,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Ce nom est réservé." }, { status: 400 })
     }
 
-    // Quota par plan (côté serveur)
+    // Quota par plan (pré-check UX — vérification FAIS FOI atomique ci-dessous)
     const plan = isPremiumActive(store) ? "premium" : "free"
     const quotas = await getPlanQuotas(plan)
     const count = await db.storeCategory.count({ where: { storeId: store.id } })
@@ -50,7 +51,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Déduplication par boutique (nom et slug)
+    // Déduplication par boutique (nom et slug) — pré-check UX
     const catSlug = slugify(name)
     if (!catSlug) return NextResponse.json({ error: "Nom invalide." }, { status: 400 })
     const dup = await db.storeCategory.findFirst({
@@ -66,9 +67,32 @@ export async function POST(req: NextRequest) {
       else return NextResponse.json({ error: "Catégorie globale introuvable." }, { status: 400 })
     }
 
-    const cat = await db.storeCategory.create({
-      data: { storeId: store.id, name, slug: catSlug, globalCategoryId, order: count },
+    // F-07 (audit) — dédup + quota + création dans UNE transaction atomique
+    // (mutex boutique + transaction Prisma) : ni dépassement de quota, ni
+    // doublon par course critique entre deux requêtes concurrentes.
+    const result = await withStoreQuotaWrite(store.id, async (tx) => {
+      const dupTx = await tx.storeCategory.findFirst({
+        where: { storeId: store.id, OR: [{ name }, { slug: catSlug }] },
+      })
+      if (dupTx) return { dup: true as const, overQuota: false as const, category: null }
+      const n = await tx.storeCategory.count({ where: { storeId: store.id } })
+      if (n >= quotas.maxStoreCategories) return { dup: false as const, overQuota: true as const, category: null }
+      const category = await tx.storeCategory.create({
+        data: { storeId: store.id, name, slug: catSlug, globalCategoryId, order: n },
+      })
+      return { dup: false as const, overQuota: false as const, category }
     })
+    if (result.dup) {
+      return NextResponse.json({ error: "Cette catégorie existe déjà dans ta boutique." }, { status: 409 })
+    }
+    if (result.overQuota) {
+      return NextResponse.json(
+        { error: `Limite du plan ${plan === "free" ? "gratuit" : "Premium"} atteinte (${quotas.maxStoreCategories} catégories).`, quota: true },
+        { status: 402 },
+      )
+    }
+
+    const cat = result.category
 
     await logAudit({
       action: "category.store.create",

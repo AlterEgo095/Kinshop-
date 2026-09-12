@@ -23,6 +23,9 @@ function fillSeries(rows: { day: Date; count: number }[], days: string[]): Daily
 
 // GET /api/stats?slug=xxx&days=N — Statistiques vendeur (V8 : propriétaire uniquement,
 // historique plafonné selon le plan : Free 7 jours, Premium 60 jours)
+// F-06 (audit abonnement) — TOUS les agrégats (séries, périodes, totaux, clients
+// fidèles) sont clampés à l'horizon du plan : un compte Free ne peut plus lire
+// des compteurs all-time au-delà de sa fenêtre d'historique autorisée.
 export async function GET(req: NextRequest) {
   try {
     const sp = req.nextUrl.searchParams
@@ -49,6 +52,13 @@ export async function GET(req: NextRequest) {
       dayLabels.push(dayKey(d))
     }
 
+    // F-06 — horizon du plan pour les TOTAUX : planSince = début de la fenêtre
+    // autorisée par statsDays (planSince ≤ since, la fenêtre demandée est donc
+    // toujours couverte). Les compteurs « totaux » ne dépassent jamais
+    // l'historique autorisé par le plan.
+    const planSince = new Date(since)
+    planSince.setUTCDate(planSince.getUTCDate() - (quotas.statsDays - days))
+
     const [visitRows, orderRows, viewsAgg, allOrders] = await Promise.all([
       db.storeVisit.findMany({
         where: { storeId: guard.store.id, day: { gte: since } },
@@ -68,8 +78,16 @@ export async function GET(req: NextRequest) {
           createdAt: true,
         },
       }),
-      db.storeVisit.aggregate({ where: { storeId: guard.store.id }, _sum: { count: true } }),
-      db.order.findMany({ where: { storeId: guard.store.id }, select: { customerPhone: true, status: true } }),
+      // F-06 — total de vues clampé à l'horizon du plan (plus de compteur all-time)
+      db.storeVisit.aggregate({
+        where: { storeId: guard.store.id, day: { gte: planSince } },
+        _sum: { count: true },
+      }),
+      // F-06 — total de commandes clampé à l'horizon du plan (plus de compteur all-time)
+      db.order.findMany({
+        where: { storeId: guard.store.id, createdAt: { gte: planSince } },
+        select: { customerPhone: true, status: true },
+      }),
     ])
 
     const viewsSeries = fillSeries(visitRows, dayLabels)
@@ -136,7 +154,7 @@ export async function GET(req: NextRequest) {
       if (o.paymentMethod in payments) payments[o.paymentMethod as PaymentMethod] += 1
     }
 
-    // Clients fidèles (≥ 2 commandes, toutes périodes)
+    // Clients fidèles (≥ 2 commandes, dans l'horizon du plan — F-06)
     const phoneCounts = new Map<string, number>()
     for (const o of allOrders) {
       phoneCounts.set(o.customerPhone, (phoneCounts.get(o.customerPhone) ?? 0) + 1)

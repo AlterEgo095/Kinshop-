@@ -9,6 +9,7 @@ import {
 import { requireStoreOwner, forbidden, quotaExceeded } from "@/lib/auth"
 import { planOf } from "@/lib/plans"
 import { getPlanQuotas, isFeatureOn } from "@/lib/config-registry"
+import { withStoreQuotaWrite } from "@/lib/quota-guard"
 
 const VALID_STATUSES = ["draft", "sent", "paid"]
 
@@ -32,7 +33,7 @@ export async function POST(req: NextRequest) {
       return forbidden("KinFacture est momentanément désactivé sur la plateforme.")
     }
 
-    // ── Quota mensuel KinFacture (mois civile UTC) ──
+    // ── Quota mensuel KinFacture (mois civile UTC — pré-check UX, vérification FAIS FOI atomique ci-dessous) ──
     const quotas = await getPlanQuotas(plan.id)
     const monthStart = new Date()
     monthStart.setUTCDate(1)
@@ -59,22 +60,38 @@ export async function POST(req: NextRequest) {
     }
     const totalUSD = Math.round((totalFC / store.rateFC) * 100) / 100
 
-    const invoice = await db.invoice.create({
-      data: {
-        number: makeInvoiceNumber(),
-        storeId: store.id,
-        clientName: clientName.slice(0, 80),
-        clientPhone: String(body.clientPhone || "").replace(/\D/g, "").slice(0, 15),
-        items: JSON.stringify(items),
-        totalFC,
-        totalUSD,
-        note: String(body.note || "").slice(0, 300),
-        dueDate: String(body.dueDate || "").slice(0, 10),
-        status: "draft",
-      },
+    // F-07 (audit) — quota mensuel revérifié + création dans UNE transaction
+    // atomique (mutex boutique + transaction Prisma) : pas de dépassement possible.
+    const result = await withStoreQuotaWrite(store.id, async (tx) => {
+      const n = await tx.invoice.count({
+        where: { storeId: store.id, createdAt: { gte: monthStart } },
+      })
+      if (n >= quotas.maxInvoicesPerMonth) return { overQuota: true as const, invoice: null }
+      const invoice = await tx.invoice.create({
+        data: {
+          number: makeInvoiceNumber(),
+          storeId: store.id,
+          clientName: clientName.slice(0, 80),
+          clientPhone: String(body.clientPhone || "").replace(/\D/g, "").slice(0, 15),
+          items: JSON.stringify(items),
+          totalFC,
+          totalUSD,
+          note: String(body.note || "").slice(0, 300),
+          dueDate: String(body.dueDate || "").slice(0, 10),
+          status: "draft",
+        },
+      })
+      return { overQuota: false as const, invoice }
     })
+    if (result.overQuota) {
+      return quotaExceeded(
+        plan.id === "free"
+          ? `Quota du plan Free atteint (${quotas.maxInvoicesPerMonth} factures ce mois). Passe Premium pour émettre davantage de factures.`
+          : `Quota de ${quotas.maxInvoicesPerMonth} factures par mois atteint.`,
+      )
+    }
 
-    return NextResponse.json({ invoice }, { status: 201 })
+    return NextResponse.json({ invoice: result.invoice }, { status: 201 })
   } catch (e) {
     console.error("POST /api/invoices", e)
     return NextResponse.json({ error: "Erreur serveur." }, { status: 500 })
