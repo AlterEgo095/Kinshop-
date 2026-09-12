@@ -228,10 +228,11 @@ export function KinShopApp({ initialSlug }: { initialSlug?: string }) {
       else if (hashTarget?.type === "cv") setView({ name: "cv" })
       else if (hashTarget?.type === "orders") setView({ name: "orders" })
       else if (hashTarget?.type === "invoice") setView({ name: "invoice-public", number: hashTarget.number })
+      else if (hashTarget?.type === "verify") setView({ name: "invoice-verify", number: hashTarget.number })
       else if (hashTarget?.type === "track") setView({ name: "track", ref: hashTarget.ref })
       else
         setView((v) =>
-          v.name === "store" || v.name === "premium-success" || v.name === "admin" || v.name === "cv" || v.name === "invoice-public" || v.name === "track" || v.name === "orders"
+          v.name === "store" || v.name === "premium-success" || v.name === "admin" || v.name === "cv" || v.name === "invoice-public" || v.name === "invoice-verify" || v.name === "track" || v.name === "orders"
             ? { name: "landing" }
             : v,
         )
@@ -467,6 +468,9 @@ export function KinShopApp({ initialSlug }: { initialSlug?: string }) {
       break
     case "invoice-public":
       content = <InvoicePublicView number={view.number} onHome={goHome} />
+      break
+    case "invoice-verify":
+      content = <InvoiceVerifyView initialNumber={view.number} onHome={goHome} />
       break
     case "track":
       content = <TrackOrderView initialRef={view.ref} onHome={goHome} />

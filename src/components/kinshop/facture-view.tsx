@@ -62,10 +62,10 @@ export function InvoicePublicView({ number, onHome }: { number: string; onHome?:
           setVerify(
             v.cancelled
               ? { kind: "cancelled" }
-              : v.valid
-                ? { kind: "ok" }
-                : v.legacy
-                  ? { kind: "legacy" }
+              : v.legacy
+                ? { kind: "legacy" }
+                : v.valid
+                  ? { kind: "ok" }
                   : { kind: "bad" },
           )
         }
