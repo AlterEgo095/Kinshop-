@@ -474,3 +474,33 @@ Stage Summary (final Task 18) :
 - V10 EN PRODUCTION (commit 3a7ebe3, PM2 online) : marketplace multi-boutiques sécurisé, traçable et évolutif. Chaque commande exige un compte (401 anonyme vérifié en prod), prix recalculés serveur, 3 dimensions de statut avec graphes de transitions serveur, OrderEvent immuable, catégories globales (12 en prod) + catégories boutique avec quotas, remboursements (validation admin), signalements, vérification des propriétaires, factures INV- avec hash + vérification QR publique, Boost ≠ Premium avec accueil sponsorisé honnête, super admin 12 onglets, journal d'audit global multi-acteurs, visiteurs uniques dédupliqués.
 - Tests : V10 76/76 (local) puis 74/76→76/76 en prod (2 checks 403/404 ajustés : la cible inexistante est refusée avant le check de propriété) ; régression V8 51/51, V9 26/26 ; fix racine du cache config découvert par la non-régression.
 - Hygiène : données de test prod supprimées (2 comptes, 1 boutique, 5 commandes, 0 résidu) ; journal d'audit conservé (immuable par conception) ; helper SSH/cleanup éphémères supprimés ; seed catégories exécuté en prod (12).
+
+---
+Task ID: 17
+Agent: Z.ai Code (principal)
+Task: Récupérer la clé API Chariow sur le VPS (/opt/SITE-AENEWS) et connecter le paiement réel dans KinShop « sans quitter la plateforme »
+
+Work Log:
+- SSH VPS (helper paramiko temporaire, supprimé après usage) : exploration /opt/SITE-AENEWS → clé API trouvée en dur dans frontend/src/app/api/checkout/charow/route.ts et payment/check/route.ts : sk_tmby5t9k_... (base https://api.chariow.com/v1, store store.aenews.store).
+- Clé validée en direct : GET /v1/products OK (23 produits AENEWS, prix en CDF, IDs prd_xxx).
+- Lecture des patterns éprouvés SITE-AENEWS : POST /v1/checkout (produits course/downloadable/license/bundle SEULEMENT — service/coaching refusés 422), GET /v1/sales/{id} (vérification statut), purchase.id = ID de vente utilisable en GET.
+- Tentative création produit via API : POST /v1/products NON supporté → les produits se créent dans le dashboard Chariow (l'utilisateur le fera).
+- KinShop avait déjà toute l'architecture (V6) : /api/premium/checkout, webhook /api/chariow/pulse (HMAC Pulse), lib chariow.ts, écran /#/premium/succes. Il ne manquait que les clés.
+- CHARIOW_API_KEY ajoutée au .env local ET /opt/KINSHOP/.env (chmod 600) + APP_URL=https://kinshop.aenews.digital.
+- Nouveau paramètre dynamique V9 `payments.chariowProductId` (section Paiements, non public) : l'ID produit se colle dans la console ADMIN après création du produit → paiement réel actif SANS redéploiement. Fallback variable d'env.
+- chariow.ts : resolveChariowProductId() (config admin > env), isChariowLiveAsync(), fetchSale(), fetchRecentSales() + erreurs actionnables FR (422 type produit, 404 non publié).
+- Checkout Premium en POPUP (sans quitter la plateforme) : window.open → l'utilisateur paie mobile money dans une fenêtre séparée, le dashboard surveille (polling 4 s + postMessage) et affiche « Premium activé » automatiquement ; fallback redirection si popup bloquée. premium-success : mode popup (postMessage opener + auto-fermeture).
+- Activation Premium fiabilisée (src/lib/premium.ts) : verifyAndApplyPremium() croise ventes Chariow (vente explicite + listing produit), email de facturation, statut completed, fenêtre 48 h, idempotence stricte (chariowSaleId jamais rejouée, garde de course updateMany + OR null).
+- POST /api/premium/verify (nouveau) : réservé au propriétaire (anti-IDOR). Pré-check dans /api/premium/checkout : mode already_paid (popup fermée avant page de retour). 3 chemins d'activation : webhook Pulse, verify à la demande, pré-check.
+- Tests curl locaux : sim mode OK, branchement produit dynamique OK, erreur 422 transformée en message actionnable OK, verify not_live/no_sale OK, pré-check OK.
+- Déploiements prod : 5c10e73 puis 477029d (update.sh + pm2 reload). PATCH /api/admin/config avec la nouvelle clé OK en prod (résolution dynamique instantanée), audit log journalise ancien→nouveau (4 entrées vérifiées).
+- Tests sécurité prod : verify sans session → 401 ; utilisateur authentifié sur boutique étrangère → 403 « Cette boutique ne t'appartient pas. » (anti-IDOR validé).
+- Vérification navigateur : prod home OK, console admin prod affiche le champ « Chariow — ID produit Premium (prd_xxx) » dans Configuration → Paiements, aller-retour UI saisie/sauvegarde/persistance/effacement validé, zéro erreur console.
+- Incident maîtrisé : ssh_tmp.py commité par erreur avec git add -A → corrigé immédiatement (git rm --cached + commit --amend + force push 7cbd89b → 477029d) ; le fichier n'existe plus dans l'historique ni sur disque. Données de test (probe/probe2/probe3) supprimées de la DB prod.
+
+Stage Summary:
+- Paiement Chariow RÉEL branché dans KinShop : clé API configurée local + prod, jamais en dur dans le code.
+- Production = 477029d (GitHub main), PM2 reload OK, home 200, zéro erreur console.
+- POUR ACTIVER LE PAIEMENT RÉEL, IL RESTE À L'UTILISATEUR : ① créer le produit « KinShop Premium » dans le dashboard Chariow en type COURSE ou DOWNLOADABLE (PAS « Service » — refusé par l'API), prix 3 $, statut publié ; ② coller son ID prd_xxx dans Console ADMIN → Configuration → Paiements → « Chariow — ID produit Premium » → Enregistrer. Le paiement s'active instantanément.
+- Recommandé (optionnel) : configurer le Pulse Chariow (Automations → Pulses → URL https://kinshop.aenews.digital/api/chariow/pulse, événement successful.sale) et coller le signing secret dans CHARIOW_PULSE_SECRET (.env) pour l'activation instantanée par webhook ; sans webhook, la vérification API à la demande couvre déjà l'activation.
+- Sécurité : anti-IDOR 403 validé, 401 sans session, idempotence des ventes, aucun secret dans le code, helper SSH supprimé (mot de passe SSH déjà flaggé à faire tourner).
