@@ -12,7 +12,13 @@ export async function GET(req: NextRequest) {
   if (denied) return denied
 
   try {
-    const [stores, productsCount, orders, pulseCount, invoicesTotal, reviewsTotal, reviewsHidden, couponsTotal, couponsActive, visitsAgg] = await Promise.all([
+    const [usersTotal, ownersCount, reportsOpen, boostsActive, refundsPending, verifiedStores, stores, productsCount, orders, pulseCount, invoicesTotal, reviewsTotal, reviewsHidden, couponsTotal, couponsActive, visitsAgg] = await Promise.all([
+      db.user.count(),
+      db.user.count({ where: { stores: { some: {} } } }),
+      db.report.count({ where: { status: { in: ["open", "under_review", "action_required"] } } }),
+      db.boostCampaign.count({ where: { status: "active", endAt: { gte: new Date() } } }),
+      db.refund.count({ where: { status: { in: ["requested", "approved"] } } }),
+      db.store.count({ where: { verificationStatus: "verified" } }),
       db.store.findMany({
         select: {
           id: true, slug: true, name: true, logoEmoji: true, ownerName: true,
@@ -22,7 +28,7 @@ export async function GET(req: NextRequest) {
       db.product.count(),
       db.order.findMany({
         select: {
-          totalUSD: true, totalFC: true, status: true, paymentMethod: true,
+          totalUSD: true, totalFC: true, status: true, paymentMethod: true, paymentStatus: true,
           createdAt: true, storeId: true, ref: true, customerName: true,
         },
         orderBy: { createdAt: "desc" },
@@ -166,6 +172,15 @@ export async function GET(req: NextRequest) {
       couponsTotal,
       couponsActive,
       visitsLast7d: visitsAgg._sum.count ?? 0,
+      // V10 — gouvernance marketplace
+      usersTotal,
+      ownersCount,
+      customersTotal: Math.max(0, usersTotal - ownersCount),
+      reportsOpen,
+      boostsActive,
+      refundsPending,
+      verifiedStores,
+      cashPending: orders.filter((o) => o.paymentStatus === "cash_pending").length,
     })
   } catch (e) {
     console.error("GET /api/admin/overview", e)

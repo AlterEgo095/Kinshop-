@@ -42,6 +42,7 @@ import {
   LogOut,
 } from "lucide-react"
 import { toast } from "sonner"
+import { OrderWorkflowControls, StoreCategoriesManager, BoostPanel } from "@/components/kinshop/dashboard-marketplace"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -127,12 +128,18 @@ interface DashboardProps {
   config?: PublicConfig
 }
 
-const STATUS_CONFIG: Record<OrderStatus, { label: string; variant: "default" | "secondary" | "destructive" | "outline"; className: string }> = {
+const STATUS_CONFIG: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline"; className: string }> = {
   new: { label: "Nouvelle", variant: "outline", className: "bg-amber-100 text-amber-800 border-amber-300" },
   paid: { label: "Payée en ligne", variant: "outline", className: "bg-emerald-50 text-emerald-700 border-emerald-400" },
   confirmed: { label: "Confirmée", variant: "outline", className: "bg-emerald-100 text-emerald-800 border-emerald-300" },
+  processing: { label: "En préparation", variant: "outline", className: "bg-sky-100 text-sky-800 border-sky-300" },
+  ready: { label: "Prête", variant: "outline", className: "bg-violet-100 text-violet-800 border-violet-300" },
+  out_for_delivery: { label: "En livraison", variant: "outline", className: "bg-indigo-100 text-indigo-800 border-indigo-300" },
   delivered: { label: "Livrée", variant: "default", className: "bg-emerald-600 text-white border-emerald-600" },
   cancelled: { label: "Annulée", variant: "destructive", className: "" },
+  returned: { label: "Retournée", variant: "outline", className: "bg-orange-100 text-orange-800 border-orange-300" },
+  refunded: { label: "Remboursée", variant: "outline", className: "bg-zinc-200 text-zinc-700 border-zinc-300" },
+  disputed: { label: "En litige", variant: "destructive", className: "" },
 }
 
 export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, config = {} }: DashboardProps) {
@@ -1220,6 +1227,8 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
 
           {/* ─── PRODUITS ─── */}
           <TabsContent value="produits" className="space-y-4">
+            {/* V10 — Catégories de la boutique (globales + locales) */}
+            <StoreCategoriesManager slug={slug} onChanged={loadOrders} />
             <div className="flex items-center justify-between">
               <p className="text-sm text-muted-foreground">{products.length} produit(s) en vente</p>
               <Button onClick={() => setAddOpen(true)}>
@@ -1360,35 +1369,22 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
                           )}
                         </div>
 
+                        {/* V10 — Workflow complet validé serveur (transitions + livraison + encaissement + historique) */}
+                        <OrderWorkflowControls
+                          orderId={order.id}
+                          ref={order.ref}
+                          status={order.status}
+                          paymentMethod={order.paymentMethod}
+                          paymentStatus={order.paymentStatus}
+                          deliveryStatus={(order as OrderData & { deliveryStatus?: string }).deliveryStatus ?? "not_assigned"}
+                          deliveryAttempts={(order as OrderData & { deliveryAttempts?: number }).deliveryAttempts ?? 0}
+                          onChanged={loadOrders}
+                        />
                         <div className="flex flex-wrap gap-2">
-                          {order.status === "new" && (
-                            <Button size="sm" onClick={() => updateOrderStatus(order, "confirmed")}>
-                              <CheckCircle2 className="w-4 h-4 mr-1" />
-                              Confirmer
-                            </Button>
-                          )}
-                          {order.status === "confirmed" && (
-                            <Button size="sm" onClick={() => updateOrderStatus(order, "delivered")}>
-                              <PackageCheck className="w-4 h-4 mr-1" />
-                              Marquer livrée
-                            </Button>
-                          )}
                           <Button size="sm" variant="outline" onClick={() => contactClient(order)}>
                             <MessageCircle className="w-4 h-4 mr-1 text-emerald-600" />
                             Contacter sur WhatsApp
                           </Button>
-                          {order.paymentMethod === "cash" && order.paymentStatus !== "paid" && (
-                            <Button size="sm" variant="outline" onClick={() => markCashReceived(order)}>
-                              <Banknote className="w-4 h-4 mr-1 text-emerald-600" />
-                              Paiement reçu
-                            </Button>
-                          )}
-                          {order.status !== "cancelled" && order.status !== "delivered" && (
-                            <Button size="sm" variant="ghost" onClick={() => updateOrderStatus(order, "cancelled")} className="text-destructive hover:text-destructive">
-                              <XCircle className="w-4 h-4 mr-1" />
-                              Annuler
-                            </Button>
-                          )}
                         </div>
                       </CardContent>
                     </Card>
@@ -1674,9 +1670,11 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
           </TabsContent>
 
           {/* ─── ALERTES SMS (V2) ─── */}
-          {/* ─── V6 CROISSANCE : livraison + codes promo ─── */}
+          {/* ─── V6 CROISSANCE : livraison + codes promo + BOOST V10 ─── */}
           <TabsContent value="croissance" className="space-y-4">
             <div className="grid md:grid-cols-2 gap-4 items-start">
+              {/* V10 — Promotion payante (indépendante de Premium) */}
+              <BoostPanel slug={slug} />
               {/* Zones de livraison */}
               <Card>
                 <CardContent className="p-5 space-y-3">

@@ -54,7 +54,7 @@ export interface OrderItem {
 
 export type PaymentMethod = "mpesa" | "airtel" | "orange" | "cash"
 export type OrderStatus = "new" | "paid" | "confirmed" | "delivered" | "cancelled"
-export type PaymentStatus = "unpaid" | "pending" | "paid" | "failed"
+export type PaymentStatus = "unpaid" | "pending" | "cash_pending" | "paid" | "failed" | "refunded"
 
 export interface OrderData {
   id: string
@@ -305,8 +305,11 @@ export const PAYMENT_LABELS: Record<PaymentMethod, string> = {
 export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
   unpaid: "Non payée",
   pending: "Paiement en cours",
-  paid: "Payée en ligne",
+  // V10 — espèces à la livraison : état distinct, JAMAIS « payée » tant que non encaissé
+  cash_pending: "À payer à la livraison",
+  paid: "Payée",
   failed: "Paiement échoué",
+  refunded: "Remboursée",
 }
 
 /** Détecte l'opérateur RDC d'après le préfixe (indice UX, jamais bloquant). */
@@ -399,6 +402,10 @@ export function makeOrderRef(): string {
   const r = Math.random().toString(36).toUpperCase().slice(2, 4)
   return `KIN-${t}${r}`
 }
+
+// V10 — La numérotation séquentielle (CMD-YYYY-NNNNNN) est produite côté SERVEUR
+// via nextCounter() (src/lib/invoice-integrity.ts). makeOrderRef reste disponible
+// pour tout usage non-commercial (aucun usage métier depuis la V10).
 
 /* ─────────── Divers ─────────── */
 

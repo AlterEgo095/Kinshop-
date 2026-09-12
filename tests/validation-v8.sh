@@ -145,12 +145,15 @@ if [ -n "$OID_A" ]; then
   code=$(curl -s -o /dev/null -w "%{http_code}" -b $JAR_B -X PATCH "$B/api/orders" -H "Content-Type: application/json" -d "{\"id\":\"$OID_A\",\"status\":\"cancelled\"}")
   ck "Bob → annuler commande d'Alice" 403 "$code"
 else echo "  ⚠️ pas de commande chez Alice — créé une pour le test"; fi
-# commande réelle passée en client public sur la boutique d'Alice (flux client préservé)
+# commande réelle passée par un COMPTE CLIENT sur la boutique d'Alice
+# (V10 : la commande anonyme est interdite côté serveur — comportement de sécurité voulu)
 PRODUCT_A=$(curl -s "$B/api/stores?slug=$STORE_SLUG_A" | grep -o '"id":"[^"]*"' | sed -n 2p | cut -d'"' -f4)
-ORDER=$(curl -s -X POST "$B/api/orders" -H "Content-Type: application/json" -d "{\"slug\":\"$STORE_SLUG_A\",\"customerName\":\"Client Test\",\"customerPhone\":\"0833333333\",\"items\":[{\"productId\":\"$PRODUCT_A\",\"qty\":1}],\"paymentMethod\":\"cash\"}")
+JAR_CLIENT="@/tmp/v8_cookies_client.txt"
+CURL_CODE=$(curl -s -c /tmp/v8_cookies_client.txt -o /dev/null -w "%{http_code}" -X POST "$B/api/auth/register" -H "Content-Type: application/json" -d "{\"email\":\"client-$RANDOM@kinshop.cd\",\"password\":\"test1234\",\"name\":\"Client V8\",\"whatsapp\":\"0833333333\"}")
+ORDER=$(curl -s -b /tmp/v8_cookies_client.txt -X POST "$B/api/orders" -H "Content-Type: application/json" -d "{\"slug\":\"$STORE_SLUG_A\",\"customerName\":\"Client Test\",\"customerPhone\":\"0833333333\",\"items\":[{\"productId\":\"$PRODUCT_A\",\"qty\":1}],\"paymentMethod\":\"cash\"}")
 ORDER_REF=$(echo "$ORDER" | grep -o '"ref":"[^"]*"' | head -1 | cut -d'"' -f4)
-echo "     → commande client créée (flux public préservé) : $ORDER_REF"
-OID_A=$(curl -s -b $JAR_A "$B/api/orders?slug=$STORE_SLUG_A" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+echo "     → inscription client: $CURL_CODE, commande client créée : $ORDER_REF"
+OID_A=$(echo "$ORDER" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 code=$(curl -s -o /dev/null -w "%{http_code}" -b $JAR_B -X PATCH "$B/api/orders" -H "Content-Type: application/json" -d "{\"id\":\"$OID_A\",\"status\":\"cancelled\"}")
 ck "Bob → annuler commande d'Alice" 403 "$code"
 code=$(curl -s -o /dev/null -w "%{http_code}" -b $JAR_A -X PATCH "$B/api/orders" -H "Content-Type: application/json" -d "{\"id\":\"$OID_A\",\"status\":\"confirmed\"}")

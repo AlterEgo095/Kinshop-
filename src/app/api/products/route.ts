@@ -47,6 +47,18 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // V10 — catégorie de boutique optionnelle : l'ID doit appartenir à CETTE boutique
+    let storeCategoryId: string | undefined
+    if (body.storeCategoryId) {
+      const cat = await db.storeCategory.findFirst({
+        where: { id: String(body.storeCategoryId), storeId: store.id },
+      })
+      if (!cat) {
+        return NextResponse.json({ error: "Catégorie de boutique invalide." }, { status: 400 })
+      }
+      storeCategoryId = cat.id
+    }
+
     const product = await db.product.create({
       data: {
         storeId,
@@ -57,6 +69,8 @@ export async function POST(req: NextRequest) {
         priceUSD,
         category: String(body.category || "Divers").slice(0, 40),
         stock: Number.isInteger(Number(body.stock)) && Number(body.stock) > 0 ? Number(body.stock) : 99,
+        // V10 — catégorie de boutique (validée : appartient bien à CETTE boutique)
+        ...(storeCategoryId ? { storeCategoryId } : {}),
       },
     })
 
@@ -88,11 +102,25 @@ export async function PATCH(req: NextRequest) {
     const plan = planOf(guard.store)
     const quotas = await getPlanQuotas(plan.id)
 
-    const data: Record<string, string | number> = {}
+    const data: Record<string, string | number | null> = {}
 
     if (typeof body.name === "string" && body.name.trim()) data.name = body.name.trim().slice(0, 120)
     if (typeof body.emoji === "string" && body.emoji.trim()) data.emoji = body.emoji.slice(0, 8)
     if (typeof body.category === "string" && body.category.trim()) data.category = body.category.slice(0, 40)
+    // V10 — catégorie de boutique (validée contre la boutique du produit) / détachement si null
+    if (body.storeCategoryId !== undefined) {
+      if (body.storeCategoryId === null || body.storeCategoryId === "") {
+        data.storeCategoryId = null
+      } else {
+        const cat = await db.storeCategory.findFirst({
+          where: { id: String(body.storeCategoryId), storeId: product.storeId },
+        })
+        if (!cat) {
+          return NextResponse.json({ error: "Catégorie de boutique invalide." }, { status: 400 })
+        }
+        data.storeCategoryId = cat.id
+      }
+    }
     if (Number(body.priceUSD) > 0) data.priceUSD = Number(body.priceUSD)
     if (Number.isInteger(Number(body.stock)) && Number(body.stock) >= 0) data.stock = Number(body.stock)
 

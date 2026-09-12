@@ -27,6 +27,7 @@ import {
   formatUSD,
   type TrackOrderData,
 } from "@/lib/kinshop"
+import { DELIVERY_STATUS_LABELS, EVENT_TYPE_LABELS, ORDER_STATUS_LABELS, type OrderEventType } from "@/lib/order-workflow"
 
 interface TrackOrderViewProps {
   initialRef: string
@@ -52,21 +53,25 @@ export function TrackOrderView({ initialRef, onHome }: TrackOrderViewProps) {
   const [loading, setLoading] = useState(false)
   const [order, setOrder] = useState<TrackOrderData | null>(null)
   const [error, setError] = useState("")
+  // V10 — Frise d'événements publique (types sûrs uniquement, sans données internes)
+  const [events, setEvents] = useState<{ type: string; newValue?: string; reason?: string; at: string }[]>([])
 
   const lookup = useCallback(async (ref: string) => {
     const clean = ref.trim().toUpperCase()
     if (!clean) {
-      setError("Entre ta référence de commande (ex : KIN-XXXX).")
+      setError("Entre ta référence de commande (ex : CMD-2026-000001).")
       return
     }
     setLoading(true)
     setError("")
     setOrder(null)
+    setEvents([])
     try {
       const res = await fetch(`/api/orders/track?ref=${encodeURIComponent(clean)}`)
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "Commande introuvable.")
       setOrder(data.order)
+      if (Array.isArray(data.events)) setEvents(data.events)
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erreur inconnue")
     } finally {
@@ -229,6 +234,33 @@ export function TrackOrderView({ initialRef, onHome }: TrackOrderViewProps) {
                       Paiement mobile money confirmé en ligne ✅
                     </div>
                   )}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* V10 — Historique détaillé (frise publique, immuable) */}
+            {events.length > 0 && (
+              <Card>
+                <CardContent className="p-5">
+                  <p className="font-bold text-sm mb-3 flex items-center gap-1.5">
+                    <Truck className="w-4 h-4 text-primary" /> Historique de la commande
+                  </p>
+                  <ol className="relative border-l-2 border-primary/20 ml-2 space-y-4">
+                    {events.map((ev, i) => (
+                      <li key={`${ev.type}-${ev.at}-${i}`} className="ml-4">
+                        <span className="absolute -left-[7px] w-3 h-3 rounded-full bg-primary/70" aria-hidden="true" />
+                        <p className="text-sm font-semibold">
+                          {EVENT_TYPE_LABELS[ev.type as OrderEventType] ?? ev.type}
+                          {ev.newValue && ORDER_STATUS_LABELS[ev.newValue] ? ` · ${ORDER_STATUS_LABELS[ev.newValue]}` : ""}
+                          {ev.newValue && !ORDER_STATUS_LABELS[ev.newValue] && DELIVERY_STATUS_LABELS[ev.newValue] ? ` · ${DELIVERY_STATUS_LABELS[ev.newValue]}` : ""}
+                        </p>
+                        {ev.reason && <p className="text-xs text-muted-foreground">{ev.reason}</p>}
+                        <p className="text-[11px] text-muted-foreground/70">
+                          {new Date(ev.at).toLocaleString("fr-FR")}
+                        </p>
+                      </li>
+                    ))}
+                  </ol>
                 </CardContent>
               </Card>
             )}

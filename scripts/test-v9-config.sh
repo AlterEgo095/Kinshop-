@@ -85,12 +85,13 @@ check "$code" "201" "flag réactivé → création coupon OK (201)"
 
 echo "── 6. PAIEMENTS : opérateur désactivé → fallback serveur ──"
 PID=$(curl -s "$BASE/api/stores?slug=$SLUG" | python3 -c "import sys,json;print(json.load(sys.stdin)['store']['products'][0]['id'])")
-curl -s -X POST "$BASE/api/orders" -H "Content-Type: application/json" \
+# V10 : commande = compte obligatoire → session vendeur requise (401 sinon, comportement voulu)
+curl -s -b /tmp/v9_cookies.txt -X POST "$BASE/api/orders" -H "Content-Type: application/json" \
   -d "{\"slug\":\"$SLUG\",\"customerName\":\"Client V9\",\"customerPhone\":\"0898765432\",\"paymentMethod\":\"orange\",\"items\":[{\"productId\":\"$PID\",\"qty\":1}]}" > /tmp/v9_o1.json
 m1=$(python3 -c "import json;print(json.load(open('/tmp/v9_o1.json'))['order']['paymentMethod'])" 2>/dev/null)
 check "$m1" "orange" "paiement orange actif → commande en orange"
 curl -s -X PATCH "$BASE/api/admin/config" "${AH[@]}" -d '{"values":{"payment.orange.enabled":false}}' -o /dev/null
-curl -s -X POST "$BASE/api/orders" -H "Content-Type: application/json" \
+curl -s -b /tmp/v9_cookies.txt -X POST "$BASE/api/orders" -H "Content-Type: application/json" \
   -d "{\"slug\":\"$SLUG\",\"customerName\":\"Client V9\",\"customerPhone\":\"0898765432\",\"paymentMethod\":\"orange\",\"items\":[{\"productId\":\"$PID\",\"qty\":1}]}" > /tmp/v9_o2.json
 m2=$(python3 -c "import json;print(json.load(open('/tmp/v9_o2.json'))['order']['paymentMethod'])" 2>/dev/null)
 check "$m2" "mpesa" "orange désactivé → repli serveur sur mpesa (1er actif)"

@@ -12,6 +12,8 @@ datasource db {
 
 model Store {
   id          String    @id @default(cuid())
+  // V10 — Vérification des propriétaires (proportionnelle au risque, gérée admin) : unverified | pending | verified | rejected
+  verificationStatus String @default("unverified")
   slug        String    @unique
   name        String
   ownerName   String
@@ -48,6 +50,9 @@ model Store {
   reviews       Review[]
   coupons       Coupon[]
   deliveryZones DeliveryZone[]
+  // V10 — Catalogue hiérarchisé & promotion payante (indépendante de Premium)
+  storeCategories StoreCategory[]
+  boosts          BoostCampaign[]
 
   @@index([ownerId])
 }
@@ -64,6 +69,9 @@ model User {
   updatedAt    DateTime  @updatedAt
   stores       Store[]
   sessions     Session[]
+  // V10 — Historique client : commandes passées avec ce compte + signalements
+  orders       Order[]
+  reports      Report[]
 }
 
 // V8 — Session opaque : le cookie ne contient qu'un jeton aléatoire, la base
@@ -87,9 +95,16 @@ model Session {
 // plans/prix coexistent — la matrice des droits est dans src/lib/plans.ts.
 model Invoice {
   id           String    @id @default(cuid())
-  number       String    @unique // KF-XXXXXX
+  number       String    @unique // KF-XXXXXX (KinFacture) | INV-YYYY-NNNNNN (facture de commande V10)
   storeId      String
   store        Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  // V10 — Facture émise depuis une commande (source="order") ; null = facture libre KinFacture
+  orderId      String?
+  order        Order?    @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  source       String    @default("manual") // manual | order
+  hash         String    @default("") // empreinte d'intégrité (sha256 du contenu canonique)
+  version      Int       @default(1)
+  relatedInvoiceId String  @default("") // facture rectifiée / avoir → référence de l'originale
   clientName   String
   clientPhone  String    @default("")
   items        String    @default("[]") // JSON [{desc, qty, unitFC}]
@@ -97,7 +112,7 @@ model Invoice {
   totalUSD     Float     @default(0)
   note         String    @default("")
   dueDate      String    @default("") // date d'échéance libre (AAAA-MM-JJ)
-  status       String    @default("draft") // draft | sent | paid
+  status       String    @default("draft") // draft | sent | paid | cancelled | credited (V10)
   paidAt       DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -112,10 +127,46 @@ model Product {
   imageUrl  String   @default("") // image principale (rétrocompat, = images[0])
   images    String   @default("[]") // V4 — galerie multi-photos (JSON string[])
   priceUSD  Float
-  category  String   @default("Divers")
+  category  String   @default("Divers") // V10 — legacy (libellé libre, gardé pour rétrocompat)
+  // V10 — Catégorie de boutique (rattachée éventuellement à une catégorie globale)
+  storeCategoryId String?
+  storeCategory   StoreCategory? @relation(fields: [storeCategoryId], references: [id], onDelete: SetNull)
   stock     Int      @default(99)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([storeCategoryId])
+}
+
+// V10 — Catégories GLOBALES du marketplace (créées par le Super Admin)
+model GlobalCategory {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  slug      String   @unique
+  icon      String   @default("📦")
+  order     Int      @default(0)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  storeCategories StoreCategory[]
+}
+
+// V10 — Catégories PROPRES À UNE BOUTIQUE (créées par le propriétaire)
+model StoreCategory {
+  id        String   @id @default(cuid())
+  storeId   String
+  store     Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  name      String
+  slug      String
+  // Rattachement optionnel à une catégorie globale (navigation marketplace)
+  globalCategoryId String?
+  globalCategory   GlobalCategory? @relation(fields: [globalCategoryId], references: [id], onDelete: SetNull)
+  order     Int      @default(0)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  products  Product[]
+
+  @@unique([storeId, slug])
+  @@index([storeId])
 }
 
 model Order {
@@ -123,6 +174,9 @@ model Order {
   ref           String   @unique
   storeId       String
   store         Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  // V10 — Compte client (null = commande invité legacy pré-V10). Commander exige désormais un compte.
+  userId        String?
+  user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   customerName  String
   customerPhone String
   zone          String   @default("")
@@ -131,10 +185,17 @@ model Order {
   totalFC       Float
   paymentMethod String   @default("mpesa")
   // V2 — Paiement mobile money en ligne de la commande
-  paymentStatus String   @default("unpaid") // unpaid | pending | paid | failed
+  // V10 — vocabulaire étendu : unpaid | pending | cash_pending | paid | failed | refunded
+  paymentStatus String   @default("unpaid")
   paymentRef    String   @default("") // référence de transaction (agrégateur ou simulation)
   payerPhone    String   @default("") // numéro mobile money qui paie (peut différer du client)
   paidAt        DateTime?
+  // V10 — Dimension LIVRAISON indépendante du statut commande et du paiement :
+  // not_assigned | assigned | picked_up | in_transit | out_for_delivery | delivered | failed | returned
+  deliveryStatus   String @default("not_assigned")
+  deliveryAttempts Int    @default(0) // tentatives (relances après échec)
+  deliveryReason   String @default("") // dernier motif structuré (échec/retour)
+  deliveryAddress  String @default("") // adresse de livraison libre (complète la zone)
   // V6 — Récap commerce détaillé (sous-total − remise + livraison)
   couponCode    String   @default("") // code promo appliqué ("" = aucun)
   discountUSD   Float    @default(0) // remise accordée
@@ -144,6 +205,106 @@ model Order {
   status        String   @default("new")
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+  // V10 — Traçabilité (immuable) + remboursements + factures de commande
+  events        OrderEvent[]
+  refunds       Refund[]
+  invoices      Invoice[]
+
+  @@index([userId])
+  @@index([storeId, status])
+}
+
+// V10 — Historique immuable d'une commande : chaque événement critique laisse une trace
+// (qui, quand, de quoi vers quoi, pourquoi). Aucune route ne modifie ni ne supprime une entrée.
+model OrderEvent {
+  id         String   @id @default(cuid())
+  orderId    String
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  type       String // created | status_changed | payment_selected | payment_confirmed | payment_failed | delivery_updated | delivery_failed | delivery_retry | delivery_returned | refund_requested | refund_approved | refund_rejected | refund_executed | invoice_generated | note
+  actorType  String   @default("system") // customer | owner | admin | system
+  actorId    String   @default("")
+  actorLabel String   @default("")
+  oldValue   String   @default("")
+  newValue   String   @default("")
+  reason     String   @default("")
+  createdAt  DateTime @default(now())
+
+  @@index([orderId, createdAt])
+}
+
+// V10 — Remboursement (litige/erreur) : demandé par client ou vendeur, validé et exécuté par l'admin.
+model Refund {
+  id              String   @id @default(cuid())
+  orderId         String
+  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  amountUSD       Float
+  method          String   @default("mobile_money") // mobile_money | cash | other
+  reference       String   @default("") // référence d'exécution (opérateur/reçu)
+  reason          String   @default("")
+  status          String   @default("requested") // requested | approved | rejected | executed
+  requestedByType String   @default("customer") // customer | owner | admin
+  requestedById   String   @default("")
+  handledBy       String   @default("")
+  proofNote       String   @default("") // preuve (note libre, référence de capture)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([orderId])
+}
+
+// V10 — Signalement (boutique/produit/commande/utilisateur) — workflow de modération.
+model Report {
+  id             String   @id @default(cuid())
+  targetType     String // store | product | order | user
+  targetId       String
+  targetLabel    String   @default("") // copie lisible résiliente à la suppression
+  reporterId     String?
+  reporter       User?    @relation(fields: [reporterId], references: [id], onDelete: SetNull)
+  reporterLabel  String   @default("")
+  reason         String   @default("autre") // arnaque | produit_non_conforme | livraison | comportement | autre
+  details        String   @default("")
+  status         String   @default("open") // open | under_review | action_required | resolved | dismissed
+  resolutionNote String   @default("")
+  handledBy      String   @default("")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([targetType, targetId])
+  @@index([status])
+}
+
+// V10 — Promotion payante (Boost) : ACHÈTE DE LA VISIBILITÉ — indépendant de l'abonnement Premium
+// (qui donne des fonctionnalités). Une campagne active met la boutique en avant sur l'accueil,
+// clairement identifiée « Sponsorisé ».
+model BoostCampaign {
+  id          String   @id @default(cuid())
+  storeId     String
+  store       Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  placement   String   @default("home_featured")
+  startAt     DateTime
+  endAt       DateTime
+  costUSD     Float    @default(0)
+  status      String   @default("pending_payment") // pending_payment | active | ended | rejected
+  paymentRef  String   @default("")
+  impressions Int      @default(0)
+  clicks      Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  @@index([storeId])
+  @@index([status, endAt])
+}
+
+// V10 — Compteur atomique (numérotation séquentielle CMD-2026-000001 / INV-2026-000001)
+model Counter {
+  key   String @id
+  value Int    @default(0)
+}
+
+// V10 — Déduplication des visites (hash slug|ip|ua|jour) pour estimer les visiteurs uniques
+model VisitDedup {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  createdAt DateTime @default(now())
 }
 
 // Idempotence des webhooks Chariow (Pulses)
@@ -161,7 +322,8 @@ model StoreVisit {
   storeId   String
   store     Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
   day       DateTime // minuit UTC du jour concerné
-  count     Int      @default(0)
+  count     Int      @default(0) // pages vues boutique
+  unique    Int      @default(0) // V10 — visiteurs uniques estimés (dédup slug|ip|ua|jour)
   updatedAt DateTime @updatedAt
 
   @@unique([storeId, day])
@@ -219,6 +381,10 @@ model DeliveryZone {
   store     Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
   name      String
   feeFC     Float    @default(0) // frais de livraison en FC (0 = gratuit)
+  // V10 — Type d'option de livraison + délai estimé affiché au client
+  // standard | express | pickup | local | national
+  kind      String   @default("standard")
+  etaLabel  String   @default("") // ex. « 24-48 h », « le jour même »
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
 
@@ -232,11 +398,18 @@ model PlatformSetting {
   updatedAt DateTime @updatedAt
 }
 
-// Journal d'audit des actions administrateur
+// Journal d'audit global (V10 : acteurs admin/user/owner/customer/system)
 model AdminAction {
-  id        String   @id @default(cuid())
-  action    String
-  target    String
-  detail    String   @default("")
-  createdAt DateTime @default(now())
+  id         String   @id @default(cuid())
+  action     String
+  target     String
+  detail     String   @default("")
+  actorType  String   @default("admin") // admin | user | owner | customer | system
+  actorId    String   @default("")
+  entityType String   @default("") // store | product | order | invoice | report | refund | boost | config | auth
+  entityId   String   @default("")
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([entityType, entityId])
 }

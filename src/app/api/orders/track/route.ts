@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import type { OrderItem, TrackOrderData } from "@/lib/kinshop"
+import { PUBLIC_EVENT_TYPES } from "@/lib/order-workflow"
 
-// GET /api/orders/track?ref=KIN-XXXX — Suivi public d'une commande par sa référence
-// Renvoie uniquement les données nécessaires au client (jamais le numéro du client).
+// GET /api/orders/track?ref=CMD-2026-000001 — Suivi public d'une commande par sa référence
+// Renvoie uniquement les données nécessaires au client (jamais le numéro du client)
+// + la frise publique d'événements (types sûrs uniquement — pas de détails internes).
 export async function GET(req: NextRequest) {
   try {
     const ref = (req.nextUrl.searchParams.get("ref") || "").trim().toUpperCase()
@@ -29,6 +31,21 @@ export async function GET(req: NextRequest) {
 
     const subtotalUSD = Math.round(items.reduce((s, it) => s + it.priceUSD * it.qty, 0) * 100) / 100
 
+    // V10 — Frise publique : uniquement les événements sûrs pour le client
+    const allEvents = await db.orderEvent.findMany({
+      where: { orderId: order.id },
+      orderBy: { createdAt: "asc" },
+    })
+    const events = allEvents
+      .filter((ev) => PUBLIC_EVENT_TYPES.includes(ev.type as never))
+      .map((ev) => ({
+        type: ev.type,
+        newValue: ev.newValue || undefined,
+        oldValue: ev.oldValue || undefined,
+        reason: ev.reason || undefined,
+        at: ev.createdAt.toISOString(),
+      }))
+
     const data: TrackOrderData = {
       ref: order.ref,
       status: order.status as TrackOrderData["status"],
@@ -53,7 +70,7 @@ export async function GET(req: NextRequest) {
       },
     }
 
-    return NextResponse.json({ order: data })
+    return NextResponse.json({ order: data, events, deliveryStatus: order.deliveryStatus })
   } catch (e) {
     console.error("GET /api/orders/track", e)
     return NextResponse.json({ error: "Erreur serveur." }, { status: 500 })

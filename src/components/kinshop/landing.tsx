@@ -31,6 +31,7 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion"
 import { configNum, configStr, type PublicConfig } from "@/lib/config-defaults"
+import { MarketplaceHome } from "@/components/kinshop/marketplace-home"
 import { buildWhatsAppLink, formatPhoneDisplay } from "@/lib/kinshop"
 
 interface LandingProps {
@@ -44,13 +45,15 @@ interface LandingProps {
   onDemo: () => void
   onOpenDashboard: (slug: string) => void
   onCvExpress: () => void
+  /** V10 — Ouvrir une boutique du marketplace (optionnel : mode domaine) */
+  onOpenStore?: (slug: string) => void
   /** Bandeau d'annonce globale défini dans la console d'administration (vide = aucun) */
   announcement?: string
   /** V9 — Configuration dynamique (feature flags, contenus, paiements, prix premium) */
   config?: PublicConfig
 }
 
-export function Landing({ user, userStore, onCreateStore, onAuth, onLogout, onDemo, onOpenDashboard, onCvExpress, announcement = "", config = {} }: LandingProps) {
+export function Landing({ user, userStore, onCreateStore, onAuth, onLogout, onDemo, onOpenDashboard, onCvExpress, onOpenStore, announcement = "", config = {} }: LandingProps) {
   // V9 — Feature flags & contenus administrables (fallbacks = valeurs par défaut)
   const cvEnabled = config["feature.cvExpress"] !== false
   const invoicesEnabled = config["feature.invoices"] !== false
@@ -385,6 +388,9 @@ export function Landing({ user, userStore, onCreateStore, onAuth, onLogout, onDe
             ))}
           </div>
         </section>
+
+        {/* V10 — Marketplace : sponsorisés (Boost), populaires (visites réelles), nouveautés */}
+        <MarketplaceHome onOpenStore={onOpenStore ?? (() => {})} />
 
         {/* Démo (masquée si fonctionnalité désactivée par l'admin) */}
         {demoEnabled && (

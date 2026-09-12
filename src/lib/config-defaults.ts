@@ -23,6 +23,7 @@ export type ConfigSectionId =
   | "catalog"
   | "payments"
   | "business"
+  | "boost"
   | "content"
 
 export interface ConfigSectionMeta {
@@ -72,8 +73,15 @@ export const CONFIG_SECTIONS: ConfigSectionMeta[] = [
   {
     id: "business",
     title: "Règles métier",
-    description: "Règles de gouvernance de la plateforme (boutiques par compte, limites admin).",
+    description: "Règles de gouvernance de la plateforme (boutiques par compte, commandes, litiges).",
     icon: "Scale",
+  },
+  {
+    id: "boost",
+    title: "Promotion (Boost)",
+    description:
+      "Mise en avant payante sur la page d'accueil (sponsorisé) — indépendante de l'abonnement Premium.",
+    icon: "Megaphone",
   },
   {
     id: "content",
@@ -104,6 +112,10 @@ export const CONFIG_DEFAULTS: PublicConfig = {
   "feature.customDomains": true, // domaines personnalisés
   "feature.premiumProgram": true, // programme Premium (checkout Chariow)
   "feature.demoStore": true, // bouton « Voir la démo » sur l'accueil
+  "feature.orderAccounts": true, // V10 — compte client OBLIGATOIRE pour commander
+  "feature.refunds": true, // V10 — demandes de remboursement (litiges)
+  "feature.reports": true, // V10 — signalements (boutique/produit/commande/utilisateur)
+  "feature.boost": true, // V10 — promotion payante (Boost ≠ Premium)
 
   /* ─────────── Plans & quotas ─────────── */
   "plan.free.maxProducts": 20,
@@ -112,12 +124,14 @@ export const CONFIG_DEFAULTS: PublicConfig = {
   "plan.free.maxDeliveryZones": 5,
   "plan.free.maxInvoicesPerMonth": 15,
   "plan.free.statsDays": 7,
+  "plan.free.maxStoreCategories": 10, // V10 — catégories boutique (hors défauts)
   "plan.premium.maxProducts": 500,
   "plan.premium.maxProductImages": 5,
   "plan.premium.maxCoupons": 30,
   "plan.premium.maxDeliveryZones": 25,
   "plan.premium.maxInvoicesPerMonth": 500,
   "plan.premium.statsDays": 60,
+  "plan.premium.maxStoreCategories": 60, // V10
   "plan.premium.priceUSD": 3,
 
   /* ─────────── Catalogue ─────────── */
@@ -147,6 +161,7 @@ export const CONFIG_DEFAULTS: PublicConfig = {
   "business.premiumGrantMaxDays": 365, // clamp de la console admin (durée max d'un cadeau premium)
   "business.orderMaxQtyPerItem": 99, // quantité max par article d'une commande
   "business.premiumMinDays": 1, // durée min d'un cadeau premium (console admin)
+  "business.maxOpenRefundsPerStore": 5, // V10 — demandes de remboursement ouvertes max par boutique
 
   /* ─────────── Contenus ─────────── */
   "content.maintenanceTitle": "KinShop en maintenance",
@@ -155,6 +170,11 @@ export const CONFIG_DEFAULTS: PublicConfig = {
     "toutes les boutiques seront de retour très vite\u00a0!",
   "content.footerTagline": "Propulsé par KinShop — créez votre boutique en 5 minutes 🇨🇩",
   "content.demoSlug": "maman-ngo",
+
+  /* ─────────── Promotion (Boost) ─────────── */
+  "boost.price7USD": 2, // campagne 7 jours
+  "boost.price30USD": 5, // campagne 30 jours
+  "boost.maxActivePerStore": 1, // campagnes actives simultanées par boutique
 }
 
 /** Valeur par défaut d'une clé (fallback si la clé est absente de la config). */

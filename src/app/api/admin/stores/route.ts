@@ -91,6 +91,16 @@ export async function PATCH(req: NextRequest) {
         data = { status: "active" }
         logDetail = `Boutique ${store.slug} réactivée`
         break
+      case "verify": {
+        // V10 — Vérification des propriétaires : unverified | pending | verified | rejected
+        const v = String(body.verificationStatus || "")
+        if (!["unverified", "pending", "verified", "rejected"].includes(v)) {
+          return NextResponse.json({ error: "verificationStatus invalide (unverified|pending|verified|rejected)." }, { status: 400 })
+        }
+        data = { verificationStatus: v }
+        logDetail = `Vérification de ${store.slug} → ${v}`
+        break
+      }
       case "grant-premium": {
         // Durées bornées par des règles métier paramétrables côté admin
         const minDays = await getConfigValue<number>("business.premiumMinDays")
@@ -156,6 +166,7 @@ export async function PATCH(req: NextRequest) {
         id: updated.id,
         slug: updated.slug,
         status: updated.status,
+        verificationStatus: updated.verificationStatus,
         isPremium: updated.isPremium,
         premiumUntil: updated.premiumUntil,
         customDomain: updated.customDomain,

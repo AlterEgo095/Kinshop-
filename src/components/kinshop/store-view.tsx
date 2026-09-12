@@ -50,7 +50,8 @@ import {
   type ReviewStats,
   type StoreData,
 } from "@/lib/kinshop"
-import { type PublicConfig } from "@/lib/config-defaults"
+import { type PublicConfig, configBool } from "@/lib/config-defaults"
+import { DELIVERY_KIND_LABELS, type DeliveryKind } from "@/lib/order-workflow"
 
 interface StoreViewProps {
   slug: string
@@ -59,6 +60,10 @@ interface StoreViewProps {
   platformRate?: number
   /** V9 — Configuration dynamique (paiements actifs, feature flags) */
   config?: PublicConfig
+  /** V10 — Compte client connecté (la commande exige un compte : feature.orderAccounts) */
+  authUser?: { id: string; name: string; email: string; whatsapp: string } | null
+  /** V10 — appelé après authentification inline (le parent relit la session) */
+  onAuthed?: () => void
 }
 
 interface CartLine {
@@ -129,7 +134,7 @@ function ReviewItem({ review }: { review: ReviewData }) {
   )
 }
 
-export function StoreView({ slug, onBack, platformRate, config = {} }: StoreViewProps) {
+export function StoreView({ slug, onBack, platformRate, config = {}, authUser = null, onAuthed }: StoreViewProps) {
   const [store, setStore] = useState<StoreData | null>(null)
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
@@ -157,6 +162,8 @@ export function StoreView({ slug, onBack, platformRate, config = {} }: StoreView
   const [cZone, setCZone] = useState("")
   const [cPayment, setCPayment] = useState<PaymentMethod>("mpesa")
   const [cNote, setCNote] = useState("")
+  // V10 — Adresse de livraison libre (complète la zone)
+  const [cAddress, setCAddress] = useState("")
 
   // V4 — Fiche produit avec galerie multi-photos
   const [detail, setDetail] = useState<ProductData | null>(null)
@@ -183,6 +190,51 @@ export function StoreView({ slug, onBack, platformRate, config = {} }: StoreView
   const [rComment, setRComment] = useState("")
   const [rRef, setRRef] = useState("")
   const [rSubmitting, setRSubmitting] = useState(false)
+
+  // V10 — Commande = compte client obligatoire (feature.orderAccounts) :
+  // mini-formulaire d'authentification intégré au checkout (le panier est préservé)
+  const requireAccounts = configBool(config, "feature.orderAccounts")
+  const needsAuth = requireAccounts && !authUser
+  const [authMode, setAuthMode] = useState<"login" | "register">("register")
+  const [authEmail, setAuthEmail] = useState("")
+  const [authPassword, setAuthPassword] = useState("")
+  const [authName, setAuthName] = useState("")
+  const [authPhone, setAuthPhone] = useState("")
+  const [authBusy, setAuthBusy] = useState(false)
+
+  // Préremplissage depuis le compte client (confirmer identité et coordonnées)
+  useEffect(() => {
+    if (authUser) {
+      setCName((v) => v || authUser.name)
+      setCPhone((v) => v || authUser.whatsapp || "")
+    }
+  }, [authUser])
+
+  const handleInlineAuth = async () => {
+    setAuthBusy(true)
+    try {
+      const endpoint = authMode === "register" ? "/api/auth/register" : "/api/auth/login"
+      const body =
+        authMode === "register"
+          ? { email: authEmail, password: authPassword, name: authName, whatsapp: authPhone }
+          : { email: authEmail, password: authPassword }
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Authentification impossible.")
+      toast.success(authMode === "register" ? "Compte créé — commande débloquée 🎉" : "Connecté 🎉")
+      // Session posée (cookie) : le parent relit l'identité → le formulaire reprend
+      // avec le panier préservé (aucun rechargement de page)
+      onAuthed?.()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur inconnue")
+    } finally {
+      setAuthBusy(false)
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -437,6 +489,7 @@ export function StoreView({ slug, onBack, platformRate, config = {} }: StoreView
           couponCode: coupon && discountUSD > 0 ? coupon.code : "",
           paymentMethod: effectivePayment,
           note: cNote,
+          deliveryAddress: cAddress,
           items: cart.map((l) => ({ productId: l.product.id, qty: l.qty })),
         }),
       })
@@ -1380,6 +1433,19 @@ export function StoreView({ slug, onBack, platformRate, config = {} }: StoreView
               >
                 🔎 Suivre ma commande ({success.ref})
               </Button>
+              {authUser && (
+                <Button
+                  variant="ghost"
+                  className="w-full"
+                  onClick={() => {
+                    setSuccess(null)
+                    setCheckoutOpen(false)
+                    window.location.hash = "#/commandes"
+                  }}
+                >
+                  📦 Voir toutes mes commandes
+                </Button>
+              )}
             </div>
           ) : (
             /* ── FORMULAIRE ── */
@@ -1391,6 +1457,58 @@ export function StoreView({ slug, onBack, platformRate, config = {} }: StoreView
                 </DialogDescription>
               </DialogHeader>
 
+              {needsAuth ? (
+                /* ── V10 — COMPTE OBLIGATOIRE (panel inline, panier préservé) ── */
+                <div className="space-y-3 rounded-xl border bg-muted/30 p-4">
+                  <div className="flex items-center gap-2">
+                    <BadgeCheck className="w-5 h-5 text-primary" />
+                    <p className="text-sm font-semibold">Un compte est requis pour commander</p>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Ton historique de commandes, tes factures et tes remboursements seront liés à ce compte.
+                  </p>
+                  <div className="flex gap-1 rounded-lg bg-muted p-1">
+                    {(["register", "login"] as const).map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => setAuthMode(m)}
+                        className={`flex-1 rounded-md py-1.5 text-xs font-semibold transition-all ${
+                          authMode === m ? "bg-background shadow-sm" : "text-muted-foreground"
+                        }`}
+                      >
+                        {m === "register" ? "Créer un compte" : "J'ai déjà un compte"}
+                      </button>
+                    ))}
+                  </div>
+                  {authMode === "register" && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <Input placeholder="Nom complet *" value={authName} onChange={(e) => setAuthName(e.target.value)} maxLength={60} />
+                      <Input placeholder="WhatsApp (optionnel)" value={authPhone} onChange={(e) => setAuthPhone(e.target.value)} maxLength={20} />
+                    </div>
+                  )}
+                  <Input
+                    type="email"
+                    placeholder="Email *"
+                    value={authEmail}
+                    onChange={(e) => setAuthEmail(e.target.value)}
+                    maxLength={80}
+                    autoComplete="email"
+                  />
+                  <Input
+                    type="password"
+                    placeholder="Mot de passe * (8 caractères min)"
+                    value={authPassword}
+                    onChange={(e) => setAuthPassword(e.target.value)}
+                    maxLength={100}
+                    autoComplete={authMode === "register" ? "new-password" : "current-password"}
+                  />
+                  <Button className="w-full" onClick={handleInlineAuth} disabled={authBusy}>
+                    {authBusy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <BadgeCheck className="w-4 h-4 mr-2" />}
+                    {authMode === "register" ? "Créer mon compte et continuer" : "Me connecter et continuer"}
+                  </Button>
+                </div>
+              ) : (
               <div className="space-y-3">
                 <div className="space-y-1.5">
                   <Label htmlFor="cName">Ton nom *</Label>
@@ -1412,6 +1530,18 @@ export function StoreView({ slug, onBack, platformRate, config = {} }: StoreView
                   )}
                 </div>
 
+                {/* V10 — Adresse de livraison précise (recommandée pour la remise) */}
+                <div className="space-y-1.5">
+                  <Label htmlFor="cAddress">Adresse / repère de livraison</Label>
+                  <Input
+                    id="cAddress"
+                    placeholder="Ex : av. Kasa-Vubu 123, près de l'église"
+                    value={cAddress}
+                    onChange={(e) => setCAddress(e.target.value)}
+                    maxLength={200}
+                  />
+                </div>
+
                 {/* V6 — Zones de livraison tarifées configurées par le vendeur */}
                 {activeZones.length > 0 && (
                   <div className="space-y-1.5">
@@ -1427,9 +1557,17 @@ export function StoreView({ slug, onBack, platformRate, config = {} }: StoreView
                             cZoneId === z.id ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"
                           }`}
                         >
-                          <span className="font-medium text-sm flex items-center gap-1.5">
+                          <span className="font-medium text-sm flex items-center gap-1.5 min-w-0">
                             <Truck className="w-4 h-4 text-primary shrink-0" />
-                            {z.name}
+                            <span className="min-w-0">
+                              <span className="block truncate">{z.name}</span>
+                              {(z as DeliveryZoneData & { kind?: string; etaLabel?: string }).kind && (
+                                <span className="block text-[11px] text-muted-foreground">
+                                  {DELIVERY_KIND_LABELS[((z as DeliveryZoneData & { kind?: string }).kind || "standard") as DeliveryKind]}
+                                  {(z as DeliveryZoneData & { etaLabel?: string }).etaLabel ? ` · ${(z as DeliveryZoneData & { etaLabel?: string }).etaLabel}` : ""}
+                                </span>
+                              )}
+                            </span>
                           </span>
                           <span className="text-sm font-bold text-primary shrink-0">
                             {z.feeFC > 0 ? formatFC(z.feeFC) : "Gratuit"}
@@ -1543,6 +1681,7 @@ export function StoreView({ slug, onBack, platformRate, config = {} }: StoreView
                   </div>
                 </div>
               </div>
+              )}
 
               <Button size="lg" className="w-full text-base" onClick={submitOrder} disabled={submitting || cartCount === 0}>
                 {submitting ? (
@@ -1561,7 +1700,7 @@ export function StoreView({ slug, onBack, platformRate, config = {} }: StoreView
                 Ta commande sera enregistrée et envoyée au vendeur sur WhatsApp ({formatPhoneDisplay(store.whatsapp)}).
               </p>
             </div>
-          )}
+              )}
         </DialogContent>
       </Dialog>
     </div>

@@ -3,6 +3,7 @@ import { db } from "@/lib/db"
 import { forbidden, requireStoreOwner, quotaExceeded } from "@/lib/auth"
 import { planOf } from "@/lib/plans"
 import { getPlanQuotas, isFeatureOn } from "@/lib/config-registry"
+import { DELIVERY_KINDS } from "@/lib/order-workflow"
 
 // GET /api/delivery-zones?slug=xxx — Zones de livraison (public : la vitrine affiche les frais)
 export async function GET(req: NextRequest) {
@@ -31,6 +32,9 @@ export async function POST(req: NextRequest) {
     const slug = String(body.slug || "")
     const name = String(body.name || "").trim()
     const feeFC = Math.max(0, Math.round(Number(body.feeFC) || 0))
+    // V10 — type d'option + délai estimé (affiché au client au checkout)
+    const kind = (DELIVERY_KINDS as readonly string[]).includes(String(body.kind)) ? String(body.kind) : "standard"
+    const etaLabel = String(body.etaLabel || "").slice(0, 40)
 
     if (!slug) return NextResponse.json({ error: "Paramètre slug requis." }, { status: 400 })
     if (name.length < 2 || name.length > 60) {
@@ -57,7 +61,7 @@ export async function POST(req: NextRequest) {
 
     try {
       const zone = await db.deliveryZone.create({
-        data: { storeId: guard.store.id, name, feeFC, active: true },
+        data: { storeId: guard.store.id, name, feeFC, kind, etaLabel, active: true },
       })
       return NextResponse.json({ zone }, { status: 201 })
     } catch {
@@ -83,7 +87,7 @@ export async function PATCH(req: NextRequest) {
     const guard = await requireStoreOwner(req, { id: existing.storeId })
     if (!guard.ok) return guard.response
 
-    const data: { name?: string; feeFC?: number; active?: boolean } = {}
+    const data: { name?: string; feeFC?: number; active?: boolean; kind?: string; etaLabel?: string } = {}
     if (typeof body.name === "string" && body.name.trim().length >= 2) {
       data.name = body.name.trim().slice(0, 60)
     }
@@ -91,6 +95,9 @@ export async function PATCH(req: NextRequest) {
       data.feeFC = Math.max(0, Math.round(Number(body.feeFC) || 0))
     }
     if (typeof body.active === "boolean") data.active = body.active
+    // V10 — type + délai estimé
+    if (body.kind !== undefined && (DELIVERY_KINDS as readonly string[]).includes(String(body.kind))) data.kind = String(body.kind)
+    if (body.etaLabel !== undefined) data.etaLabel = String(body.etaLabel).slice(0, 40)
 
     if (Object.keys(data).length === 0) {
       return NextResponse.json({ error: "Rien à mettre à jour." }, { status: 400 })

@@ -1,3 +1,4 @@
+import { createHash } from "crypto"
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 
@@ -18,15 +19,31 @@ export async function POST(req: NextRequest) {
     const day = new Date()
     day.setUTCHours(0, 0, 0, 0)
 
+    // V10 — Déduplication visiteur unique : hash(slug|ip|ua|jour), respectueux
+    // (aucune adresse IP stockée en clair, aucune donnée personnelle).
+    const ip = (req.headers.get("x-forwarded-for") || "").split(",")[0].trim() || "local"
+    const ua = (req.headers.get("user-agent") || "").slice(0, 120)
+    const dedupKey = createHash("sha256").update(`${slug}|${ip}|${ua}|${day.toISOString().slice(0, 10)}`).digest("hex")
+    let isNewVisitor = false
+    try {
+      await db.visitDedup.create({ data: { key: dedupKey } })
+      isNewVisitor = true
+    } catch {
+      isNewVisitor = false // clé déjà présente : visiteur récurrent
+    }
+
     const existing = await db.storeVisit.findUnique({
       where: { storeId_day: { storeId: store.id, day } },
       select: { id: true },
     })
 
     if (existing) {
-      await db.storeVisit.update({ where: { id: existing.id }, data: { count: { increment: 1 } } })
+      await db.storeVisit.update({
+        where: { id: existing.id },
+        data: { count: { increment: 1 }, ...(isNewVisitor ? { unique: { increment: 1 } } : {}) },
+      })
     } else {
-      await db.storeVisit.create({ data: { storeId: store.id, day, count: 1 } })
+      await db.storeVisit.create({ data: { storeId: store.id, day, count: 1, unique: isNewVisitor ? 1 : 0 } })
     }
 
     return NextResponse.json({ ok: true, counted: true })

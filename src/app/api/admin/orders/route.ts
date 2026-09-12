@@ -104,20 +104,37 @@ export async function PATCH(req: NextRequest) {
   }
 }
 
-// DELETE /api/admin/orders?id=xxx — Supprimer une commande
+// DELETE /api/admin/orders?id=xxx — Supprimer une commande (gouvernance restreinte V10)
+// INTERDIT sur une commande réglée (paid/refunded) : l'historique financier et
+// la traçabilité ne sont jamais détruits. Motif exigé pour les autres cas.
 export async function DELETE(req: NextRequest) {
   const denied = guardAdmin(req)
   if (denied) return denied
 
   try {
     const id = req.nextUrl.searchParams.get("id")
+    const reason = (req.nextUrl.searchParams.get("reason") || "").trim()
     if (!id) return NextResponse.json({ error: "Paramètre id requis." }, { status: 400 })
+    if (reason.length < 5) {
+      return NextResponse.json({ error: "Motif de suppression obligatoire (min. 5 caractères)." }, { status: 400 })
+    }
 
     const order = await db.order.findUnique({ where: { id } })
     if (!order) return NextResponse.json({ error: "Commande introuvable." }, { status: 404 })
 
+    if (["paid", "refunded"].includes(order.paymentStatus)) {
+      return NextResponse.json(
+        { error: "Suppression interdite : cette commande est réglée. Utilise le remboursement ou l'annulation (trace conservée)." },
+        { status: 409 },
+      )
+    }
+
     await db.order.delete({ where: { id } })
-    await logAdminAction("order.delete", `order:${order.ref}`, `Suppression de la commande ${order.ref}`)
+    await logAdminAction(
+      "order.delete",
+      `order:${order.ref}`,
+      `Suppression de la commande ${order.ref} (${order.totalFC} FC) — motif : ${reason}`,
+    )
 
     return NextResponse.json({ ok: true })
   } catch (e) {

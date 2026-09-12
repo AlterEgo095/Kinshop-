@@ -176,6 +176,43 @@ export const CONFIG_SPECS: ConfigSpec[] = [
     label: "Boutique de démonstration",
     description: "Bouton « Voir la démo » sur l'accueil.",
   },
+  {
+    key: "feature.orderAccounts",
+    section: "features",
+    type: "boolean",
+    default: true,
+    public: true,
+    label: "Compte obligatoire pour commander (V10)",
+    description:
+      "Actif : toute commande exige un compte client authentifié (serveur). Désactivé : commandes invités legacy tolérées.",
+  },
+  {
+    key: "feature.refunds",
+    section: "features",
+    type: "boolean",
+    default: true,
+    public: true,
+    label: "Remboursements (V10)",
+    description: "Demandes de remboursement client/vendeur, validation et exécution admin.",
+  },
+  {
+    key: "feature.reports",
+    section: "features",
+    type: "boolean",
+    default: true,
+    public: true,
+    label: "Signalements (V10)",
+    description: "Signalement de boutiques, produits, commandes ou comportements — modération admin.",
+  },
+  {
+    key: "feature.boost",
+    section: "features",
+    type: "boolean",
+    default: true,
+    public: true,
+    label: "Promotion payante — Boost (V10)",
+    description: "Campagnes de mise en avant sponsorisée sur l'accueil. Indépendant de Premium.",
+  },
 
   /* ─────────── Plans & quotas ─────────── */
   ...planSpecs("free", "Plan Free", {
@@ -185,6 +222,7 @@ export const CONFIG_SPECS: ConfigSpec[] = [
     maxDeliveryZones: [5, 0, 1_000],
     maxInvoicesPerMonth: [15, 0, 100_000],
     statsDays: [7, 1, 365],
+    maxStoreCategories: [10, 0, 500],
   }),
   ...planSpecs("premium", "Plan Premium", {
     maxProducts: [500, 1, 100_000],
@@ -193,6 +231,7 @@ export const CONFIG_SPECS: ConfigSpec[] = [
     maxDeliveryZones: [25, 0, 1_000],
     maxInvoicesPerMonth: [500, 0, 100_000],
     statsDays: [60, 1, 730],
+    maxStoreCategories: [60, 0, 1_000],
   }),
   {
     key: "plan.premium.priceUSD",
@@ -310,6 +349,52 @@ export const CONFIG_SPECS: ConfigSpec[] = [
     label: "Quantité max par article (commande)",
     description: "Clamp serveur de la quantité commandée pour chaque ligne de panier.",
   },
+  {
+    key: "business.maxOpenRefundsPerStore",
+    section: "business",
+    type: "number",
+    default: 5,
+    public: false,
+    min: 1,
+    max: 100,
+    label: "Remboursements ouverts max par boutique",
+    description: "Anti-abus : limite de demandes de remboursement simultanées (statut demandé/approuvé).",
+  },
+
+  /* ─────────── Promotion (Boost) ─────────── */
+  {
+    key: "boost.price7USD",
+    section: "boost",
+    type: "number",
+    default: 2,
+    public: true,
+    min: 0,
+    max: 10_000,
+    label: "Prix campagne 7 jours ($)",
+    description: "Coût d'une mise en avant de 7 jours sur la page d'accueil (sponsorisé).",
+  },
+  {
+    key: "boost.price30USD",
+    section: "boost",
+    type: "number",
+    default: 5,
+    public: true,
+    min: 0,
+    max: 10_000,
+    label: "Prix campagne 30 jours ($)",
+    description: "Coût d'une mise en avant de 30 jours sur la page d'accueil (sponsorisé).",
+  },
+  {
+    key: "boost.maxActivePerStore",
+    section: "boost",
+    type: "number",
+    default: 1,
+    public: false,
+    min: 1,
+    max: 10,
+    label: "Campagnes actives max par boutique",
+    description: "Appliqué côté serveur à la création d'une campagne.",
+  },
 
   /* ─────────── Contenus ─────────── */
   {
@@ -364,6 +449,7 @@ function planSpecs(
     maxDeliveryZones: "Zones de livraison max",
     maxInvoicesPerMonth: "Factures max par mois",
     statsDays: "Historique statistiques (jours)",
+    maxStoreCategories: "Catégories boutique max (V10)",
   }
   return Object.entries(limits).map(([name, [def, min, max]]) => ({
     key: `plan.${plan}.${name}`,
@@ -377,22 +463,22 @@ function planSpecs(
   }))
 }
 
-/* ─────────── Cache mémoire (TTL court + invalidation à l'écriture) ─────────── */
-
-const CACHE_TTL_MS = 10_000
-let cache: { at: number; raw: Map<string, string> } | null = null
+/* ─────────── Lecture (SANS cache — V10) ───────────
+   Anciennement : cache mémoire TTL 10 s avec invalidation à l'écriture.
+   Problème découvert par les tests de non-régression : sous Turbopack/dev,
+   les modules serveur sont dupliqués par route → l'invalidation croisée
+   n'atteint pas toutes les instances (fenêtres de stalence). La table
+   PlatformSetting est minuscule (SQLite, < 1 ms par lecture complète) :
+   on lit TOUJOURS frais — la cohérence prime sur la micro-optimisation. */
 
 export function invalidateConfigCache(): void {
-  cache = null
+  // Conservé pour compat d'appel (anciennement : purge du cache mémoire).
 }
 
-/** Raws bruts de la table PlatformSetting (avec cache). */
+/** Raws bruts de la table PlatformSetting (toujours frais). */
 async function getRawMap(): Promise<Map<string, string>> {
-  if (cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.raw
   const rows = await db.platformSetting.findMany()
-  const raw = new Map(rows.map((r) => [r.key, r.value]))
-  cache = { at: Date.now(), raw }
-  return raw
+  return new Map(rows.map((r) => [r.key, r.value]))
 }
 
 /* ─────────── Lecture ─────────── */
@@ -462,6 +548,7 @@ export interface PlanQuotaValues {
   maxDeliveryZones: number
   maxInvoicesPerMonth: number
   statsDays: number
+  maxStoreCategories: number
 }
 
 export async function getPlanQuotas(planId: "free" | "premium"): Promise<PlanQuotaValues> {
@@ -478,6 +565,7 @@ export async function getPlanQuotas(planId: "free" | "premium"): Promise<PlanQuo
     maxDeliveryZones: Math.max(0, num(`plan.${planId}.maxDeliveryZones`, 5)),
     maxInvoicesPerMonth: Math.max(0, num(`plan.${planId}.maxInvoicesPerMonth`, 15)),
     statsDays: Math.max(1, num(`plan.${planId}.statsDays`, 7)),
+    maxStoreCategories: Math.max(0, num(`plan.${planId}.maxStoreCategories`, 10)),
   }
 }
 

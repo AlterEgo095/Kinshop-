@@ -417,3 +417,55 @@ Stage Summary:
 - V9 est EN PRODUCTION sur kinshop.aenews.digital : la console ADMIN est le centre de contrôle dynamique de la plateforme (44 paramètres : général, 9 feature flags, plans & quotas, catalogue, paiements, règles métier, contenus), appliqués côté serveur, validés, journalisés, propagés ≤ 30 s — sans toucher au code.
 - Chaîne de release validée de bout en bout : commit → GitHub (PAT inline) → update.sh VPS → PM2 → vérifications API + navigateur + audit.
 - Production laissée propre (valeur test restaurée ; defaultRateFC=2400 de l'admin préservé).
+
+---
+Task ID: 17
+Agent: Z.ai Code (main)
+Task: MISSION GLOBALE — marketplace multi-boutiques sécurisé, traçable, évolutif (V10). Audit préalable + plan.
+
+Work Log (AUDIT préalable — code lu + pentest curl) :
+- SOCLE RÉUTILISABLE (ne pas recréer) : auth User/Session (scrypt, jetons opaques, HttpOnly), requireStoreOwner anti-IDOR, recalcul serveur des prix (produits DB + coupon + zone + computeOrderTotals), registry config 44 paramètres avec enforcement, rate limiting, AdminAction (admin seulement), StoreVisit agrégats, paiement mobile money simulé (initiate/status), DeliveryZone/Coupon/Review, console admin 8 onglets.
+- LACUNES CONFIRMÉES (pentest + lecture) :
+  G1 commande ANONYME (POST /api/orders 201 sans compte, pas de userId) ;
+  G2 aucun historique d'événements (statuts écrasés, aucune trace qui/quand/avant→après) ;
+  G3 réf KIN-XXXXXX ≠ CMD-YYYY-NNNNNN ;
+  G4 transitions de statut non validées (n'importe quel état → n'importe lequel, ex. delivered→new) ;
+  G5 vocabulaire paiement incomplet (pas de cash_pending/refunded ; espèces non distinguées) ;
+  G6 pas de delivery_status indépendant (3 dimensions confondues) ;
+  G7 pas de workflow livraison échouée (motifs structurés, relance, retour) ;
+  G8 pas de remboursements/litiges ;
+  G9 catégories = texte libre produit (pas de catégories globales admin ni catégories boutique) ;
+  G10 pas de signalements ;
+  G11 pas de vérification des propriétaires ;
+  G12 facture non liée à la commande, sans intégrité ni QR de vérification ;
+  G13 visibilité payante confondue avec Premium (pas de Boost) ;
+  G14 pas d'historique client (404 /api/orders/mine) ;
+  G15 audit limité aux actions admin (pas d'événements user/system) ;
+  G16 admin sans vue utilisateurs ni trace complète d'une commande ;
+  G17 pas de page d'accueil marketplace (populaires/nouveautés/sponsorisés) ;
+  G18 visites sans estimation de visiteurs uniques ;
+  G19 DELETE /api/admin/orders détruit la traçabilité (interdit sur commandes payées à corriger).
+- DÉCISIONS D'ARCHITECTURE (consolidation > création) : 3 dimensions de statut (order/payment/delivery) avec graphes de transitions SERVEUR ; OrderEvent immuable (acteur, avant→après, motif) ; userId nullable sur Order (rétrocompat commandes invité legacy) ; catégories à 2 niveaux (GlobalCategory admin + StoreCategory propriétaire, Product.storeCategoryId nullable) ; Refund/Report/BoostCampaign/Counter/VisitDedup nouveaux ; Invoice étendue (orderId, hash, version, avoir) ; AdminAction étendue (actorType/actorId/entityType/entityId) ; RBAC simple assumé : VISITOR / CUSTOMER / STORE_OWNER / ADMIN (delivery role = vendeur ou admin, moderator = admin — documentation dans le rapport, pas de sur-architecture).
+
+Stage Summary:
+- Audit complet livré (19 lacunes), plan P0→P7 défini : P0 sécurité commande (auth+userId+transitions+cash), P1 traçabilité, P2 catégories, P3 paiements (abstraction provider), P4 factures intégrité, P5 gouvernance (reports/verification/users/audit), P6 boost/home, P7 analytics uniques.
+
+---
+Task ID: 18
+Agent: Z.ai Code (main)
+Task: MISSION GLOBALE V10 — marketplace multi-boutiques sécurisé, traçable, évolutif. Implémentation + tests + déploiement.
+
+Work Log (implémentation) :
+- SCHÉMA (migration additive, zéro perte) : Order +userId/deliveryStatus/deliveryAttempts/deliveryReason/deliveryAddress ; OrderEvent (immuable) ; Refund ; Report ; BoostCampaign ; GlobalCategory + StoreCategory (2 niveaux) ; Product +storeCategoryId ; Invoice +orderId/source/hash/version/relatedInvoiceId (statuts cancelled/credited) ; Store +verificationStatus ; DeliveryZone +kind/etaLabel ; AdminAction +actorType/actorId/entityType/entityId ; StoreVisit +unique ; Counter (numérotation atomique) ; VisitDedup (dédup visiteurs).
+- LIBS : order-workflow.ts (3 dimensions de statut indépendantes : ORDER_TRANSITIONS new→confirmed→processing→ready→out_for_delivery→delivered + cancelled/returned/refunded/disputed ; DELIVERY_TRANSITIONS not_assigned→assigned→picked_up→in_transit→out_for_delivery→delivered/failed ; motifs d'échec structurés OBLIGATOIRES) ; payments.ts (abstraction PaymentProvider — mobile money + cash-on-delivery, confirmAuthority owner|system) ; audit.ts (logAudit global acteurs admin/user/owner/customer/system) ; invoice-integrity.ts (CMD-/INV- séquentiels via Counter + hash sha256).
+- ROUTES : orders POST (compte OBLIGATOIRE flag feature.orderAccounts, userId serveur, ref CMD-YYYY-NNNNNN, cash_pending, événements created+payment_selected, journal) ; orders PATCH (transitions VALIDÉES par le graphe, confirmCash owner-only, cohérence livraison↔commande, événements) ; orders/delivery PATCH (dimension indépendante, motif obligatoire, relance attempts+1, retour, alignement commande) ; orders/events (owner/admin) ; orders/mine (historique client) ; orders/track (+frise publique types sûrs) ; orders/invoice POST/GET (facture INV-, hash, une seule active, garde statut) ; invoices/verify (vérification publique QR) ; refunds (client/owner → admin approuve/exécute avec référence) ; reports (auth + rate limit 5/h + anti-doublon) ; store-categories (owner, quota plan, dédoublonnage, noms réservés, rate limit) ; admin/categories (CRUD global, suppression refusée si rattachée) ; boost (owner : campagne 7/30 j prix SERVEUR, max actif, paiement → active) ; boost/click ; home (sponsorisés étiquetés + populaires visites réelles 30 j + nouveautés, impressions) ; admin/users ; admin/reports ; admin/refunds ; admin/boost ; admin/stores +action verify ; admin/logs filtres actorType/entityType/q ; admin/overview KPIs marketplace ; products +storeCategoryId validé ; delivery-zones +kind/etaLabel ; admin/orders DELETE interdit sur commande réglée (motif obligatoire sinon) ; analytics/visit +visiteurs uniques dédupliqués (hash slug|ip|ua|jour).
+- CONFIG : 10 nouvelles specs (feature.orderAccounts/refunds/reports/boost, plan.*.maxStoreCategories, business.maxOpenRefundsPerStore, boost.price7USD/price30USD/maxActivePerStore + section Boost) → 54 paramètres administrables.
+- FIX DÉCOUVERT PAR LA NON-RÉGRESSION : cache mémoire du registry config (TTL 10 s) dupliqué par route sous Turbopack → fenêtres de stalence inter-routes (PATCH puis lecture = ancienne valeur). Supprimé (lecture toujours fraîche, < 1 ms sur SQLite) — 3 échecs V9 résolus.
+- FRONTEND : store-view (garde auth INLINE au checkout — panier préservé, inscription/connexion sans quitter la vitrine, préremplissage compte, adresse de livraison, libellés kind/eta des zones, bouton Mes commandes) ; my-orders.tsx (historique client + badges 3 dimensions + demande de remboursement) ; dashboard-marketplace.tsx (OrderWorkflowControls : transitions graphe + livraison + encaissement espèces + historique immuable ; StoreCategoriesManager ; BoostPanel) ; dashboard (badges 11 statuts, wiring) ; track-order (frise publique) ; marketplace-home.tsx (sections honnêtes, Sponsorisé étiqueté) ; landing (intégration) ; admin-console (12 onglets : + Utilisateurs, Signalements, Promotions(+Remboursements), Journal) ; admin-marketplace-tabs.tsx ; kinshop-app (vue orders #/commandes, deep-links, StoreView authUser/onAuthed) ; seed 12 catégories globales (Téléphones, Ciment, Services…).
+
+TESTS (scénarios A-H de la mission + non-régression) :
+- scripts/test-v10-marketplace.py → 76/76 : A visiteur (commande anonyme 401, home public, signalement 401) ; B client (compte → commande 201 CMD-, cash_pending, prix manipulé IGNORÉ (recalcul serveur), historique, frise publique) ; C vendeur (boutique liée compte, catégories boutique + doublon 409 + IDOR 403, produit catégorisé, transitions interdites 400, workflow complet, encaissement espèces owner, livraison assign→failed(motif obligatoire 400)→relance attempts=1→delivered→commande delivered, événements immuables (client d'autrui 403), facture INV- + hash + double 409 + vérification publique valide) ; D échec/retour/remboursement (mpesa payé, refus_client, returned, demande client 201) ; E sécurité (id inconnu 404, IDOR 403, delivered→new 400, client encaisse 403, admin PIN 401) ; F quotas (maxStoreCategories FREE 402) ; G boost (création pending, durée invalide 400, IDOR 403, paiement → active, home sponsorisé, clic tracké, admin clôture → disparition auto) ; H super admin (users sans passwordHash, overview étendu, refunds approve/execute → commande refunded, verify boutique + statut invalide 400, signalement + doublon 409, journal global order.created/refund.executed, DELETE commande payée 409).
+- NON-RÉGRESSION : V9 26/26 (2 checks adaptés au compte obligatoire V10) ; V8 51/51 (commande client créée via compte — anonymat interdit étant la correction V10).
+- NAVIGATEUR (agent-browser) : landing + sections marketplace ; vitrine → panier → checkout → GARDE AUTH inline → inscription sans quitter la vitrine → formulaire repris avec panier conservé → commande CMD-2026-000020 créée ; #/commandes avec la commande et ses statuts ; console admin 12 onglets (Utilisateurs 34 comptes/17+17, Signalements 2 ouverts, Promotions, Journal global avec order.created actorType=customer) ; 0 erreur console.
+
+DÉPLOIEMENT : push GitHub + /opt/KINSHOP/deploy/update.sh + vérifications prod (API + navigateur) — voir stage summary final.

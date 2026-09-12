@@ -11,6 +11,7 @@ import { AdminConsole } from "@/components/kinshop/admin-console"
 import CvExpress from "@/components/kinshop/cv-express"
 import { InvoicePublicView } from "@/components/kinshop/facture-view"
 import { TrackOrderView } from "@/components/kinshop/track-order"
+import { MyOrdersView } from "@/components/kinshop/my-orders"
 import { PwaLayer } from "@/components/kinshop/pwa"
 import { PLATFORM_DOMAIN } from "@/lib/domain"
 import { DEFAULT_RATE_FC, type StoreData } from "@/lib/kinshop"
@@ -29,6 +30,7 @@ type View =
   | { name: "cv" }
   | { name: "invoice-public"; number: string }
   | { name: "track"; ref: string }
+  | { name: "orders" } // V10 — historique client
 
 // V8 — Clé legacy de l'ancienne « session vendeur » (slug en localStorage) :
 // supprimée au profit de la vraie session serveur (cookie HttpOnly).
@@ -70,6 +72,7 @@ type HashTarget =
   | { type: "premium" }
   | { type: "admin" }
   | { type: "cv" }
+  | { type: "orders" }
   | { type: "invoice"; number: string }
   | { type: "track"; ref: string }
   | null
@@ -81,6 +84,7 @@ function parseHash(): HashTarget {
   if (/^#\/premium\/succes/i.test(window.location.hash)) return { type: "premium" }
   if (/^#\/admin/i.test(window.location.hash)) return { type: "admin" }
   if (/^#\/cv/i.test(window.location.hash)) return { type: "cv" }
+  if (/^#\/commandes/i.test(window.location.hash)) return { type: "orders" }
   const invoice = window.location.hash.match(/^#\/facture\/([A-Za-z0-9-]+)/)
   if (invoice) return { type: "invoice", number: invoice[1] }
   // V6 — Suivi public de commande (#/suivi/KIN-XXXX)
@@ -135,6 +139,7 @@ export function KinShopApp({ initialSlug }: { initialSlug?: string }) {
       else if (hashTarget?.type === "premium") setView({ name: "premium-success" })
       else if (hashTarget?.type === "admin") setView({ name: "admin" })
       else if (hashTarget?.type === "cv") setView({ name: "cv" })
+      else if (hashTarget?.type === "orders") setView({ name: "orders" })
       else if (hashTarget?.type === "invoice") setView({ name: "invoice-public", number: hashTarget.number })
       else if (hashTarget?.type === "track") setView({ name: "track", ref: hashTarget.ref })
     })()
@@ -167,6 +172,12 @@ export function KinShopApp({ initialSlug }: { initialSlug?: string }) {
       if (window.location.hash !== target) {
         window.history.pushState(null, "", target)
       }
+    } else if (view.name === "orders") {
+      // V10 — historique client partageable
+      const target = "#/commandes"
+      if (window.location.hash !== target) {
+        window.history.pushState(null, "", target)
+      }
     } else if (view.name === "invoice-public") {
       const target = `#/facture/${view.number}`
       if (window.location.hash !== target) {
@@ -187,6 +198,7 @@ export function KinShopApp({ initialSlug }: { initialSlug?: string }) {
       window.location.hash.startsWith("#/admin") ||
       window.location.hash.startsWith("#/facture/") ||
       window.location.hash.startsWith("#/suivi/") ||
+      window.location.hash.startsWith("#/commandes") ||
       window.location.hash.startsWith("#/cv"))
     ) {
       window.history.replaceState(null, "", window.location.pathname)
@@ -201,11 +213,12 @@ export function KinShopApp({ initialSlug }: { initialSlug?: string }) {
       else if (hashTarget?.type === "premium") setView({ name: "premium-success" })
       else if (hashTarget?.type === "admin") setView({ name: "admin" })
       else if (hashTarget?.type === "cv") setView({ name: "cv" })
+      else if (hashTarget?.type === "orders") setView({ name: "orders" })
       else if (hashTarget?.type === "invoice") setView({ name: "invoice-public", number: hashTarget.number })
       else if (hashTarget?.type === "track") setView({ name: "track", ref: hashTarget.ref })
       else
         setView((v) =>
-          v.name === "store" || v.name === "premium-success" || v.name === "admin" || v.name === "cv" || v.name === "invoice-public" || v.name === "track"
+          v.name === "store" || v.name === "premium-success" || v.name === "admin" || v.name === "cv" || v.name === "invoice-public" || v.name === "track" || v.name === "orders"
             ? { name: "landing" }
             : v,
         )
@@ -397,7 +410,33 @@ export function KinShopApp({ initialSlug }: { initialSlug?: string }) {
       }
       break
     case "store":
-      content = <StoreView slug={view.slug} onBack={goHome} platformRate={platform.defaultRateFC} config={platform.config} />
+      content = (
+        <StoreView
+          slug={view.slug}
+          onBack={goHome}
+          platformRate={platform.defaultRateFC}
+          config={platform.config}
+          authUser={authUser}
+          onAuthed={refreshMe}
+        />
+      )
+      break
+    case "orders":
+      // V10 — Historique client : accès réservé aux comptes authentifiés
+      if (!authReady) {
+        content = <AuthGateLoader />
+      } else if (!authUser) {
+        content = (
+          <AuthView
+            initialMode="login"
+            onAuthed={() => handleAuthed()}
+            onCancel={goHome}
+            onSwitchMode={(mode) => setView({ name: "auth", mode })}
+          />
+        )
+      } else {
+        content = <MyOrdersView onHome={goHome} />
+      }
       break
     case "premium-success":
       content = <PremiumSuccess ownerSlug={userStore?.slug ?? null} onGoDashboard={openDashboard} onGoHome={goHome} />
@@ -430,6 +469,7 @@ export function KinShopApp({ initialSlug }: { initialSlug?: string }) {
           onDemo={openDemo}
           onOpenDashboard={openDashboard}
           onCvExpress={() => setView({ name: "cv" })}
+          onOpenStore={openStore}
           announcement={platform.announcement}
           config={platform.config}
         />

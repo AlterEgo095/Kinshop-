@@ -35,6 +35,10 @@ import {
   Trash2,
   TrendingUp,
   Truck,
+  Users as UsersIcon,
+  ShieldAlert as ShieldAlertIcon,
+  Megaphone as MegaphoneIcon,
+  ScrollText as ScrollTextIcon,
   Wrench,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -47,6 +51,13 @@ import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  AdminUsersTab,
+  AdminReportsTab,
+  AdminBoostTab,
+  AdminAuditTab,
+  AdminRefundsSection,
+} from "@/components/kinshop/admin-marketplace-tabs"
 import {
   Table,
   TableBody,
@@ -109,9 +120,13 @@ type AdminTab =
   | "stores"
   | "orders"
   | "products"
+  | "users"
+  | "reports"
+  | "boost"
   | "reviews"
   | "growth"
   | "config"
+  | "audit"
   | "settings"
 
 interface SeriesPoint {
@@ -1234,6 +1249,15 @@ export function AdminConsole({
             <TabsTrigger value="products" className="gap-1.5 shrink-0">
               <Package className="w-4 h-4" /> Produits
             </TabsTrigger>
+            <TabsTrigger value="users" className="gap-1.5 shrink-0">
+              <UsersIcon className="w-4 h-4" /> Utilisateurs
+            </TabsTrigger>
+            <TabsTrigger value="reports" className="gap-1.5 shrink-0">
+              <ShieldAlertIcon className="w-4 h-4" /> Signalements
+            </TabsTrigger>
+            <TabsTrigger value="boost" className="gap-1.5 shrink-0">
+              <MegaphoneIcon className="w-4 h-4" /> Promotions
+            </TabsTrigger>
             <TabsTrigger value="reviews" className="gap-1.5 shrink-0">
               <Star className="w-4 h-4" /> Avis
             </TabsTrigger>
@@ -1242,6 +1266,9 @@ export function AdminConsole({
             </TabsTrigger>
             <TabsTrigger value="config" className="gap-1.5 shrink-0">
               <Wrench className="w-4 h-4" /> Configuration
+            </TabsTrigger>
+            <TabsTrigger value="audit" className="gap-1.5 shrink-0">
+              <ScrollTextIcon className="w-4 h-4" /> Journal
             </TabsTrigger>
             <TabsTrigger value="settings" className="gap-1.5 shrink-0">
               <Settings2 className="w-4 h-4" /> Paramètres
@@ -2377,6 +2404,35 @@ export function AdminConsole({
                 )}
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* ════ UTILISATEURS (V10) ════ */}
+          <TabsContent value="users" className="space-y-4">
+            <AdminUsersTab />
+          </TabsContent>
+
+          {/* ════ SIGNALEMENTS (V10) ════ */}
+          <TabsContent value="reports" className="space-y-4">
+            <AdminReportsTab />
+          </TabsContent>
+
+          {/* ════ PROMOTIONS / BOOST (V10) ════ */}
+          <TabsContent value="boost" className="space-y-4">
+            <AdminBoostTab />
+            <Card>
+              <CardContent className="p-4 space-y-2">
+                <p className="font-bold text-sm">Remboursements</p>
+                <p className="text-xs text-muted-foreground">
+                  Demandes client/vendeur — approuver, refuser, exécuter (référence exigée, tout est journalisé).
+                </p>
+                <AdminRefundsSection />
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* ════ JOURNAL D'AUDIT GLOBAL (V10) ════ */}
+          <TabsContent value="audit" className="space-y-4">
+            <AdminAuditTab />
           </TabsContent>
 
           {/* ════ CONFIGURATION (V9 — centre de contrôle dynamique) ════ */}
