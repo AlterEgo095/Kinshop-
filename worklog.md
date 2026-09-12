@@ -398,3 +398,22 @@ Stage Summary:
 - Restrictions volontairement code (justifiées) : statuts de commande/paiement (logique de flux typée), opérateurs de paiement (union type + intégrations), validation promo 1..90 %, langue FR — extensibles via le même registry si besoin futur.
 - Artifacts : src/lib/config-defaults.ts, src/lib/config-registry.ts, src/app/api/admin/config/route.ts, src/app/api/platform/route.ts, src/components/kinshop/admin-config-tab.tsx, admin-console.tsx, kinshop-app.tsx, landing.tsx, create-wizard.tsx, dashboard.tsx, store-view.tsx, routes API enforcement, scripts/test-v9-config.sh.
 - Non déployé en prod (déploiement = /opt/KINSHOP/deploy/update.sh après commit/push, à la demande).
+
+---
+Task ID: 16
+Agent: Z.ai Code (main)
+Task: Déploiement production V9 (centre de contrôle dynamique ADMIN) — push GitHub + update.sh + vérification prod complète, à la demande (« Déploie »).
+
+Work Log:
+- Contrôles pré-déploiement : repo propre à dc902da (V9) ; dev server 200 ; GET /api/admin/config 401 sans PIN / 200 avec PIN dev (44 specs, 7 sections) ; PATCH invalide → 400 ; lint 0 erreur.
+- Découverte : ref locale origin/main périmée (5f16cdd) ; git ls-remote → GitHub réel à a3ec85d (V8 + V8.1 déjà poussés par Task 14). Seul dc902da (V9) manquait → push PAT inline (jamais persisté) → GitHub main = dc902da.
+- VPS 95.111.226.63 (helper paramiko éphémère /tmp-style, supprimé après usage) : état pré-déploiement = 1e77139 (V8.1), PM2 kinshop online, 61G dispo, sudo ok. Déploiement via /opt/KINSHOP/deploy/update.sh (fetch+reset origin/main, bun install --frozen-lockfile, prisma generate + db push — V9 zéro migration, build standalone, pm2 reload + save) → EXIT 0.
+- Vérifications prod : git log serveur = dc902da ; PM2 online ; app 127.0.0.1:3310 → 200 ; https://kinshop.aenews.digital/ → 200 ; /api/platform expose le bloc config public (44 clés ; prod conserve defaultRateFC=2400 personnalisé par l'admin, preuve de persistance) ; /api/admin/config 401 sans PIN, 200 avec PIN prod (44 specs).
+- Test admin E2E en prod (valeur réversible) : lecture content.footerTagline → PATCH « Boutiques WhatsApp pour tous — KinShop RDC » → canal public /api/platform reflète immédiatement la nouvelle valeur (propagation ≤ 30 s aux users) → PATCH invalide (plan.free.maxProducts="beaucoup") → 400 → journal d'audit enregistre config.update avec ancien → nouveau → restauration valeur d'origine vérifiée côté admin ET côté user.
+- Navigateur (agent-browser) sur la prod : titre correct, corps rendu (4,3k caractères, 176 lignes), footer avec tagline pilotée par la config, 0 erreur page/console ; rendu mobile 390px OK ; capture puis nettoyage.
+- Hygiène : helper SSH éphémère supprimé (identifiants jamais commités) ; worklog à jour.
+
+Stage Summary:
+- V9 est EN PRODUCTION sur kinshop.aenews.digital : la console ADMIN est le centre de contrôle dynamique de la plateforme (44 paramètres : général, 9 feature flags, plans & quotas, catalogue, paiements, règles métier, contenus), appliqués côté serveur, validés, journalisés, propagés ≤ 30 s — sans toucher au code.
+- Chaîne de release validée de bout en bout : commit → GitHub (PAT inline) → update.sh VPS → PM2 → vérifications API + navigateur + audit.
+- Production laissée propre (valeur test restaurée ; defaultRateFC=2400 de l'admin préservé).
