@@ -19,6 +19,35 @@
 **Modèle du serveur** (identique aux autres apps : IAHUB, wedding-platform…) :
 `/opt/<APP>` + build Next.js **standalone** + **PM2** + **nginx vhost** + **certbot**.
 
+### V8 — Comptes utilisateurs & sécurité (déployée le 2026-09-12)
+
+Depuis la V8, **toute création/gestion de boutique exige un compte utilisateur**
+(inscription gratuite + session cookie `kinshop_session` HttpOnly). Les quotas
+FREE/PREMIUM sont appliqués côté serveur (voir `src/lib/plans.ts`) :
+
+| Ressource | Free | Premium (3 $/mois) |
+|---|---|---|
+| Produits | 20 | 500 |
+| Photos/produit | 1 | 5 |
+| Codes promo | 3 | 30 |
+| Zones de livraison | 5 | 25 |
+| Factures/mois | 15 | 500 |
+| Historique stats | 7 j | 60 j |
+| Domaine personnalisé | ✗ | ✓ |
+
+Un compte = **une** boutique. Les boutiques créées avant la V8 (ownerId null,
+« orphelines ») restent visibles publiquement mais ne sont éditables par personne.
+
+**Réattribuer une boutique orpheline à un compte** (console admin) :
+
+```bash
+# 1. Le vendeur crée son compte sur la plateforme (ex. vendeur@exemple.cd)
+# 2. L'admin rattache sa boutique :
+curl -X PATCH https://kinshop.aenews.digital/api/admin/stores \
+  -H "x-admin-pin: $ADMIN_PIN" -H "Content-Type: application/json" \
+  -d '{"id":"<STORE_ID>","action":"assign-owner","email":"vendeur@exemple.cd"}'
+```
+
 ## Mise à jour de l'application
 
 ```bash

@@ -116,6 +116,30 @@ export async function PATCH(req: NextRequest) {
         data = { customDomain: null, domainVerified: false, domainToken: "" }
         logDetail = `Domaine ${store.customDomain || ""} délié de ${store.slug}`
         break
+      case "assign-owner": {
+        // V8 — Réattribue (ou détache) la propriété d'une boutique, notamment
+        // pour adopter les boutiques orphelines créées avant l'introduction des comptes.
+        const email = String(body.email || "").trim().toLowerCase()
+        if (!email) {
+          data = { ownerId: null }
+          logDetail = `Propriété de ${store.slug} retirée (boutique orpheline)`
+        } else {
+          const user = await db.user.findUnique({ where: { email }, select: { id: true, email: true } })
+          if (!user) {
+            return NextResponse.json({ error: `Aucun compte utilisateur pour ${email}.` }, { status: 404 })
+          }
+          const owned = await db.store.findFirst({ where: { ownerId: user.id, id: { not: store.id } }, select: { slug: true } })
+          if (owned) {
+            return NextResponse.json(
+              { error: `${email} possède déjà la boutique ${owned.slug} (un compte = une boutique).` },
+              { status: 409 },
+            )
+          }
+          data = { ownerId: user.id }
+          logDetail = `${store.slug} réattribuée à ${email}`
+        }
+        break
+      }
       default:
         return NextResponse.json({ error: "Action inconnue." }, { status: 400 })
     }
