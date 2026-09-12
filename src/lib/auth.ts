@@ -128,6 +128,11 @@ export function quotaExceeded(detail: string): NextResponse {
   return NextResponse.json({ error: detail, quota: true }, { status: 402 })
 }
 
+export function conflict(detail: string): NextResponse {
+  // 409 = l'état actuel de la ressource interdit l'opération (intégrité documentaire)
+  return NextResponse.json({ error: detail }, { status: 409 })
+}
+
 /* ─────────── Garde-fous boutique (anti-IDOR) ─────────── */
 
 export type OwnerGuard =

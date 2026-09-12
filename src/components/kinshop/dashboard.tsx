@@ -221,6 +221,10 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
   const [invNote, setInvNote] = useState("")
   const [invLines, setInvLines] = useState<InvoiceItem[]>([{ desc: "", qty: 1, unitFC: 0 }])
   const [invCreating, setInvCreating] = useState(false)
+  // P4 — annulation tracée d'une facture émise (motif obligatoire, jamais de suppression)
+  const [invCancel, setInvCancel] = useState<InvoiceData | null>(null)
+  const [invCancelReason, setInvCancelReason] = useState("")
+  const [invCancelling, setInvCancelling] = useState(false)
 
   // V6 — Confiance & Croissance : zones de livraison, codes promo, avis
   const [zones, setZones] = useState<DeliveryZoneData[]>([])
@@ -1068,20 +1072,39 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
     }
   }
 
-  const updateInvoiceStatus = async (inv: InvoiceData, status: InvoiceStatus) => {
+  const updateInvoiceStatus = async (inv: InvoiceData, status: InvoiceStatus, reason?: string) => {
     try {
       const res = await fetch("/api/invoices", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: inv.id, status }),
+        body: JSON.stringify({ id: inv.id, status, reason }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
       setInvoices((iv) => iv.map((x) => (x.id === inv.id ? data.invoice : x)))
       setInvPreview((p) => (p && p.id === inv.id ? data.invoice : p))
-      toast.success(status === "paid" ? `Facture ${inv.number} payée ✅` : `Facture ${inv.number} marquée envoyée 📤`)
+      toast.success(
+        status === "paid"
+          ? `Facture ${inv.number} payée ✅`
+          : status === "cancelled"
+            ? `Facture ${inv.number} annulée (tracée) 🚫`
+            : `Facture ${inv.number} marquée envoyée 📤`,
+      )
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Erreur")
+    }
+  }
+
+  const cancelInvoice = async () => {
+    if (!invCancel) return
+    if (invCancelReason.trim().length < 4) return toast.error("Un motif d'au moins 4 caractères est requis (traçabilité).")
+    setInvCancelling(true)
+    try {
+      await updateInvoiceStatus(invCancel, "cancelled", invCancelReason.trim())
+      setInvCancel(null)
+      setInvCancelReason("")
+    } finally {
+      setInvCancelling(false)
     }
   }
 
@@ -1135,6 +1158,8 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
     draft: "bg-stone-100 text-stone-700 border-stone-200",
     sent: "bg-amber-50 text-amber-800 border-amber-200",
     paid: "bg-emerald-50 text-emerald-800 border-emerald-300",
+    cancelled: "bg-red-50 text-red-800 border-red-200",
+    credited: "bg-purple-50 text-purple-800 border-purple-200",
   }
 
   if (loading) {
@@ -1563,20 +1588,37 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
                             <MessageCircle className="w-4 h-4 mr-1 text-emerald-100" />
                             WhatsApp
                           </Button>
-                          {st !== "paid" && (
+                          {(st === "draft" || st === "sent") && (
                             <Button size="sm" variant="outline" onClick={() => updateInvoiceStatus(inv, "paid")}>
                               ✅ Payée
                             </Button>
                           )}
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="text-destructive hover:text-destructive ml-auto"
-                            onClick={() => deleteInvoice(inv)}
-                            aria-label={`Supprimer la facture ${inv.number}`}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
+                          {st === "draft" ? (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="text-destructive hover:text-destructive ml-auto"
+                              onClick={() => deleteInvoice(inv)}
+                              aria-label={`Supprimer le brouillon ${inv.number}`}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          ) : (
+                            (st === "sent" || st === "paid") && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="text-red-600 hover:text-red-700 ml-auto"
+                                onClick={() => {
+                                  setInvCancel(inv)
+                                  setInvCancelReason("")
+                                }}
+                                aria-label={`Annuler la facture ${inv.number}`}
+                              >
+                                🚫 Annuler
+                              </Button>
+                            )
+                          )}
                         </div>
                       </CardContent>
                     </Card>
@@ -2743,6 +2785,39 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
         </DialogContent>
       </Dialog>
 
+      {/* P4 — Dialog : annulation tracée d'une facture émise (motif obligatoire) */}
+      <Dialog open={!!invCancel} onOpenChange={(o) => !o && setInvCancel(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Annuler la facture {invCancel?.number} ?</DialogTitle>
+            <DialogDescription>
+              Une facture émise n&apos;est jamais supprimée : elle est marquée <strong>ANNULÉE</strong> avec votre motif
+              (traçabilité comptable). Émettez ensuite une nouvelle facture si nécessaire.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="inv-cancel-reason">Motif d&apos;annulation (obligatoire)</Label>
+            <Textarea
+              id="inv-cancel-reason"
+              value={invCancelReason}
+              onChange={(e) => setInvCancelReason(e.target.value)}
+              placeholder="Ex : erreur de saisie du montant, client a annulé la commande…"
+              rows={3}
+              maxLength={200}
+            />
+            <p className="text-xs text-muted-foreground">Le motif est consigné dans le journal d&apos;audit de la plateforme.</p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setInvCancel(null)}>
+              Retour
+            </Button>
+            <Button variant="destructive" onClick={cancelInvoice} disabled={invCancelling || invCancelReason.trim().length < 4}>
+              {invCancelling ? "Annulation…" : "Annuler la facture"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Dialog : aperçu facture (KinFacture) */}
       <Dialog open={!!invPreview} onOpenChange={(o) => !o && setInvPreview(null)}>
         <DialogContent className="sm:max-w-3xl">
@@ -2778,14 +2853,30 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
                 📤 Marquer envoyée
               </Button>
             )}
-            {invPreview && invPreview.status !== "paid" && (
+            {invPreview && (invPreview.status === "draft" || invPreview.status === "sent") && (
               <Button size="sm" variant="outline" className="border-emerald-300 text-emerald-700 hover:bg-emerald-50" onClick={() => updateInvoiceStatus(invPreview, "paid")}>
                 ✅ Marquer payée
               </Button>
             )}
-            {invPreview && invPreview.status === "paid" && (
-              <Badge variant="outline" className="ml-auto bg-emerald-50 text-emerald-800 border-emerald-300 font-bold">
-                ✅ Payée
+            {invPreview && (invPreview.status === "sent" || invPreview.status === "paid") && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-red-300 text-red-700 hover:bg-red-50"
+                onClick={() => {
+                  setInvCancel(invPreview)
+                  setInvCancelReason("")
+                }}
+              >
+                🚫 Annuler (motif requis)
+              </Button>
+            )}
+            {invPreview && (invPreview.status === "paid" || invPreview.status === "cancelled" || invPreview.status === "credited") && (
+              <Badge
+                variant="outline"
+                className={`ml-auto font-bold ${invPreview.status === "paid" ? "bg-emerald-50 text-emerald-800 border-emerald-300" : invPreview.status === "cancelled" ? "bg-red-50 text-red-800 border-red-300" : "bg-purple-50 text-purple-800 border-purple-300"}`}
+              >
+                {invPreview.status === "paid" ? "✅ Payée" : invPreview.status === "cancelled" ? "🚫 Annulée" : "Avoir"}
               </Badge>
             )}
           </div>

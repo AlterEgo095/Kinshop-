@@ -157,6 +157,7 @@ export type OrderEventType =
   | "refund_rejected"
   | "refund_executed"
   | "invoice_generated"
+  | "invoice_cancelled"
   | "note"
 
 /* Types d'événements visibles publiquement par le client (suivi) :
@@ -187,6 +188,7 @@ export const EVENT_TYPE_LABELS: Record<string, string> = {
   refund_rejected: "Remboursement refusé",
   refund_executed: "Remboursement exécuté",
   invoice_generated: "Facture générée",
+  invoice_cancelled: "Facture annulée",
   note: "Note",
 }
 

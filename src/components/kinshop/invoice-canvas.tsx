@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from 'react'
 import QRCode from 'qrcode'
 import type { InvoiceData } from '@/lib/kinfacture'
-import { buildPaymentQrText, type InvoiceItem } from '@/lib/kinfacture'
+import { buildPaymentQrText, buildInvoiceVerifyUrl, type InvoiceItem } from '@/lib/kinfacture'
 import { formatFC, formatUSD, formatPhoneDisplay, type StoreData } from '@/lib/kinshop'
 
 const W = 1240
@@ -75,7 +75,7 @@ function fmtDate(iso: string | Date): string {
 }
 
 export async function renderInvoiceCanvas(
-  invoice: Pick<InvoiceData, 'number' | 'clientName' | 'clientPhone' | 'totalFC' | 'totalUSD' | 'note' | 'dueDate' | 'status' | 'createdAt' | 'items' | 'paidAt'>,
+  invoice: Pick<InvoiceData, 'number' | 'clientName' | 'clientPhone' | 'totalFC' | 'totalUSD' | 'note' | 'dueDate' | 'status' | 'createdAt' | 'items' | 'paidAt' | 'hash'>,
   store: InvoiceStoreInfo,
 ): Promise<HTMLCanvasElement> {
   const canvas = document.createElement('canvas')
@@ -88,8 +88,24 @@ export async function renderInvoiceCanvas(
   ctx.fillRect(0, 0, W, H)
 
   const items = parseItems({ items: invoice.items })
-  const statusLabel = invoice.status === 'paid' ? 'PAYÉE' : invoice.status === 'sent' ? 'ENVOYÉE' : 'BROUILLON'
-  const statusColor = invoice.status === 'paid' ? EMERALD : invoice.status === 'sent' ? AMBER : MUTED
+  const statusLabel =
+    invoice.status === 'paid'
+      ? 'PAYÉE'
+      : invoice.status === 'sent'
+        ? 'ENVOYÉE'
+        : invoice.status === 'cancelled'
+          ? 'ANNULÉE'
+          : invoice.status === 'credited'
+            ? 'AVOIR'
+            : 'BROUILLON'
+  const statusColor =
+    invoice.status === 'paid'
+      ? EMERALD
+      : invoice.status === 'sent'
+        ? AMBER
+        : invoice.status === 'cancelled' || invoice.status === 'credited'
+          ? '#b91c1c'
+          : MUTED
 
   // ─── Bandeau header ───
   const headerH = 190
@@ -108,10 +124,16 @@ export async function renderInvoiceCanvas(
   ctx.font = '800 52px system-ui, -apple-system, sans-serif'
   ctx.fillStyle = '#ffffff'
   ctx.textAlign = 'right'
-  ctx.fillText('FACTURE', W - M, 88)
+  ctx.fillText('FACTURE', W - M, 84)
   ctx.font = '700 30px system-ui, -apple-system, sans-serif'
   ctx.fillStyle = AMBER
-  ctx.fillText(invoice.number, W - M, 132)
+  ctx.fillText(invoice.number, W - M, 126)
+  // P4 — empreinte d'intégrité imprimée (8 premiers hex) : vérification croisée manuelle
+  if (invoice.hash) {
+    ctx.font = '600 18px system-ui, -apple-system, sans-serif'
+    ctx.fillStyle = 'rgba(255,255,255,0.85)'
+    ctx.fillText(`Empreinte : ${invoice.hash.slice(0, 8).toUpperCase()}`, W - M, 158)
+  }
   ctx.textAlign = 'left'
 
   // Badge statut
@@ -313,7 +335,44 @@ export async function renderInvoiceCanvas(
   ctx.fillText(`Payez au ${formatPhoneDisplay(store.whatsapp)}`, tx, py + 6)
   ctx.font = '400 20px system-ui, -apple-system, sans-serif'
   ctx.fillStyle = MUTED
-  ctx.fillText(`Scannez le QR ou indiquez la référence ${invoice.number} lors du paiement.`, tx, py + 42)
+  ctx.fillText(`Référence : ${invoice.number}`, tx, py + 42)
+
+  // ─── P4 : QR de VÉRIFICATION d'authenticité (coin droit du bloc paiement) ───
+  try {
+    const verifyUrl = buildInvoiceVerifyUrl(invoice.number)
+    const vSize = 116
+    const vX = W - M - vSize - 24
+    const vY = y + 28
+    const vData = await QRCode.toDataURL(verifyUrl, { margin: 1, width: 320, color: { dark: EMERALD_DARK, light: '#ffffff' } })
+    const vImg = new Image()
+    vImg.src = vData
+    await new Promise<void>((resolve) => {
+      vImg.onload = () => resolve()
+      vImg.onerror = () => resolve()
+      setTimeout(resolve, 1200)
+    })
+    if (vImg.complete && vImg.naturalWidth > 0) {
+      ctx.fillStyle = '#ffffff'
+      roundRect(ctx, vX - 8, vY - 8, vSize + 16, vSize + 16, 10)
+      ctx.fill()
+      ctx.strokeStyle = EMERALD
+      ctx.lineWidth = 2
+      roundRect(ctx, vX - 8, vY - 8, vSize + 16, vSize + 16, 10)
+      ctx.stroke()
+      ctx.drawImage(vImg, vX, vY, vSize, vSize)
+      ctx.textAlign = 'center'
+      ctx.font = '700 17px system-ui, -apple-system, sans-serif'
+      ctx.fillStyle = EMERALD_DARK
+      ctx.fillText('✓ AUTHENTICITÉ', vX + vSize / 2, vY + vSize + 20)
+      ctx.font = '400 15px system-ui, -apple-system, sans-serif'
+      ctx.fillStyle = MUTED
+      ctx.fillText('Scannez pour vérifier', vX + vSize / 2, vY + vSize + 42)
+      ctx.fillText('cette facture sur kinshop.cd', vX + vSize / 2, vY + vSize + 62)
+      ctx.textAlign = 'left'
+    }
+  } catch {
+    // QR de vérification indisponible : le reste du document reste intact
+  }
 
   y += payH + 44
 
@@ -412,7 +471,7 @@ export function InvoiceCanvas({
   store,
   onRendered,
 }: {
-  invoice: Pick<InvoiceData, 'number' | 'clientName' | 'clientPhone' | 'totalFC' | 'totalUSD' | 'note' | 'dueDate' | 'status' | 'createdAt' | 'items' | 'paidAt'>
+  invoice: Pick<InvoiceData, 'number' | 'clientName' | 'clientPhone' | 'totalFC' | 'totalUSD' | 'note' | 'dueDate' | 'status' | 'createdAt' | 'items' | 'paidAt' | 'hash'>
   store: InvoiceStoreInfo
   onRendered?: (canvas: HTMLCanvasElement | null) => void
 }) {

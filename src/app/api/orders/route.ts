@@ -419,6 +419,47 @@ export async function PATCH(req: NextRequest) {
       await db.orderEvent.createMany({ data: events })
     }
 
+    // P4 (F4-6) — Cohérence commande ↔ facture : une commande annulée,
+    // retournée ou remboursée ne peut pas laisser une facture ACTIVE
+    // (justificatif de dette) — les factures actives sont annulées
+    // automatiquement avec trace (document comptable jamais écrasé).
+    if (["cancelled", "returned", "refunded"].includes(status)) {
+      const activeInvoices = await db.invoice.findMany({
+        where: { orderId: id, status: { notIn: ["cancelled", "credited"] } },
+        select: { id: true, number: true, note: true, status: true },
+      })
+      for (const inv of activeInvoices) {
+        await db.invoice.update({
+          where: { id: inv.id },
+          data: {
+            status: "cancelled",
+            note: `[ANNULÉE AUTO — commande ${status} par ${actorLabel}] ${inv.note}`.trim().slice(0, 300),
+          },
+        })
+        await db.orderEvent.create({
+          data: {
+            orderId: id,
+            type: "invoice_cancelled",
+            actorType,
+            actorId: user.id,
+            actorLabel,
+            oldValue: inv.status,
+            newValue: "cancelled",
+            reason: `Facture ${inv.number} annulée automatiquement (commande ${status})`,
+          },
+        })
+        await logAudit({
+          action: "invoice.cancelled_order",
+          target: `invoice:${inv.number}`,
+          detail: `Facture ${inv.number} annulée automatiquement — commande ${order.ref} ${status} (par ${actorLabel})`,
+          actorType,
+          actorId: user.id,
+          entityType: "invoice",
+          entityId: inv.id,
+        })
+      }
+    }
+
     await logAudit({
       action: confirmCash ? "order.payment_confirmed" : "order.status",
       target: `order:${order.ref}`,

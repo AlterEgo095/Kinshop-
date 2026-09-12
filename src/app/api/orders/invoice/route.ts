@@ -3,16 +3,19 @@ import { db } from "@/lib/db"
 import { getUserFromRequest, requireStoreOwner, unauthorized } from "@/lib/auth"
 import { guardAdmin } from "@/lib/admin"
 import { isFeatureOn } from "@/lib/config-registry"
-import { makeSequentialInvoiceNumber, invoiceHash } from "@/lib/invoice-integrity"
+import { makeSequentialInvoiceNumber, invoiceHashV2 } from "@/lib/invoice-integrity"
+import { withStoreQuotaWrite } from "@/lib/quota-guard"
 import { logAudit } from "@/lib/audit"
 import type { OrderItem } from "@/lib/kinshop"
 
 // POST /api/orders/invoice — Émettre la FACTURE de commande (V10)
 // Accès : propriétaire de la boutique (dérivé serveur) ou admin.
 // - numéro séquentiel INV-YYYY-NNNNNN (compteur atomique, jamais réutilisé)
-// - empreinte d'intégrité sha256 (contenu canonique) — la facture émise n'est
-//   jamais modifiée silencieusement : rectification = annulation/avoir + nouvelle facture
-// - une seule facture active par commande
+// - empreinte d'intégrité sha256 V2 (contenu canonique COMPLET : totaux +
+//   lignes + client + échéance/note) — la facture émise n'est jamais modifiée
+//   silencieusement : rectification = annulation/avoir + nouvelle facture
+// - une seule facture active par commande — vérification + création dans UNE
+//   transaction atomique (mutex boutique, P4 F4-7 : pas de course TOCTOU)
 export async function POST(req: NextRequest) {
   try {
     if (!(await isFeatureOn("invoices"))) {
@@ -43,17 +46,6 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Une seule facture ACTIVE par commande (annulée/avoir → nouvelle autorisée)
-    const existingActive = await db.invoice.findFirst({
-      where: { orderId, status: { notIn: ["cancelled", "credited"] } },
-    })
-    if (existingActive) {
-      return NextResponse.json(
-        { error: `Une facture active existe déjà pour cette commande (${existingActive.number}).`, number: existingActive.number },
-        { status: 409 },
-      )
-    }
-
     let items: OrderItem[] = []
     try {
       const parsed = JSON.parse(order.items)
@@ -62,8 +54,6 @@ export async function POST(req: NextRequest) {
       // items invalide
     }
 
-    const number = await makeSequentialInvoiceNumber()
-    const now = new Date()
     // Items de facture au format KinFacture [{desc, qty, unitFC}] — prix GELÉS au
     // moment de la commande (taux dérivé de la commande, jamais du frontend).
     const orderRate = order.totalUSD > 0 ? order.totalFC / order.totalUSD : 0
@@ -72,57 +62,88 @@ export async function POST(req: NextRequest) {
       qty: it.qty,
       unitFC: Math.round(it.priceUSD * orderRate),
     }))
-    const hash = invoiceHash({
-      number,
-      orderId: order.id,
-      storeId: order.storeId,
-      totalUSD: order.totalUSD,
-      totalFC: order.totalFC,
-      issuedAt: now.toISOString(),
-    })
+    const itemsJson = JSON.stringify(invoiceItems)
+    const note = `Commande ${order.ref} — paiement ${order.paymentMethod} (${order.paymentStatus})${order.deliveryZone ? ` — livraison : ${order.deliveryZone}` : ""}`
 
-    const invoice = await db.invoice.create({
-      data: {
+    // P4 (F4-7) : le contrôle « une seule facture active » et la création
+    // partagent la même unité atomique (mutex boutique + transaction).
+    const result = await withStoreQuotaWrite(order.storeId, async (tx) => {
+      const existingActive = await tx.invoice.findFirst({
+        where: { orderId, status: { notIn: ["cancelled", "credited"] } },
+      })
+      if (existingActive) {
+        return { conflict: true as const, invoice: null, number: existingActive.number }
+      }
+
+      const number = await makeSequentialInvoiceNumber(tx)
+      const now = new Date()
+      const hash = invoiceHashV2({
         number,
-        storeId: order.storeId,
         orderId: order.id,
-        source: "order",
-        hash,
+        storeId: order.storeId,
+        totalUSD: order.totalUSD,
+        totalFC: order.totalFC,
+        issuedAt: now.toISOString(),
+        itemsJson,
         clientName: order.customerName,
         clientPhone: order.customerPhone,
-        items: JSON.stringify(invoiceItems),
-        totalFC: order.totalFC,
-        totalUSD: order.totalUSD,
-        note: `Commande ${order.ref} — paiement ${order.paymentMethod} (${order.paymentStatus})${order.deliveryZone ? ` — livraison : ${order.deliveryZone}` : ""}`,
-        status: order.paymentStatus === "paid" ? "paid" : "sent",
-        paidAt: order.paidAt,
-        createdAt: now,
-      },
+        dueDate: "",
+        note,
+      })
+
+      const invoice = await tx.invoice.create({
+        data: {
+          number,
+          storeId: order.storeId,
+          orderId: order.id,
+          source: "order",
+          hash,
+          version: 2,
+          clientName: order.customerName,
+          clientPhone: order.customerPhone,
+          items: itemsJson,
+          totalFC: order.totalFC,
+          totalUSD: order.totalUSD,
+          note,
+          status: order.paymentStatus === "paid" ? "paid" : "sent",
+          paidAt: order.paidAt,
+          createdAt: now,
+        },
+      })
+
+      await tx.orderEvent.create({
+        data: {
+          orderId: order.id,
+          type: "invoice_generated",
+          actorType: isAdmin ? "admin" : "owner",
+          actorId: user.id,
+          actorLabel: user.name || user.email,
+          newValue: number,
+          reason: `Facture ${number} émise (${order.totalFC} FC)`,
+        },
+      })
+
+      return { conflict: false as const, invoice, number: "" }
     })
 
-    await db.orderEvent.create({
-      data: {
-        orderId: order.id,
-        type: "invoice_generated",
-        actorType: isAdmin ? "admin" : "owner",
-        actorId: user.id,
-        actorLabel: user.name || user.email,
-        newValue: number,
-        reason: `Facture ${number} émise (${order.totalFC} FC)`,
-      },
-    })
+    if (result.conflict) {
+      return NextResponse.json(
+        { error: `Une facture active existe déjà pour cette commande (${result.number}).`, number: result.number },
+        { status: 409 },
+      )
+    }
 
     await logAudit({
       action: "invoice.generated",
-      target: `invoice:${number}`,
+      target: `invoice:${result.invoice.number}`,
       detail: `Commande ${order.ref} — ${order.totalFC} FC — émise par ${isAdmin ? "admin" : "vendeur"}`,
       actorType: isAdmin ? "admin" : "owner",
       actorId: user.id,
       entityType: "invoice",
-      entityId: invoice.id,
+      entityId: result.invoice.id,
     })
 
-    return NextResponse.json({ invoice }, { status: 201 })
+    return NextResponse.json({ invoice: result.invoice }, { status: 201 })
   } catch (e) {
     console.error("POST /api/orders/invoice", e)
     return NextResponse.json({ error: "Erreur serveur." }, { status: 500 })

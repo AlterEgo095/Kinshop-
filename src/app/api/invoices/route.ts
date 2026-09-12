@@ -1,19 +1,38 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import {
-  makeInvoiceNumber,
   sanitizeInvoiceItems,
   sumInvoiceItems,
   type InvoiceItem,
 } from "@/lib/kinfacture"
-import { requireStoreOwner, forbidden, quotaExceeded } from "@/lib/auth"
+import { requireStoreOwner, forbidden, quotaExceeded, conflict } from "@/lib/auth"
 import { planOf } from "@/lib/plans"
 import { getPlanQuotas, isFeatureOn } from "@/lib/config-registry"
 import { withStoreQuotaWrite } from "@/lib/quota-guard"
+import { invoiceHashV2, makeSequentialKinfactureNumber } from "@/lib/invoice-integrity"
+import { logAudit } from "@/lib/audit"
 
-const VALID_STATUSES = ["draft", "sent", "paid"]
+// P4 (F4-4) — Graphe de transitions des factures libres KinFacture.
+// Une facture ÉMISE ne se modifie jamais silencieusement : rectification =
+// annulation tracée (motif obligatoire) + nouvelle facture.
+const INVOICE_TRANSITIONS: Record<string, string[]> = {
+  draft: ["sent", "cancelled"],
+  sent: ["paid", "cancelled"],
+  paid: ["cancelled"],
+  cancelled: [],
+  credited: [],
+}
+const TRANSITION_LABELS: Record<string, string> = {
+  draft: "Brouillon",
+  sent: "Envoyée",
+  paid: "Payée",
+  cancelled: "Annulée",
+  credited: "Avoir",
+}
 
 // POST /api/invoices — Créer une facture (V8 : propriétaire + quota mensuel du plan)
+// P4 (F4-1/F4-2) : numéro séquentiel KF-YYYY-NNNNNN (compteur atomique, jamais
+// réutilisé) + empreinte d'intégrité V2 couvrant tout le contenu facturé.
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
@@ -62,23 +81,47 @@ export async function POST(req: NextRequest) {
 
     // F-07 (audit) — quota mensuel revérifié + création dans UNE transaction
     // atomique (mutex boutique + transaction Prisma) : pas de dépassement possible.
+    // P4 : la numérotation séquentielle et le hash V2 partagent la même
+    // transaction — pas de trou de séquence en cas d'échec.
+    const clientPhone = String(body.clientPhone || "").replace(/\D/g, "").slice(0, 15)
+    const note = String(body.note || "").slice(0, 300)
+    const dueDate = String(body.dueDate || "").slice(0, 10)
     const result = await withStoreQuotaWrite(store.id, async (tx) => {
       const n = await tx.invoice.count({
         where: { storeId: store.id, createdAt: { gte: monthStart } },
       })
       if (n >= quotas.maxInvoicesPerMonth) return { overQuota: true as const, invoice: null }
+      const number = await makeSequentialKinfactureNumber(tx)
+      const now = new Date()
+      const itemsJson = JSON.stringify(items)
+      const hash = invoiceHashV2({
+        number,
+        orderId: "",
+        storeId: store.id,
+        totalUSD,
+        totalFC,
+        issuedAt: now.toISOString(),
+        itemsJson,
+        clientName: clientName.slice(0, 80),
+        clientPhone,
+        dueDate,
+        note,
+      })
       const invoice = await tx.invoice.create({
         data: {
-          number: makeInvoiceNumber(),
+          number,
           storeId: store.id,
           clientName: clientName.slice(0, 80),
-          clientPhone: String(body.clientPhone || "").replace(/\D/g, "").slice(0, 15),
-          items: JSON.stringify(items),
+          clientPhone,
+          items: itemsJson,
           totalFC,
           totalUSD,
-          note: String(body.note || "").slice(0, 300),
-          dueDate: String(body.dueDate || "").slice(0, 10),
+          note,
+          dueDate,
           status: "draft",
+          hash,
+          version: 2,
+          createdAt: now,
         },
       })
       return { overQuota: false as const, invoice }
@@ -90,6 +133,16 @@ export async function POST(req: NextRequest) {
           : `Quota de ${quotas.maxInvoicesPerMonth} factures par mois atteint.`,
       )
     }
+
+    await logAudit({
+      action: "invoice.created",
+      target: `invoice:${result.invoice.number}`,
+      detail: `Facture libre ${result.invoice.number} — ${totalFC} FC — ${items.length} ligne(s)`,
+      actorType: "owner",
+      actorId: guard.user.id,
+      entityType: "invoice",
+      entityId: result.invoice.id,
+    })
 
     return NextResponse.json({ invoice: result.invoice }, { status: 201 })
   } catch (e) {
@@ -132,12 +185,16 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// PATCH /api/invoices — Changer le statut (V8 : propriétaire uniquement, anti-IDOR)
+// PATCH /api/invoices — Transitions de statut (V8 propriétaire uniquement, anti-IDOR)
+// P4 (F4-4) : graphe de transitions serveur — draft→sent→paid, annulation
+// possible depuis tout état actif AVEC motif obligatoire ; cancelled/credited
+// sont terminaux ; chaque transition est tracée dans le journal d'audit.
 export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json()
     const id = String(body.id || "")
     const status = String(body.status || "")
+    const reason = String(body.reason || "").trim()
 
     if (!id) return NextResponse.json({ error: "Paramètre id requis." }, { status: 400 })
 
@@ -147,19 +204,53 @@ export async function PATCH(req: NextRequest) {
     const guard = await requireStoreOwner(req, { id: invoice.storeId })
     if (!guard.ok) return guard.response
 
-    const data: { status?: string; paidAt?: Date | null } = {}
-    if (status) {
-      if (!VALID_STATUSES.includes(status)) {
-        return NextResponse.json({ error: "Statut invalide." }, { status: 400 })
-      }
-      data.status = status
-      data.paidAt = status === "paid" ? new Date() : null
-    }
-    if (Object.keys(data).length === 0) {
-      return NextResponse.json({ error: "Rien à mettre à jour." }, { status: 400 })
+    if (!status) return NextResponse.json({ error: "Statut requis." }, { status: 400 })
+
+    const allowed = INVOICE_TRANSITIONS[invoice.status] ?? []
+    if (!allowed.includes(status)) {
+      return NextResponse.json(
+        {
+          error: `Transition impossible : une facture ${TRANSITION_LABELS[invoice.status] ?? invoice.status} ne peut pas devenir ${TRANSITION_LABELS[status] ?? status}.`,
+        },
+        { status: 400 },
+      )
     }
 
-    const updated = await db.invoice.update({ where: { id }, data })
+    if (status === "cancelled") {
+      if (reason.length < 4) {
+        return NextResponse.json(
+          { error: "Un motif d'annulation d'au moins 4 caractères est requis (traçabilité)." },
+          { status: 400 },
+        )
+      }
+      if (invoice.orderId) {
+        return NextResponse.json(
+          { error: "Cette facture est rattachée à une commande : passez par le workflow de la commande (annulation / remboursement) plutôt que d'annuler la facture directement." },
+          { status: 400 },
+        )
+      }
+    }
+
+    const data: { status?: string; paidAt?: Date | null; note?: string } = {}
+    if (status === "paid") data.paidAt = new Date()
+    if (status === "sent" && invoice.status !== "paid") data.paidAt = null
+    if (status === "cancelled") {
+      // La note d'origine est conservée : le motif s'ajoute en préfixe (trace immuable du document).
+      data.note = `[ANNULÉE — motif : ${reason.slice(0, 200)}] ${invoice.note}`.trim().slice(0, 300)
+    }
+
+    const updated = await db.invoice.update({ where: { id }, data: { status, ...data } })
+
+    await logAudit({
+      action: "invoice.status_changed",
+      target: `invoice:${invoice.number}`,
+      detail: `${invoice.status} → ${status}${status === "cancelled" ? ` — motif : ${reason.slice(0, 160)}` : ""}`,
+      actorType: "owner",
+      actorId: guard.user.id,
+      entityType: "invoice",
+      entityId: invoice.id,
+    })
+
     return NextResponse.json({ invoice: updated })
   } catch (e) {
     console.error("PATCH /api/invoices", e)
@@ -167,7 +258,10 @@ export async function PATCH(req: NextRequest) {
   }
 }
 
-// DELETE /api/invoices?id=xxx — Supprimer une facture (V8 : propriétaire uniquement)
+// DELETE /api/invoices?id=xxx — Supprimer un BROUILLON (V8 : propriétaire uniquement)
+// P4 (F4-3) : une facture émise (sent/paid/cancelled/credited) n'est JAMAIS
+// supprimable — elle constitue un justificatif pour le client et une pièce
+// comptable. Rectification = annulation tracée (PATCH) puis nouvelle facture.
 export async function DELETE(req: NextRequest) {
   try {
     const id = req.nextUrl.searchParams.get("id")
@@ -179,7 +273,24 @@ export async function DELETE(req: NextRequest) {
     const guard = await requireStoreOwner(req, { id: invoice.storeId })
     if (!guard.ok) return guard.response
 
+    if (invoice.status !== "draft") {
+      return conflict(
+        `La facture ${invoice.number} est ${TRANSITION_LABELS[invoice.status] ?? invoice.status} : elle ne peut plus être supprimée (justificatif client + pièce comptable). Annulez-la avec motif si nécessaire.`,
+      )
+    }
+
     await db.invoice.delete({ where: { id } })
+
+    await logAudit({
+      action: "invoice.draft_deleted",
+      target: `invoice:${invoice.number}`,
+      detail: `Brouillon ${invoice.number} supprimé (${invoice.totalFC} FC)`,
+      actorType: "owner",
+      actorId: guard.user.id,
+      entityType: "invoice",
+      entityId: invoice.id,
+    })
+
     return NextResponse.json({ ok: true })
   } catch (e) {
     console.error("DELETE /api/invoices", e)

@@ -201,10 +201,16 @@ export function MyOrdersView({ onHome }: { onHome: () => void }) {
 
                     <div className="flex flex-wrap items-center gap-2 pt-1">
                       <span className="text-xs text-muted-foreground mr-auto">{timeAgo(o.createdAt)}</span>
-                      {o.invoices.length > 0 && (
-                        <Badge variant="outline" className="text-[11px] gap-1">
-                          <ReceiptText className="w-3 h-3" /> {o.invoices[0].number}
-                        </Badge>
+                      {o.invoices.filter((inv) => !["cancelled", "credited"].includes(inv.status)).length > 0 && (
+                        <a
+                          href={`#/facture/${encodeURIComponent(o.invoices.filter((inv) => !["cancelled", "credited"].includes(inv.status))[0].number)}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="inline-flex h-8 items-center gap-1 rounded-md border bg-emerald-50 px-2 text-xs font-semibold text-emerald-800 hover:bg-emerald-100"
+                          title="Ouvrir la facture (authentifiable par QR)"
+                        >
+                          <ReceiptText className="w-3 h-3" />
+                          Facture {o.invoices.filter((inv) => !["cancelled", "credited"].includes(inv.status))[0].number}
+                        </a>
                       )}
                       <Button
                         variant="outline"

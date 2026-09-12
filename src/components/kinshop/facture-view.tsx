@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { motion } from "framer-motion"
-import { ArrowLeft, MessageCircle, ShieldCheck, Smartphone } from "lucide-react"
+import { ArrowLeft, MessageCircle, ScanLine, ShieldCheck, Smartphone, ShieldAlert } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -17,16 +17,26 @@ interface InvoiceWithStore extends InvoiceData {
   store: Pick<StoreData, "name" | "logoEmoji" | "whatsapp" | "city">
 }
 
+type VerifyState =
+  | { kind: "ok" }
+  | { kind: "legacy" }
+  | { kind: "cancelled" }
+  | { kind: "bad" }
+  | null
+
 const STATUS_STYLE: Record<InvoiceStatus, string> = {
   draft: "bg-stone-100 text-stone-700 border-stone-200",
   sent: "bg-amber-50 text-amber-800 border-amber-200",
   paid: "bg-emerald-50 text-emerald-800 border-emerald-200",
+  cancelled: "bg-red-50 text-red-800 border-red-200",
+  credited: "bg-purple-50 text-purple-800 border-purple-200",
 }
 
 export function InvoicePublicView({ number, onHome }: { number: string; onHome?: () => void }) {
   const [invoice, setInvoice] = useState<InvoiceWithStore | null>(null)
   const [loading, setLoading] = useState(true)
   const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null)
+  const [verify, setVerify] = useState<VerifyState>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -40,6 +50,27 @@ export function InvoicePublicView({ number, onHome }: { number: string; onHome?:
         if (!cancelled) setInvoice(null)
       } finally {
         if (!cancelled) setLoading(false)
+      }
+    })()
+    // P4 — verdict d'authenticité (empreinte recalculée par la plateforme)
+    ;(async () => {
+      try {
+        const res = await fetch(`/api/invoices/verify?number=${encodeURIComponent(number)}`, { cache: "no-store" })
+        if (cancelled) return
+        if (res.ok) {
+          const v = await res.json()
+          setVerify(
+            v.cancelled
+              ? { kind: "cancelled" }
+              : v.valid
+                ? { kind: "ok" }
+                : v.legacy
+                  ? { kind: "legacy" }
+                  : { kind: "bad" },
+          )
+        }
+      } catch {
+        // verdict indisponible : bandeau omis
       }
     })()
     return () => {
@@ -123,6 +154,41 @@ export function InvoicePublicView({ number, onHome }: { number: string; onHome?:
               store={invoice.store}
               onRendered={setCanvas}
             />
+
+            {/* P4 — Bandeau d'authenticité (empreinte recalculée par la plateforme) */}
+            {verify && (
+              <div
+                className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3 text-sm ${
+                  verify.kind === "ok"
+                    ? "border-emerald-300 bg-emerald-50 text-emerald-900"
+                    : verify.kind === "cancelled"
+                      ? "border-amber-300 bg-amber-50 text-amber-900"
+                      : verify.kind === "legacy"
+                        ? "border-stone-300 bg-stone-50 text-stone-700"
+                        : "border-red-300 bg-red-50 text-red-900"
+                }`}
+                role="status"
+              >
+                <span className="flex min-w-0 items-center gap-2 font-semibold">
+                  {verify.kind === "ok" ? (
+                    <ShieldCheck className="size-5 shrink-0" aria-hidden="true" />
+                  ) : (
+                    <ShieldAlert className="size-5 shrink-0" aria-hidden="true" />
+                  )}
+                  {verify.kind === "ok" && "Facture authentique — contenu intégral vérifié par KinShop"}
+                  {verify.kind === "legacy" && "Facture héritée : source authentique, émise avant la vérification renforcée"}
+                  {verify.kind === "cancelled" && "Cette facture a été annulée ou remplacée par un avoir"}
+                  {verify.kind === "bad" && "Alerte : empreinte invalide — cette facture a pu être falsifiée"}
+                </span>
+                <a
+                  href={`#/verifier/${encodeURIComponent(invoice.number)}`}
+                  className="inline-flex items-center gap-1.5 font-semibold underline decoration-1 underline-offset-2"
+                >
+                  <ScanLine className="size-4" aria-hidden="true" />
+                  Vérifier l&apos;authenticité
+                </a>
+              </div>
+            )}
 
             {/* Instructions de paiement mobile money */}
             <section className="rounded-2xl border bg-amber-50/60 p-4 sm:p-6" aria-label="Instructions de paiement">

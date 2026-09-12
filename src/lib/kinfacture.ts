@@ -8,7 +8,7 @@ export interface InvoiceItem {
   unitFC: number
 }
 
-export type InvoiceStatus = "draft" | "sent" | "paid"
+export type InvoiceStatus = "draft" | "sent" | "paid" | "cancelled" | "credited"
 
 export interface InvoiceData {
   id: string
@@ -24,19 +24,25 @@ export interface InvoiceData {
   status: InvoiceStatus
   paidAt: string | null
   createdAt: string
+  // P4 — intégrité documentaire
+  orderId?: string | null
+  source?: string // manual | order
+  hash?: string // empreinte sha256 du contenu canonique
+  version?: number // 1 = totaux (historique) ; 2 = contenu complet
 }
 
 export const INVOICE_STATUS_LABELS: Record<InvoiceStatus, string> = {
   draft: "Brouillon",
   sent: "Envoyée",
   paid: "Payée",
+  cancelled: "Annulée",
+  credited: "Avoir",
 }
 
-/** KF-XXXXXX — numéro de facture unique lisible */
-export function makeInvoiceNumber(): string {
-  const t = Date.now().toString(36).toUpperCase().slice(-4)
-  const r = Math.random().toString(36).toUpperCase().slice(2, 5)
-  return `KF-${t}${r}`
+/** URL publique de vérification d'authenticité (QR imprimé sur la facture, P4). */
+export function buildInvoiceVerifyUrl(number: string): string {
+  if (typeof window === "undefined") return `/#/verifier/${encodeURIComponent(number)}`
+  return `${window.location.origin}/#/verifier/${encodeURIComponent(number)}`
 }
 
 /** Total d'une liste de lignes (recalculé côté serveur, jamais faire confiance au client) */
@@ -92,7 +98,9 @@ export function buildInvoiceMessage(params: {
   lines.push(`💳 Payez par mobile money (M-Pesa / Airtel / Orange) — QR de paiement sur la facture :`)
   lines.push(params.publicUrl)
   lines.push("")
-  lines.push("✅ Facture générée par KinShop — kinshop.cd")
+  lines.push("✅ Facture authentifiable : vérifiez-la sur la page « Vérifier » de KinShop (QR au dos du document).")
+  lines.push("")
+  lines.push("🧾 Facture générée par KinShop — kinshop.cd")
   return lines.join("\n")
 }
 

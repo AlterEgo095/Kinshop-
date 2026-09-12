@@ -8,7 +8,7 @@
 // 3. BoostPanel : campagnes de promotion payante (≠ Premium).
 
 import { useCallback, useEffect, useState } from "react"
-import { Loader2, Plus, Trash2, Megaphone, History, Truck, Banknote, Layers } from "lucide-react"
+import { Loader2, Plus, Trash2, Megaphone, History, Truck, Banknote, Layers, ReceiptText } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -56,11 +56,17 @@ export function OrderWorkflowControls({
   const [failNote, setFailNote] = useState("")
   const [historyOpen, setHistoryOpen] = useState(false)
   const [events, setEvents] = useState<{ id: string; type: string; actorLabel: string; oldValue: string; newValue: string; reason: string; createdAt: string }[]>([])
+  // P4 — facture de commande (émission + statut) : la règle serveur est la référence
+  const [invoiceNumber, setInvoiceNumber] = useState<string | null>(null)
+  const [invoiceStatus, setInvoiceStatus] = useState<string | null>(null)
+  const [invoiceLoading, setInvoiceLoading] = useState(false)
 
   const nextStatuses = ORDER_TRANSITIONS[status as keyof typeof ORDER_TRANSITIONS] ?? []
   const nextDelivery = DELIVERY_TRANSITIONS[deliveryStatus as keyof typeof DELIVERY_TRANSITIONS] ?? []
   const cashConfirmable = paymentMethod === "cash" && !["paid", "refunded"].includes(paymentStatus) &&
     !["new", "cancelled", "returned", "refunded", "disputed"].includes(status)
+  // Facturable dès confirmation (garde serveur identique à POST /api/orders/invoice)
+  const invoiceEligible = !["new", "paid", "cancelled", "returned", "refunded", "disputed"].includes(status)
 
   const callOrders = async (body: Record<string, unknown>) => {
     setBusy(true)
@@ -107,6 +113,48 @@ export function OrderWorkflowControls({
       if (res.ok) setEvents(data.events ?? [])
     } catch {
       // silencieux
+    }
+  }
+
+  // P4 — charge le statut facture de la commande (une seule active sinon annulée/avoir)
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch(`/api/orders/invoice?orderId=${encodeURIComponent(orderId)}`, { cache: "no-store" })
+        if (cancelled || !res.ok) return
+        const data = await res.json()
+        if (cancelled) return
+        const list: { number: string; status: string }[] = Array.isArray(data.invoices) ? data.invoices : []
+        const active = list.find((i) => !["cancelled", "credited"].includes(i.status))
+        setInvoiceNumber(active?.number ?? null)
+        setInvoiceStatus(active?.status ?? null)
+      } catch {
+        // silencieux — le bouton d'émission reste disponible
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [orderId, status])
+
+  const generateInvoice = async () => {
+    setInvoiceLoading(true)
+    try {
+      const res = await fetch("/api/orders/invoice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Émission impossible.")
+      setInvoiceNumber(data.invoice.number)
+      setInvoiceStatus(data.invoice.status)
+      toast.success(`Facture ${data.invoice.number} émise 🧾 (empreinte intégrale vérifiable)`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur inconnue")
+    } finally {
+      setInvoiceLoading(false)
     }
   }
 
@@ -180,6 +228,34 @@ export function OrderWorkflowControls({
       <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={loadHistory}>
         <History className="w-3.5 h-3.5 mr-1" /> Historique
       </Button>
+
+      {/* P4 — Facture de commande (INV- séquentielle, empreinte d'intégrité, QR de vérification) */}
+      {invoiceNumber ? (
+        <a
+          href={`#/facture/${encodeURIComponent(invoiceNumber)}`}
+          className="inline-flex h-7 items-center gap-1 rounded-md border bg-emerald-50 px-2 text-xs font-semibold text-emerald-800 hover:bg-emerald-100"
+          title="Ouvrir la facture de cette commande"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <ReceiptText className="w-3.5 h-3.5" />
+          Facture {invoiceNumber}
+          {invoiceStatus === "paid" ? " (payée)" : ""}
+        </a>
+      ) : (
+        invoiceEligible && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 px-2 text-xs text-emerald-800 hover:text-emerald-900"
+            disabled={busy || invoiceLoading}
+            onClick={generateInvoice}
+            title="Émettre la facture de cette commande (document authentifiable par le client)"
+          >
+            {invoiceLoading ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <ReceiptText className="w-3.5 h-3.5 mr-1" />}
+            Émettre la facture
+          </Button>
+        )
+      )}
       {deliveryAttempts > 0 && (
         <Badge variant="outline" className="text-[10px]">
           {deliveryAttempts} relance(s)
