@@ -16,6 +16,10 @@ model Store {
   name        String
   ownerName   String
   whatsapp    String
+  // V8 — Propriétaire authentifié (compte utilisateur). Null = boutique orpheline
+  // créée avant l'introduction des comptes (lecture publique seule, non éditable).
+  ownerId     String?
+  owner       User?     @relation(fields: [ownerId], references: [id], onDelete: SetNull)
   description String    @default("")
   city        String    @default("Kinshasa")
   logoEmoji   String    @default("🛍️")
@@ -44,9 +48,43 @@ model Store {
   reviews       Review[]
   coupons       Coupon[]
   deliveryZones DeliveryZone[]
+
+  @@index([ownerId])
+}
+
+// V8 — Compte utilisateur : chaque boutique appartient à un utilisateur authentifié.
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique // toujours stocké en minuscules
+  passwordHash String // format s1$<salt>$<hash> (scrypt, jamais le mot de passe en clair)
+  name         String
+  whatsapp     String    @default("")
+  role         String    @default("user") // user | admin (réservé)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  stores       Store[]
+  sessions     Session[]
+}
+
+// V8 — Session opaque : le cookie ne contient qu'un jeton aléatoire, la base
+// ne stocke que son SHA-256 (un vol de base ne permet pas de voler les sessions).
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
 }
 
 // V3 — KinFacture : factures professionnelles avec QR de paiement mobile money
+// V8 — Abonnement Premium (état réel calculé côté serveur).
+// Implémentation actuelle : isPremium + premiumUntil sur Store, activé UNIQUEMENT par
+// le webhook Chariow signé (HMAC) ou la console admin. Aucune route API publique ne
+// permet d'écrire ces champs. Le modèle Subscription dédié devient utile si plusieurs
+// plans/prix coexistent — la matrice des droits est dans src/lib/plans.ts.
 model Invoice {
   id           String    @id @default(cuid())
   number       String    @unique // KF-XXXXXX

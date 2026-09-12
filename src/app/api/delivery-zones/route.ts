@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
+import { requireStoreOwner, quotaExceeded } from "@/lib/auth"
+import { planOf, PLANS } from "@/lib/plans"
 
 // GET /api/delivery-zones?slug=xxx — Zones de livraison (public : la vitrine affiche les frais)
 export async function GET(req: NextRequest) {
@@ -21,7 +23,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// POST /api/delivery-zones — Ajouter une zone tarifée
+// POST /api/delivery-zones — Ajouter une zone tarifée (V8 : propriétaire + quota du plan)
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
@@ -34,17 +36,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Nom de zone invalide (2 à 60 caractères)." }, { status: 400 })
     }
 
-    const store = await db.store.findUnique({ where: { slug } })
-    if (!store) return NextResponse.json({ error: "Boutique introuvable." }, { status: 404 })
+    const guard = await requireStoreOwner(req, { slug })
+    if (!guard.ok) return guard.response
+    const plan = planOf(guard.store)
 
-    const count = await db.deliveryZone.count({ where: { storeId: store.id } })
-    if (count >= 25) {
-      return NextResponse.json({ error: "Limite de 25 zones atteinte. Supprime-en d'abord." }, { status: 400 })
+    // ── Quota zones de livraison (serveur) ──
+    const count = await db.deliveryZone.count({ where: { storeId: guard.store.id } })
+    if (count >= plan.maxDeliveryZones) {
+      return quotaExceeded(
+        plan.id === "free"
+          ? `Limite du plan Free atteinte (${PLANS.free.maxDeliveryZones} zones). Passe Premium pour desservir davantage de quartiers.`
+          : `Limite de ${plan.maxDeliveryZones} zones atteinte.`,
+      )
     }
 
     try {
       const zone = await db.deliveryZone.create({
-        data: { storeId: store.id, name, feeFC, active: true },
+        data: { storeId: guard.store.id, name, feeFC, active: true },
       })
       return NextResponse.json({ zone }, { status: 201 })
     } catch {
@@ -57,7 +65,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// PATCH /api/delivery-zones — Modifier une zone (nom, tarif, active)
+// PATCH /api/delivery-zones — Modifier une zone (V8 : propriétaire uniquement)
 export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json()
@@ -66,6 +74,9 @@ export async function PATCH(req: NextRequest) {
 
     const existing = await db.deliveryZone.findUnique({ where: { id } })
     if (!existing) return NextResponse.json({ error: "Zone introuvable." }, { status: 404 })
+
+    const guard = await requireStoreOwner(req, { id: existing.storeId })
+    if (!guard.ok) return guard.response
 
     const data: { name?: string; feeFC?: number; active?: boolean } = {}
     if (typeof body.name === "string" && body.name.trim().length >= 2) {
@@ -92,7 +103,7 @@ export async function PATCH(req: NextRequest) {
   }
 }
 
-// DELETE /api/delivery-zones?id=xxx — Supprimer une zone
+// DELETE /api/delivery-zones?id=xxx — Supprimer une zone (V8 : propriétaire uniquement)
 export async function DELETE(req: NextRequest) {
   try {
     const id = req.nextUrl.searchParams.get("id")
@@ -100,6 +111,9 @@ export async function DELETE(req: NextRequest) {
 
     const existing = await db.deliveryZone.findUnique({ where: { id } })
     if (!existing) return NextResponse.json({ error: "Zone introuvable." }, { status: 404 })
+
+    const guard = await requireStoreOwner(req, { id: existing.storeId })
+    if (!guard.ok) return guard.response
 
     await db.deliveryZone.delete({ where: { id } })
     return NextResponse.json({ ok: true })

@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { isChariowLive, initiateCheckout, buildPremiumRedirectUrl, getChariowConfig } from "@/lib/chariow"
 import { normalizePhone } from "@/lib/kinshop"
+import { requireStoreOwner, unauthorized } from "@/lib/auth"
 
 export async function POST(req: NextRequest) {
   try {
@@ -27,18 +28,25 @@ export async function POST(req: NextRequest) {
     if (!firstName) {
       return NextResponse.json({ error: "Ton prénom est requis." }, { status: 400 })
     }
-
     const digits = normalizePhone(String(body.phone || ""))
     if (digits.length < 9) {
       return NextResponse.json({ error: "Numéro de téléphone invalide (ex : 0812345678)." }, { status: 400 })
     }
 
-    const store = await db.store.findUnique({ where: { slug } })
+    // V8 : seul le propriétaire peut payer l'abonnement de SA boutique
+    const user = await requireStoreOwner(req, { slug })
+    if (!user.ok) {
+      return user.ok === false && user.response.status === 401
+        ? unauthorized("Connecte-toi pour souscrire au Premium de ta boutique.")
+        : user.response
+    }
+    const store = user.ok ? user.store : null
     if (!store) return NextResponse.json({ error: "Boutique introuvable." }, { status: 404 })
 
-    // On mémorise les coordonnées de facturation sur la boutique
+    // On mémorise les coordonnées de facturation sur la boutique (champ dédié,
+    // sans jamais toucher aux champs d'abonnement — seul Chariow/admin les écrit)
     await db.store.update({
-      where: { slug },
+      where: { id: store.id },
       data: { chariowEmail: email, chariowPhone: digits },
     })
 

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { Landing } from "@/components/kinshop/landing"
+import { AuthView, type AuthMode } from "@/components/kinshop/auth-view"
 import { CreateWizard } from "@/components/kinshop/create-wizard"
 import { Dashboard } from "@/components/kinshop/dashboard"
 import { StoreView } from "@/components/kinshop/store-view"
@@ -14,9 +15,11 @@ import { PwaLayer } from "@/components/kinshop/pwa"
 import { PLATFORM_DOMAIN } from "@/lib/domain"
 import { DEFAULT_RATE_FC, type StoreData } from "@/lib/kinshop"
 import { Button } from "@/components/ui/button"
+import { Loader2 } from "lucide-react"
 
 type View =
   | { name: "landing" }
+  | { name: "auth"; mode: AuthMode; next?: "create" | "dashboard" }
   | { name: "create" }
   | { name: "dashboard"; slug: string }
   | { name: "store"; slug: string }
@@ -26,8 +29,24 @@ type View =
   | { name: "invoice-public"; number: string }
   | { name: "track"; ref: string }
 
-const OWNER_KEY = "kinshop_owner_slug"
-const DEMO_SLUG = "maman-ngo"
+// V8 — Clé legacy de l'ancienne « session vendeur » (slug en localStorage) :
+// supprimée au profit de la vraie session serveur (cookie HttpOnly).
+const LEGACY_OWNER_KEY = "kinshop_owner_slug"
+
+interface AuthUser {
+  id: string
+  email: string
+  name: string
+  whatsapp: string
+}
+
+interface UserStoreInfo {
+  id: string
+  slug: string
+  name: string
+  logoEmoji: string
+  plan: "free" | "premium"
+}
 
 interface PlatformStatus {
   maintenance: boolean
@@ -73,20 +92,40 @@ export function KinShopApp({ initialSlug }: { initialSlug?: string }) {
   const [view, setView] = useState<View>(
     initialSlug ? { name: "store", slug: initialSlug } : { name: "landing" },
   )
-  const [ownerSlug, setOwnerSlug] = useState<string | null>(null)
-  const [hydrated, setHydrated] = useState(false)
+  // V8 — Identité de l'utilisateur connecté (session serveur) + sa boutique
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null)
+  const [userStore, setUserStore] = useState<UserStoreInfo | null>(null)
+  const [authReady, setAuthReady] = useState(false)
   // Maintenance globale + annonce (paramètres console admin) — surveillés en continu
   const [platform, setPlatform] = useState<PlatformStatus>(PLATFORM_STATUS_DEFAULT)
 
-  // Hydratation : session vendeur + deep-link boutique (#/boutique/slug)
+  // Récupère l'état d'authentification réel côté serveur (jamais faire confiance
+  // au localStorage). Retourne l'état pour les transitions immédiates.
+  const refreshMe = useCallback(async (): Promise<{ user: AuthUser | null; store: UserStoreInfo | null }> => {
+    try {
+      const res = await fetch("/api/auth/me", { cache: "no-store" })
+      const data = (await res.json()) as { user: AuthUser | null; store: UserStoreInfo | null }
+      setAuthUser(data.user ?? null)
+      setUserStore(data.store ?? null)
+      return { user: data.user ?? null, store: data.store ?? null }
+    } catch {
+      return { user: null, store: null }
+    } finally {
+      setAuthReady(true)
+    }
+  }, [])
+
+  // Hydratation : session utilisateur + deep-link boutique (#/boutique/slug)
   // (async IIFE : évite un setState synchrone dans l'effet → rendus en cascade)
   useEffect(() => {
     let cancelled = false
     ;(async () => {
       await Promise.resolve()
       if (cancelled) return
-      const saved = localStorage.getItem(OWNER_KEY)
-      if (saved) setOwnerSlug(saved)
+      // Migration : l'ancienne « session » localStorage n'a plus aucune valeur
+      localStorage.removeItem(LEGACY_OWNER_KEY)
+      await refreshMe()
+      if (cancelled) return
       const hashTarget = parseHash()
       if (hashTarget?.type === "store") setView({ name: "store", slug: hashTarget.slug })
       else if (hashTarget?.type === "premium") setView({ name: "premium-success" })
@@ -94,16 +133,14 @@ export function KinShopApp({ initialSlug }: { initialSlug?: string }) {
       else if (hashTarget?.type === "cv") setView({ name: "cv" })
       else if (hashTarget?.type === "invoice") setView({ name: "invoice-public", number: hashTarget.number })
       else if (hashTarget?.type === "track") setView({ name: "track", ref: hashTarget.ref })
-      setHydrated(true)
     })()
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [refreshMe])
 
   // Synchroniser le hash avec la vue boutique / succès premium (liens partageables)
   useEffect(() => {
-    if (!hydrated) return
     if (view.name === "store") {
       const target = `#/boutique/${view.slug}`
       // Mode domaine personnalisé : la vitrine d'origine reste à la racine (URL propre)
@@ -146,7 +183,7 @@ export function KinShopApp({ initialSlug }: { initialSlug?: string }) {
     ) {
       window.history.replaceState(null, "", window.location.pathname)
     }
-  }, [view, hydrated, isCustomDomain, initialSlug])
+  }, [view, isCustomDomain, initialSlug])
 
   // Bouton retour navigateur pendant qu'on est dans une boutique
   useEffect(() => {
@@ -174,11 +211,43 @@ export function KinShopApp({ initialSlug }: { initialSlug?: string }) {
     window.scrollTo({ top: 0 })
   }, [view])
 
-  const handleCreated = useCallback((slug: string) => {
-    localStorage.setItem(OWNER_KEY, slug)
-    setOwnerSlug(slug)
-    setView({ name: "dashboard", slug })
-  }, [])
+  /* ─────────── Transitions d'authentification (V8) ─────────── */
+
+  // Après inscription/connexion réussies (session posée par le serveur) :
+  // on relit /api/auth/me puis on emmène l'utilisateur à sa destination.
+  const handleAuthed = useCallback(
+    async (next?: "create" | "dashboard") => {
+      const me = await refreshMe()
+      if (next === "dashboard") {
+        if (me.store) setView({ name: "dashboard", slug: me.store.slug })
+        else setView({ name: "create" }) // connecté sans boutique → création guidée
+      } else if (next === "create") {
+        setView({ name: "create" })
+      } else {
+        setView(me.store ? { name: "dashboard", slug: me.store.slug } : { name: "landing" })
+      }
+    },
+    [refreshMe],
+  )
+
+  const handleLogout = useCallback(async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" })
+    } catch {
+      // silencieux : la session expirera naturellement
+    }
+    await refreshMe()
+    setView({ name: "landing" })
+  }, [refreshMe])
+
+  // Boutique créée : le serveur l'a liée au compte — on relit l'état puis dashboard
+  const handleCreated = useCallback(
+    async (slug: string) => {
+      await refreshMe()
+      setView({ name: "dashboard", slug })
+    },
+    [refreshMe],
+  )
 
   const openStore = useCallback((slug: string) => {
     setView({ name: "store", slug })
@@ -193,17 +262,25 @@ export function KinShopApp({ initialSlug }: { initialSlug?: string }) {
     setView({ name: "landing" })
   }, [isCustomDomain])
 
-  const openDashboard = useCallback((slug: string) => {
-    setView({ name: "dashboard", slug })
-  }, [])
+  const openDashboard = useCallback(
+    (slug: string) => {
+      // V8 : ouvrir un dashboard exige une session valide — sinon écran de connexion
+      if (authReady && !authUser) {
+        setView({ name: "auth", mode: "login", next: "dashboard" })
+        return
+      }
+      setView({ name: "dashboard", slug })
+    },
+    [authReady, authUser],
+  )
 
   // Préchargement silencieux de la démo pour éviter l'écran vide si non seedée
   const openDemo = useCallback(async () => {
     try {
-      const res = await fetch(`/api/stores?slug=${DEMO_SLUG}`)
+      const res = await fetch(`/api/stores?slug=maman-ngo`)
       const data = await res.json()
       if (res.ok && (data as { store: StoreData }).store) {
-        openStore(DEMO_SLUG)
+        openStore("maman-ngo")
       } else {
         setView({ name: "create" })
       }
@@ -252,19 +329,67 @@ export function KinShopApp({ initialSlug }: { initialSlug?: string }) {
     }
   }, [refreshPlatform])
 
+  /* ─────────── Garde de routes (V8) ───────────
+     L'écran d'attente évite un « flash » de formulaire d'authentification
+     pendant la vérification de session au montage. */
+
   let content: React.ReactNode
   switch (view.name) {
+    case "auth":
+      content = (
+        <AuthView
+          key={`${view.mode}-${view.next ?? "none"}`}
+          initialMode={view.mode}
+          next={view.next}
+          onAuthed={() => handleAuthed(view.next)}
+          onCancel={goHome}
+          onSwitchMode={(mode) => setView((v) => (v.name === "auth" ? { ...v, mode } : v))}
+        />
+      )
+      break
     case "create":
-      content = <CreateWizard onCreated={handleCreated} onCancel={goHome} platformRate={platform.defaultRateFC} />
+      if (!authReady) {
+        content = <AuthGateLoader />
+      } else if (!authUser) {
+        // Parcours cible : visiteur → compte → boutique (jamais de boutique sans identité)
+        content = (
+          <AuthView
+            initialMode="register"
+            next="create"
+            onAuthed={() => handleAuthed("create")}
+            onCancel={goHome}
+            onSwitchMode={(mode) => setView({ name: "auth", mode, next: "create" })}
+          />
+        )
+      } else if (userStore) {
+        // Un compte = une boutique : si elle existe déjà, on va au dashboard
+        content = <Dashboard slug={userStore.slug} onBack={goHome} onViewStore={openStore} platformRate={platform.defaultRateFC} onLogout={handleLogout} />
+      } else {
+        content = <CreateWizard onCreated={handleCreated} onCancel={goHome} platformRate={platform.defaultRateFC} user={authUser} />
+      }
       break
     case "dashboard":
-      content = <Dashboard slug={view.slug} onBack={goHome} onViewStore={openStore} platformRate={platform.defaultRateFC} />
+      if (!authReady) {
+        content = <AuthGateLoader />
+      } else if (!authUser) {
+        content = (
+          <AuthView
+            initialMode="login"
+            next="dashboard"
+            onAuthed={() => handleAuthed("dashboard")}
+            onCancel={goHome}
+            onSwitchMode={(mode) => setView({ name: "auth", mode, next: "dashboard" })}
+          />
+        )
+      } else {
+        content = <Dashboard slug={view.slug} onBack={goHome} onViewStore={openStore} platformRate={platform.defaultRateFC} onLogout={handleLogout} />
+      }
       break
     case "store":
       content = <StoreView slug={view.slug} onBack={goHome} platformRate={platform.defaultRateFC} />
       break
     case "premium-success":
-      content = <PremiumSuccess ownerSlug={ownerSlug} onGoDashboard={openDashboard} onGoHome={goHome} />
+      content = <PremiumSuccess ownerSlug={userStore?.slug ?? null} onGoDashboard={openDashboard} onGoHome={goHome} />
       break
     case "admin":
       content = <AdminConsole onBack={goHome} onOpenStore={openStore} />
@@ -281,8 +406,11 @@ export function KinShopApp({ initialSlug }: { initialSlug?: string }) {
     default:
       content = (
         <Landing
-          ownerSlug={ownerSlug}
+          user={authUser}
+          userStore={userStore}
           onCreateStore={() => setView({ name: "create" })}
+          onAuth={(mode, next) => setView({ name: "auth", mode, next })}
+          onLogout={handleLogout}
           onDemo={openDemo}
           onOpenDashboard={openDashboard}
           onCvExpress={() => setView({ name: "cv" })}
@@ -318,5 +446,17 @@ export function KinShopApp({ initialSlug }: { initialSlug?: string }) {
       {content}
       <PwaLayer visible={view.name !== "store"} />
     </>
+  )
+}
+
+/** Petit écran d'attente pendant la vérification de session au montage. */
+function AuthGateLoader() {
+  return (
+    <div className="min-h-screen flex items-center justify-center">
+      <div className="flex flex-col items-center gap-3 text-muted-foreground">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        <p className="text-sm">Vérification de ta session…</p>
+      </div>
+    </div>
   )
 }

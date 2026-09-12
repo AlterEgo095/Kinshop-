@@ -1,20 +1,22 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import type { CouponType } from "@/lib/kinshop"
+import { requireStoreOwner, quotaExceeded } from "@/lib/auth"
+import { planOf, PLANS } from "@/lib/plans"
 
 const CODE_RE = /^[A-Z0-9]{3,16}$/
 
-// GET /api/coupons?slug=xxx — Codes promo d'une boutique (tableau de bord vendeur)
+// GET /api/coupons?slug=xxx — Codes promo d'une boutique (V8 : propriétaire uniquement)
 export async function GET(req: NextRequest) {
   try {
     const slug = req.nextUrl.searchParams.get("slug")
     if (!slug) return NextResponse.json({ error: "Paramètre slug requis." }, { status: 400 })
 
-    const store = await db.store.findUnique({ where: { slug } })
-    if (!store) return NextResponse.json({ error: "Boutique introuvable." }, { status: 404 })
+    const guard = await requireStoreOwner(req, { slug })
+    if (!guard.ok) return guard.response
 
     const coupons = await db.coupon.findMany({
-      where: { storeId: store.id },
+      where: { storeId: guard.store.id },
       orderBy: { createdAt: "desc" },
     })
     return NextResponse.json({ coupons })
@@ -24,7 +26,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// POST /api/coupons — Créer un code promo
+// POST /api/coupons — Créer un code promo (V8 : propriétaire + quota du plan)
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
@@ -43,12 +45,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Type de remise invalide." }, { status: 400 })
     }
 
-    const store = await db.store.findUnique({ where: { slug } })
-    if (!store) return NextResponse.json({ error: "Boutique introuvable." }, { status: 404 })
+    const guard = await requireStoreOwner(req, { slug })
+    if (!guard.ok) return guard.response
+    const plan = planOf(guard.store)
 
-    const existingCount = await db.coupon.count({ where: { storeId: store.id } })
-    if (existingCount >= 30) {
-      return NextResponse.json({ error: "Limite de 30 codes promo atteinte. Supprime-en d'abord." }, { status: 400 })
+    // ── Quota codes promo (serveur) ──
+    const existingCount = await db.coupon.count({ where: { storeId: guard.store.id } })
+    if (existingCount >= plan.maxCoupons) {
+      return quotaExceeded(
+        plan.id === "free"
+          ? `Limite du plan Free atteinte (${PLANS.free.maxCoupons} codes promo). Passe Premium pour en créer davantage.`
+          : `Limite de ${plan.maxCoupons} codes promo atteinte.`,
+      )
     }
 
     const value = Number(body.value)
@@ -64,7 +72,7 @@ export async function POST(req: NextRequest) {
 
     try {
       const coupon = await db.coupon.create({
-        data: { storeId: store.id, code, type, value, minTotalUSD, maxUses, active: true },
+        data: { storeId: guard.store.id, code, type, value, minTotalUSD, maxUses, active: true },
       })
       return NextResponse.json({ coupon }, { status: 201 })
     } catch {
@@ -77,7 +85,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// PATCH /api/coupons — Activer / désactiver un code promo
+// PATCH /api/coupons — Activer / désactiver un code promo (V8 : propriétaire uniquement)
 export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json()
@@ -86,6 +94,9 @@ export async function PATCH(req: NextRequest) {
 
     const existing = await db.coupon.findUnique({ where: { id } })
     if (!existing) return NextResponse.json({ error: "Code promo introuvable." }, { status: 404 })
+
+    const guard = await requireStoreOwner(req, { id: existing.storeId })
+    if (!guard.ok) return guard.response
 
     const coupon = await db.coupon.update({
       where: { id },
@@ -98,7 +109,7 @@ export async function PATCH(req: NextRequest) {
   }
 }
 
-// DELETE /api/coupons?id=xxx — Supprimer un code promo
+// DELETE /api/coupons?id=xxx — Supprimer un code promo (V8 : propriétaire uniquement)
 export async function DELETE(req: NextRequest) {
   try {
     const id = req.nextUrl.searchParams.get("id")
@@ -106,6 +117,9 @@ export async function DELETE(req: NextRequest) {
 
     const existing = await db.coupon.findUnique({ where: { id } })
     if (!existing) return NextResponse.json({ error: "Code promo introuvable." }, { status: 404 })
+
+    const guard = await requireStoreOwner(req, { id: existing.storeId })
+    if (!guard.ok) return guard.response
 
     await db.coupon.delete({ where: { id } })
     return NextResponse.json({ ok: true })

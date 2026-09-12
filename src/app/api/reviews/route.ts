@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
+import { requireStoreOwner } from "@/lib/auth"
+import { clientIp, rateLimit } from "@/lib/ratelimit"
 
 // GET /api/reviews?slug=xxx — Avis publics d'une boutique + statistiques (moyenne, distribution)
 export async function GET(req: NextRequest) {
@@ -17,8 +19,11 @@ export async function GET(req: NextRequest) {
     })
 
     // Le vendeur a besoin des avis masqués pour la modération : paramètre all=1
+    // (V8 : réservé au propriétaire de la boutique — la modération n'est plus publique)
     const all = req.nextUrl.searchParams.get("all") === "1"
     if (all) {
+      const guard = await requireStoreOwner(req, { slug })
+      if (!guard.ok) return guard.response
       const allReviews = await db.review.findMany({
         where: { storeId: store.id },
         orderBy: { createdAt: "desc" },
@@ -63,6 +68,11 @@ export async function POST(req: NextRequest) {
     const store = await db.store.findUnique({ where: { slug } })
     if (!store) return NextResponse.json({ error: "Boutique introuvable." }, { status: 404 })
 
+    // Anti-spam avis : 30 avis/heure/IP
+    if (!rateLimit(`review:${clientIp(req)}`, 30, 60 * 60 * 1000)) {
+      return NextResponse.json({ error: "Trop d'avis envoyés. Réessaie plus tard." }, { status: 429 })
+    }
+
     // Lien optionnel avec une commande réelle de cette boutique (badge vérifié)
     let orderId = ""
     if (ref) {
@@ -97,7 +107,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// PATCH /api/reviews — Modération vendeur : masquer / restaurer
+// PATCH /api/reviews — Modération vendeur (V8 : propriétaire uniquement, anti-IDOR)
 export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json()
@@ -106,6 +116,9 @@ export async function PATCH(req: NextRequest) {
 
     const existing = await db.review.findUnique({ where: { id } })
     if (!existing) return NextResponse.json({ error: "Avis introuvable." }, { status: 404 })
+
+    const guard = await requireStoreOwner(req, { id: existing.storeId })
+    if (!guard.ok) return guard.response
 
     const review = await db.review.update({
       where: { id },
@@ -118,7 +131,7 @@ export async function PATCH(req: NextRequest) {
   }
 }
 
-// DELETE /api/reviews?id=xxx — Supprimer un avis (vendeur)
+// DELETE /api/reviews?id=xxx — Supprimer un avis (V8 : propriétaire uniquement)
 export async function DELETE(req: NextRequest) {
   try {
     const id = req.nextUrl.searchParams.get("id")
@@ -126,6 +139,9 @@ export async function DELETE(req: NextRequest) {
 
     const existing = await db.review.findUnique({ where: { id } })
     if (!existing) return NextResponse.json({ error: "Avis introuvable." }, { status: 404 })
+
+    const guard = await requireStoreOwner(req, { id: existing.storeId })
+    if (!guard.ok) return guard.response
 
     await db.review.delete({ where: { id } })
     return NextResponse.json({ ok: true })

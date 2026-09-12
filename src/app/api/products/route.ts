@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { normalizeImages } from "@/lib/kinshop"
+import { requireStoreOwner, quotaExceeded } from "@/lib/auth"
+import { planOf, PLANS } from "@/lib/plans"
 
-// POST /api/products — Ajouter un produit (avec galerie multi-photos V4)
+// POST /api/products — Ajouter un produit (V8 : propriétaire + quota du plan)
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
@@ -17,11 +19,30 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Le prix (USD) doit être supérieur à 0." }, { status: 400 })
     }
 
-    const store = await db.store.findUnique({ where: { id: storeId } })
-    if (!store) return NextResponse.json({ error: "Boutique introuvable." }, { status: 404 })
+    const guard = await requireStoreOwner(req, { id: storeId })
+    if (!guard.ok) return guard.response
+    const { store } = guard
+    const plan = planOf(store)
+
+    // ── Quota produits (appliqué côté serveur, jamais côté client seul) ──
+    const count = await db.product.count({ where: { storeId: store.id } })
+    if (count >= plan.maxProducts) {
+      return quotaExceeded(
+        plan.id === "free"
+          ? `Limite du plan Free atteinte (${PLANS.free.maxProducts} produits). Passe Premium pour en ajouter davantage.`
+          : `Limite de ${plan.maxProducts} produits atteinte.`,
+      )
+    }
 
     // V4 — galerie multi-photos (5 max, 1re = principale). Rétrocompat imageUrl.
     const images = normalizeImages(body.images, typeof body.imageUrl === "string" ? body.imageUrl : undefined)
+    if (images.length > plan.maxProductImages) {
+      return quotaExceeded(
+        plan.id === "free"
+          ? `Le plan Free autorise ${PLANS.free.maxProductImages} seule photo par produit — passe Premium pour les galeries (jusqu'à ${PLANS.premium.maxProductImages} photos).`
+          : `Maximum ${plan.maxProductImages} photos par produit.`,
+      )
+    }
 
     const product = await db.product.create({
       data: {
@@ -46,21 +67,22 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// PATCH /api/products — Modifier un produit (galerie photos, prix, stock…)
+// PATCH /api/products — Modifier un produit (V8 : propriété dérivée du produit,
+// le storeId fourni par le client est ignoré → anti-IDOR)
 export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json()
     const id = String(body.id || "")
-    const storeId = String(body.storeId || "")
-    if (!id || !storeId) {
-      return NextResponse.json({ error: "id et storeId requis." }, { status: 400 })
-    }
+    if (!id) return NextResponse.json({ error: "id requis." }, { status: 400 })
 
     const product = await db.product.findUnique({ where: { id } })
     if (!product) return NextResponse.json({ error: "Produit introuvable." }, { status: 404 })
-    if (product.storeId !== storeId) {
-      return NextResponse.json({ error: "Ce produit n'appartient pas à ta boutique." }, { status: 403 })
-    }
+
+    // La propriété se vérifie depuis la boutique qui possède le produit (serveur),
+    // jamais depuis le storeId envoyé par le client.
+    const guard = await requireStoreOwner(req, { id: product.storeId })
+    if (!guard.ok) return guard.response
+    const plan = planOf(guard.store)
 
     const data: Record<string, string | number> = {}
 
@@ -70,9 +92,16 @@ export async function PATCH(req: NextRequest) {
     if (Number(body.priceUSD) > 0) data.priceUSD = Number(body.priceUSD)
     if (Number.isInteger(Number(body.stock)) && Number(body.stock) >= 0) data.stock = Number(body.stock)
 
-    // V4 — galerie : remplacée intégralement si le champ images est fourni
+    // V4 — galerie : remplacée intégralement si le champ images est fourni (quota plan)
     if (Array.isArray(body.images) || typeof body.images === "string") {
       const images = normalizeImages(body.images)
+      if (images.length > plan.maxProductImages) {
+        return quotaExceeded(
+          plan.id === "free"
+            ? `Le plan Free autorise ${PLANS.free.maxProductImages} seule photo par produit — passe Premium pour les galeries.`
+            : `Maximum ${plan.maxProductImages} photos par produit.`,
+        )
+      }
       data.images = JSON.stringify(images)
       data.imageUrl = images[0] || ""
     }
@@ -85,7 +114,7 @@ export async function PATCH(req: NextRequest) {
   }
 }
 
-// DELETE /api/products?id=xxx — Supprimer un produit
+// DELETE /api/products?id=xxx — Supprimer un produit (V8 : propriétaire uniquement)
 export async function DELETE(req: NextRequest) {
   try {
     const id = req.nextUrl.searchParams.get("id")
@@ -93,6 +122,9 @@ export async function DELETE(req: NextRequest) {
 
     const product = await db.product.findUnique({ where: { id } })
     if (!product) return NextResponse.json({ error: "Produit introuvable." }, { status: 404 })
+
+    const guard = await requireStoreOwner(req, { id: product.storeId })
+    if (!guard.ok) return guard.response
 
     await db.product.delete({ where: { id } })
     return NextResponse.json({ ok: true })

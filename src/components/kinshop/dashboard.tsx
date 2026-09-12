@@ -39,6 +39,7 @@ import {
   Users,
   XCircle,
   PackageCheck,
+  LogOut,
 } from "lucide-react"
 import { toast } from "sonner"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -120,6 +121,8 @@ interface DashboardProps {
   onViewStore: (slug: string) => void
   /** Taux FC/$ plateforme (polling root) — un changement déclenche une synchronisation silencieuse */
   platformRate?: number
+  /** V8 — Déconnexion (session serveur) */
+  onLogout?: () => void
 }
 
 const STATUS_CONFIG: Record<OrderStatus, { label: string; variant: "default" | "secondary" | "destructive" | "outline"; className: string }> = {
@@ -130,7 +133,7 @@ const STATUS_CONFIG: Record<OrderStatus, { label: string; variant: "default" | "
   cancelled: { label: "Annulée", variant: "destructive", className: "" },
 }
 
-export function Dashboard({ slug, onBack, onViewStore, platformRate }: DashboardProps) {
+export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout }: DashboardProps) {
   const [store, setStore] = useState<StoreData | null>(null)
   const [products, setProducts] = useState<ProductData[]>([])
   const [orders, setOrders] = useState<OrderData[]>([])
@@ -1067,6 +1070,12 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate }: Dashboard
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            {onLogout && (
+              <Button variant="ghost" size="sm" onClick={onLogout} aria-label="Déconnexion" className="px-2 text-muted-foreground hover:text-foreground">
+                <LogOut className="w-4 h-4" />
+                <span className="hidden md:inline ml-1 text-sm">Déconnexion</span>
+              </Button>
+            )}
             <Button variant="outline" size="sm" onClick={() => setShareOpen(true)} className="hidden sm:inline-flex">
               <Share2 className="w-4 h-4 mr-1" />
               Partager

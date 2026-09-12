@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { randomBytes } from "crypto"
 import { db } from "@/lib/db"
+import { requireStoreOwner } from "@/lib/auth"
 import {
   normalizeDomain,
   isPlatformDomain,
@@ -11,17 +12,15 @@ import {
   VERIFY_PREFIX,
 } from "@/lib/domain"
 
-// GET /api/stores/domain?slug=xxx — état du domaine personnalisé de la boutique
+// GET /api/stores/domain?slug=xxx — état du domaine personnalisé (V8 : propriétaire uniquement)
 export async function GET(req: NextRequest) {
   const slug = (req.nextUrl.searchParams.get("slug") || "").trim()
   if (!slug) return NextResponse.json({ error: "Paramètre slug requis." }, { status: 400 })
 
   try {
-    const store = await db.store.findUnique({
-      where: { slug },
-      select: { id: true, slug: true, name: true, isPremium: true, customDomain: true, domainVerified: true, domainToken: true },
-    })
-    if (!store) return NextResponse.json({ error: "Boutique introuvable." }, { status: 404 })
+    const guard = await requireStoreOwner(req, { slug })
+    if (!guard.ok) return guard.response
+    const store = guard.store
 
     return NextResponse.json({
       domain: {
@@ -40,6 +39,7 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/stores/domain — { slug, action: "claim" | "verify" | "remove", domain? }
+// V8 : propriétaire uniquement (en plus de la barrière Premium existante)
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
@@ -49,8 +49,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Paramètres slug et action requis." }, { status: 400 })
     }
 
-    const store = await db.store.findUnique({ where: { slug } })
-    if (!store) return NextResponse.json({ error: "Boutique introuvable." }, { status: 404 })
+    const guard = await requireStoreOwner(req, { slug })
+    if (!guard.ok) return guard.response
+    const store = guard.store
 
     // Fonctionnalité réservée aux boutiques Premium
     if (!store.isPremium || (store.premiumUntil && new Date(store.premiumUntil).getTime() < Date.now())) {

@@ -6,10 +6,12 @@ import {
   sumInvoiceItems,
   type InvoiceItem,
 } from "@/lib/kinfacture"
+import { requireStoreOwner, quotaExceeded } from "@/lib/auth"
+import { planOf, PLANS } from "@/lib/plans"
 
 const VALID_STATUSES = ["draft", "sent", "paid"]
 
-// POST /api/invoices — Créer une facture (totaux recalculés côté serveur)
+// POST /api/invoices — Créer une facture (V8 : propriétaire + quota mensuel du plan)
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
@@ -19,8 +21,25 @@ export async function POST(req: NextRequest) {
     if (!slug) return NextResponse.json({ error: "slug requis." }, { status: 400 })
     if (!clientName) return NextResponse.json({ error: "Le nom du client est requis." }, { status: 400 })
 
-    const store = await db.store.findUnique({ where: { slug } })
-    if (!store) return NextResponse.json({ error: "Boutique introuvable." }, { status: 404 })
+    const guard = await requireStoreOwner(req, { slug })
+    if (!guard.ok) return guard.response
+    const { store } = guard
+    const plan = planOf(store)
+
+    // ── Quota mensuel KinFacture (mois civile UTC) ──
+    const monthStart = new Date()
+    monthStart.setUTCDate(1)
+    monthStart.setUTCHours(0, 0, 0, 0)
+    const monthCount = await db.invoice.count({
+      where: { storeId: store.id, createdAt: { gte: monthStart } },
+    })
+    if (monthCount >= plan.maxInvoicesPerMonth) {
+      return quotaExceeded(
+        plan.id === "free"
+          ? `Quota du plan Free atteint (${PLANS.free.maxInvoicesPerMonth} factures ce mois). Passe Premium pour émettre davantage de factures.`
+          : `Quota de ${plan.maxInvoicesPerMonth} factures par mois atteint.`,
+      )
+    }
 
     const items: InvoiceItem[] = sanitizeInvoiceItems(body.items)
     if (items.length === 0) {
@@ -55,7 +74,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// GET /api/invoices?slug=xxx — Factures d'une boutique (dashboard vendeur)
+// GET /api/invoices?slug=xxx — Factures d'une boutique (V8 : propriétaire uniquement)
 // GET /api/invoices?number=KF-XXX — Facture publique par numéro (lien de partage client)
 export async function GET(req: NextRequest) {
   try {
@@ -73,11 +92,11 @@ export async function GET(req: NextRequest) {
     const slug = req.nextUrl.searchParams.get("slug")
     if (!slug) return NextResponse.json({ error: "Paramètre slug ou number requis." }, { status: 400 })
 
-    const store = await db.store.findUnique({ where: { slug } })
-    if (!store) return NextResponse.json({ error: "Boutique introuvable." }, { status: 404 })
+    const guard = await requireStoreOwner(req, { slug })
+    if (!guard.ok) return guard.response
 
     const invoices = await db.invoice.findMany({
-      where: { storeId: store.id },
+      where: { storeId: guard.store.id },
       orderBy: { createdAt: "desc" },
       take: 100,
     })
@@ -89,7 +108,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// PATCH /api/invoices — Changer le statut (draft → sent → paid)
+// PATCH /api/invoices — Changer le statut (V8 : propriétaire uniquement, anti-IDOR)
 export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json()
@@ -100,6 +119,9 @@ export async function PATCH(req: NextRequest) {
 
     const invoice = await db.invoice.findUnique({ where: { id } })
     if (!invoice) return NextResponse.json({ error: "Facture introuvable." }, { status: 404 })
+
+    const guard = await requireStoreOwner(req, { id: invoice.storeId })
+    if (!guard.ok) return guard.response
 
     const data: { status?: string; paidAt?: Date | null } = {}
     if (status) {
@@ -121,7 +143,7 @@ export async function PATCH(req: NextRequest) {
   }
 }
 
-// DELETE /api/invoices?id=xxx — Supprimer une facture
+// DELETE /api/invoices?id=xxx — Supprimer une facture (V8 : propriétaire uniquement)
 export async function DELETE(req: NextRequest) {
   try {
     const id = req.nextUrl.searchParams.get("id")
@@ -129,6 +151,9 @@ export async function DELETE(req: NextRequest) {
 
     const invoice = await db.invoice.findUnique({ where: { id } })
     if (!invoice) return NextResponse.json({ error: "Facture introuvable." }, { status: 404 })
+
+    const guard = await requireStoreOwner(req, { id: invoice.storeId })
+    if (!guard.ok) return guard.response
 
     await db.invoice.delete({ where: { id } })
     return NextResponse.json({ ok: true })

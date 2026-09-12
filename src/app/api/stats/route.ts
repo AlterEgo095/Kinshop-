@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
+import { requireStoreOwner } from "@/lib/auth"
+import { planOf } from "@/lib/plans"
 import type {
   DailyPoint,
   OrderItem,
@@ -18,16 +20,20 @@ function fillSeries(rows: { day: Date; count: number }[], days: string[]): Daily
   return days.map((day) => ({ day, count: map.get(day) ?? 0 }))
 }
 
-// GET /api/stats?slug=xxx&days=14 — Statistiques avancées vendeur (V2)
+// GET /api/stats?slug=xxx&days=N — Statistiques vendeur (V8 : propriétaire uniquement,
+// historique plafonné selon le plan : Free 7 jours, Premium 60 jours)
 export async function GET(req: NextRequest) {
   try {
     const sp = req.nextUrl.searchParams
     const slug = sp.get("slug")
     if (!slug) return NextResponse.json({ error: "Paramètre slug requis." }, { status: 400 })
 
-    const days = Math.min(60, Math.max(7, Number(sp.get("days")) || 14))
-    const store = await db.store.findUnique({ where: { slug }, select: { id: true } })
-    if (!store) return NextResponse.json({ error: "Boutique introuvable." }, { status: 404 })
+    const guard = await requireStoreOwner(req, { slug })
+    if (!guard.ok) return guard.response
+    const plan = planOf(guard.store)
+
+    const requestedDays = Math.min(60, Math.max(7, Number(sp.get("days")) || 14))
+    const days = Math.min(requestedDays, plan.statsDays)
 
     // Série des N derniers jours (aujourd'hui inclus)
     const dayLabels: string[] = []
@@ -42,12 +48,12 @@ export async function GET(req: NextRequest) {
 
     const [visitRows, orderRows, viewsAgg, allOrders] = await Promise.all([
       db.storeVisit.findMany({
-        where: { storeId: store.id, day: { gte: since } },
+        where: { storeId: guard.store.id, day: { gte: since } },
         orderBy: { day: "asc" },
       }),
       db.order.findMany({
         where: {
-          storeId: store.id,
+          storeId: guard.store.id,
           createdAt: { gte: since, lt: new Date(since.getTime() + (days + 1) * 86400000) },
         },
         select: {
@@ -59,8 +65,8 @@ export async function GET(req: NextRequest) {
           createdAt: true,
         },
       }),
-      db.storeVisit.aggregate({ where: { storeId: store.id }, _sum: { count: true } }),
-      db.order.findMany({ where: { storeId: store.id }, select: { customerPhone: true, status: true } }),
+      db.storeVisit.aggregate({ where: { storeId: guard.store.id }, _sum: { count: true } }),
+      db.order.findMany({ where: { storeId: guard.store.id }, select: { customerPhone: true, status: true } }),
     ])
 
     const viewsSeries = fillSeries(visitRows, dayLabels)
@@ -151,7 +157,7 @@ export async function GET(req: NextRequest) {
       trendPct,
     }
 
-    return NextResponse.json({ stats })
+    return NextResponse.json({ stats, plan: { id: plan.id, statsDays: plan.statsDays } })
   } catch (e) {
     console.error("GET /api/stats", e)
     return NextResponse.json({ error: "Erreur serveur." }, { status: 500 })

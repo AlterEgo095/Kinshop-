@@ -2,10 +2,36 @@ import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { normalizeImages, slugify } from "@/lib/kinshop"
 import { getPlatformSettings } from "@/lib/admin"
+import { getUserFromRequest, requireStoreOwner, unauthorized } from "@/lib/auth"
+import { MAX_STORES_PER_USER } from "@/lib/plans"
+import { rateLimit } from "@/lib/ratelimit"
 
-// POST /api/stores — Créer une boutique
+// POST /api/stores — Créer une boutique (V8 : compte authentifié OBLIGATOIRE)
+// Un utilisateur = une boutique (MAX_STORES_PER_USER). Le propriétaire est lié
+// côté serveur à partir de la session — jamais depuis le corps de la requête.
 export async function POST(req: NextRequest) {
   try {
+    const user = await getUserFromRequest(req)
+    if (!user) {
+      return unauthorized("Crée un compte ou connecte-toi pour ouvrir ta boutique.")
+    }
+
+    // Anti-spam : 3 créations/jour/utilisateur (la règle « 1 boutique » plafonne déjà)
+    if (!rateLimit(`store-create:${user.id}`, 3, 24 * 60 * 60 * 1000)) {
+      return NextResponse.json(
+        { error: "Trop de créations de boutique. Réessaie demain." },
+        { status: 429 },
+      )
+    }
+
+    const ownedCount = await db.store.count({ where: { ownerId: user.id } })
+    if (ownedCount >= MAX_STORES_PER_USER) {
+      return NextResponse.json(
+        { error: "Tu possèdes déjà ta boutique — un compte KinShop correspond à une boutique." },
+        { status: 409 },
+      )
+    }
+
     const body = await req.json()
     const name = String(body.name || "").trim()
     const ownerName = String(body.ownerName || "").trim()
@@ -46,6 +72,7 @@ export async function POST(req: NextRequest) {
         city: String(body.city || "Kinshasa"),
         logoEmoji: String(body.logoEmoji || "🛍️").slice(0, 8),
         rateFC: Number(body.rateFC) > 0 ? Number(body.rateFC) : settings.defaultRateFC,
+        ownerId: user.id, // ← propriété liée côté serveur (session)
       },
     })
 
@@ -56,7 +83,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// GET /api/stores?slug=xxx — Boutique publique avec produits
+// GET /api/stores?slug=xxx — Boutique publique avec produits (aucune donnée sensible)
 export async function GET(req: NextRequest) {
   try {
     const slug = req.nextUrl.searchParams.get("slug")
@@ -68,8 +95,8 @@ export async function GET(req: NextRequest) {
     })
     if (!store) return NextResponse.json({ error: "Boutique introuvable." }, { status: 404 })
 
-    // Réponse publique : on masque les champs internes Chariow
-    const { chariowEmail, chariowPhone, chariowSaleId, ...publicStore } = store
+    // Réponse publique : masque les champs internes (Chariow, jeton de domaine, owner)
+    const { chariowEmail, chariowPhone, chariowSaleId, domainToken, domainVerified, ownerId, ...publicStore } = store
     return NextResponse.json(
       {
         store: {
@@ -88,15 +115,15 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// PATCH /api/stores — Mise à jour des réglages
+// PATCH /api/stores — Mise à jour des réglages (V8 : propriétaire uniquement)
 export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json()
     const slug = String(body.slug || "")
     if (!slug) return NextResponse.json({ error: "Paramètre slug requis." }, { status: 400 })
 
-    const existing = await db.store.findUnique({ where: { slug } })
-    if (!existing) return NextResponse.json({ error: "Boutique introuvable." }, { status: 404 })
+    const guard = await requireStoreOwner(req, { slug })
+    if (!guard.ok) return guard.response
 
     const data: Record<string, string | number> = {}
     if (typeof body.name === "string" && body.name.trim()) data.name = body.name.trim()

@@ -38,15 +38,17 @@ interface CreateWizardProps {
   onCancel: () => void
   /** Taux FC/$ de la plateforme, synchronisé en temps réel avec la console admin */
   platformRate?: number
+  /** Utilisateur connecté (V8) — préremplit les infos sans les figer */
+  user?: { name: string; whatsapp: string } | null
 }
 
-export function CreateWizard({ onCreated, onCancel, platformRate = DEFAULT_RATE_FC }: CreateWizardProps) {
+export function CreateWizard({ onCreated, onCancel, platformRate = DEFAULT_RATE_FC, user = null }: CreateWizardProps) {
   const [step, setStep] = useState(1)
 
-  // Étape 1 : infos boutique
+  // Étape 1 : infos boutique (préremplies depuis le compte authentifié)
   const [name, setName] = useState("")
-  const [ownerName, setOwnerName] = useState("")
-  const [whatsapp, setWhatsapp] = useState("")
+  const [ownerName, setOwnerName] = useState(user?.name ?? "")
+  const [whatsapp, setWhatsapp] = useState(user?.whatsapp ?? "")
   const [description, setDescription] = useState("")
   const [slug, setSlug] = useState("")
   const [logoEmoji, setLogoEmoji] = useState("🛍️")

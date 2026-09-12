@@ -18,6 +18,8 @@ import {
   Eye,
   FileText,
   Receipt,
+  LogIn,
+  LogOut,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -30,8 +32,13 @@ import {
 } from "@/components/ui/accordion"
 
 interface LandingProps {
-  ownerSlug: string | null
+  /** Utilisateur connecté (session serveur) — null = visiteur */
+  user: { id: string; name: string; email: string } | null
+  /** Boutique de l'utilisateur connecté (null si visiteur ou compte sans boutique) */
+  userStore: { slug: string; name: string; logoEmoji: string } | null
   onCreateStore: () => void
+  onAuth: (mode: "login" | "register", next?: "create" | "dashboard") => void
+  onLogout: () => void
   onDemo: () => void
   onOpenDashboard: (slug: string) => void
   onCvExpress: () => void
@@ -41,7 +48,7 @@ interface LandingProps {
 
 const DEMO_SLUG = "maman-ngo"
 
-export function Landing({ ownerSlug, onCreateStore, onDemo, onOpenDashboard, onCvExpress, announcement = "" }: LandingProps) {
+export function Landing({ user, userStore, onCreateStore, onAuth, onLogout, onDemo, onOpenDashboard, onCvExpress, announcement = "" }: LandingProps) {
   return (
     <div className="min-h-screen flex flex-col bg-background">
       {/* Bandeau d'annonce globale (console admin) */}
@@ -67,14 +74,36 @@ export function Landing({ ownerSlug, onCreateStore, onDemo, onOpenDashboard, onC
             <a href="#tarifs" className="hover:text-foreground transition-colors">Tarifs</a>
           </nav>
           <div className="flex items-center gap-2 shrink-0">
-            {ownerSlug && (
-              <Button variant="outline" size="sm" onClick={() => onOpenDashboard(ownerSlug)} aria-label="Ma boutique" className="px-2 sm:px-3">
-                <BarChart3 className="w-4 h-4 sm:mr-1" />
-                <span className="hidden sm:inline">Ma boutique</span>
+            {user ? (
+              <>
+                {userStore && (
+                  <Button variant="outline" size="sm" onClick={() => onOpenDashboard(userStore.slug)} aria-label="Mon tableau de bord" className="px-2 sm:px-3">
+                    <BarChart3 className="w-4 h-4 sm:mr-1" />
+                    <span className="hidden sm:inline">Mon tableau de bord</span>
+                  </Button>
+                )}
+                <Button variant="ghost" size="sm" onClick={onLogout} aria-label="Déconnexion" className="px-2">
+                  <LogOut className="w-4 h-4" />
+                  <span className="hidden sm:inline ml-1">Sortir</span>
+                </Button>
+              </>
+            ) : (
+              <Button variant="ghost" size="sm" onClick={() => onAuth("login", "dashboard")} className="px-2 sm:px-3">
+                <LogIn className="w-4 h-4 sm:mr-1" />
+                <span className="hidden sm:inline">Se connecter</span>
               </Button>
             )}
-            <Button size="sm" onClick={onCreateStore} className="shadow-md">
-              Créer<span className="hidden sm:inline">&nbsp;ma boutique</span>
+            <Button size="sm" onClick={userStore ? () => onOpenDashboard(userStore.slug) : onCreateStore} className="shadow-md">
+              {userStore ? (
+                <>
+                  <BarChart3 className="w-4 h-4 sm:mr-1" />
+                  <span className="hidden sm:inline">Ma boutique</span>
+                </>
+              ) : (
+                <>
+                  Créer<span className="hidden sm:inline">&nbsp;ma boutique</span>
+                </>
+              )}
             </Button>
           </div>
         </div>
@@ -118,9 +147,9 @@ export function Landing({ ownerSlug, onCreateStore, onDemo, onOpenDashboard, onC
                 transition={{ duration: 0.4, delay: 0.3 }}
                 className="flex flex-col sm:flex-row gap-3"
               >
-                <Button size="lg" onClick={onCreateStore} className="text-base h-12 shadow-lg shadow-primary/25">
+                <Button size="lg" onClick={userStore ? () => onOpenDashboard(userStore.slug) : onCreateStore} className="text-base h-12 shadow-lg shadow-primary/25">
                   <Store className="w-5 h-5 mr-2" />
-                  Créer ma boutique gratuitement
+                  {userStore ? "Gérer ma boutique" : "Créer ma boutique gratuitement"}
                 </Button>
                 <Button size="lg" variant="outline" onClick={onDemo} className="text-base h-12">
                   <Eye className="w-5 h-5 mr-2" />
@@ -446,10 +475,10 @@ export function Landing({ ownerSlug, onCreateStore, onDemo, onOpenDashboard, onC
                     size="lg"
                     variant="outline"
                     className="w-full sm:w-auto border-amber-300 hover:bg-amber-50"
-                    onClick={() => (ownerSlug ? onOpenDashboard(ownerSlug) : onCreateStore())}
+                    onClick={() => (userStore ? onOpenDashboard(userStore.slug) : onCreateStore())}
                   >
                     <Receipt className="w-5 h-5 mr-2" />
-                    {ownerSlug ? "Ouvrir mes factures" : "Créer ma boutique pour facturer"}
+                    {userStore ? "Ouvrir mes factures" : "Créer ma boutique pour facturer"}
                   </Button>
                 </CardContent>
               </Card>

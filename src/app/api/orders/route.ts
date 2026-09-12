@@ -13,6 +13,7 @@ import {
   type PaymentMethod,
 } from "@/lib/kinshop"
 import { notifyNewOrder } from "@/lib/notifier"
+import { requireStoreOwner } from "@/lib/auth"
 
 const VALID_PAYMENTS: PaymentMethod[] = ["mpesa", "airtel", "orange", "cash"]
 
@@ -32,6 +33,10 @@ export async function POST(req: NextRequest) {
 
     const store = await db.store.findUnique({ where: { slug } })
     if (!store) return NextResponse.json({ error: "Boutique introuvable." }, { status: 404 })
+    // Gouvernance : une boutique suspendue par l'admin ne peut plus recevoir de commandes
+    if (store.status !== "active") {
+      return NextResponse.json({ error: "Cette boutique est momentanément indisponible." }, { status: 403 })
+    }
 
     // Valider les articles contre la base (jamais faire confiance au client)
     const requested: { productId: string; qty: number }[] = Array.isArray(body.items) ? body.items : []
@@ -171,17 +176,17 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// GET /api/orders?slug=xxx — Commandes d'une boutique
+// GET /api/orders?slug=xxx — Commandes d'une boutique (V8 : propriétaire uniquement)
 export async function GET(req: NextRequest) {
   try {
     const slug = req.nextUrl.searchParams.get("slug")
     if (!slug) return NextResponse.json({ error: "Paramètre slug requis." }, { status: 400 })
 
-    const store = await db.store.findUnique({ where: { slug } })
-    if (!store) return NextResponse.json({ error: "Boutique introuvable." }, { status: 404 })
+    const guard = await requireStoreOwner(req, { slug })
+    if (!guard.ok) return guard.response
 
     const orders = await db.order.findMany({
-      where: { storeId: store.id },
+      where: { storeId: guard.store.id },
       orderBy: { createdAt: "desc" },
       take: 100,
     })
@@ -194,6 +199,7 @@ export async function GET(req: NextRequest) {
 }
 
 // PATCH /api/orders — Changer le statut d'une commande (+ paiement espèces reçu)
+// V8 : propriétaire uniquement — la boutique est dérivée de la commande (anti-IDOR).
 export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json()
@@ -201,11 +207,14 @@ export async function PATCH(req: NextRequest) {
     const status = String(body.status || "")
     const paymentStatus = String(body.paymentStatus || "")
 
-    const allowed = ["new", "confirmed", "delivered", "cancelled"]
+    const allowed = ["new", "paid", "confirmed", "delivered", "cancelled"]
     if (!id) return NextResponse.json({ error: "Paramètre id requis." }, { status: 400 })
 
     const order = await db.order.findUnique({ where: { id } })
     if (!order) return NextResponse.json({ error: "Commande introuvable." }, { status: 404 })
+
+    const guard = await requireStoreOwner(req, { id: order.storeId })
+    if (!guard.ok) return guard.response
 
     const data: { status?: string; paymentStatus?: string; paidAt?: Date } = {}
     if (status) {

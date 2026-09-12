@@ -1,11 +1,13 @@
 // POST /api/premium/simulate-confirm — Active le Premium en MODE SIMULATION
 //
-// Uniquement disponible quand les clés Chariow ne sont PAS configurées.
-// Permet de tester le parcours de paiement complet sans compte Chariow.
+// Uniquement disponible quand les clés Chariow ne sont PAS configurées (démo).
+// V8 : seul le PROPRIÉTAIRE authentifié de la boutique peut la simuler — plus
+// personne ne peut activer le Premium d'une boutique étrangère.
 
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { isChariowLive } from "@/lib/chariow"
+import { requireStoreOwner } from "@/lib/auth"
 
 const PREMIUM_DAYS = 30
 
@@ -22,8 +24,9 @@ export async function POST(req: NextRequest) {
     const slug = String(body.slug || "").trim()
     if (!slug) return NextResponse.json({ error: "Boutique manquante." }, { status: 400 })
 
-    const store = await db.store.findUnique({ where: { slug } })
-    if (!store) return NextResponse.json({ error: "Boutique introuvable." }, { status: 404 })
+    const guard = await requireStoreOwner(req, { slug })
+    if (!guard.ok) return guard.response
+    const store = guard.store
 
     // Prolonge de 30 jours à partir de la fin actuelle si déjà premium
     const now = new Date()
