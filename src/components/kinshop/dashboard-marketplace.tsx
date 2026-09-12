@@ -490,7 +490,10 @@ export function BoostPanel({ slug }: { slug: string }) {
         body: JSON.stringify({ id: data.campaign.id }),
       })
       const data2 = await res2.json()
-      if (!res2.ok) throw new Error(data2.error || "Paiement impossible.")
+      if (!res2.ok) {
+        await load() // la campagne créée reste visible « en attente de paiement »
+        throw new Error(data2.error || "Paiement impossible.")
+      }
       toast.success("Campagne active — ta boutique apparaît en « Sponsorisé » sur l'accueil 🚀")
       await load()
     } catch (e) {

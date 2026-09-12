@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getAdminPin, isUsingDefaultPin, logAdminAction } from "@/lib/admin"
+import { getAdminPin, isUsingDefaultPin, logAdminAction, notePinFailure, pinRateLimitedResponse } from "@/lib/admin"
 
 // POST /api/admin/auth — Vérifier le PIN administrateur
+// F-05 (audit) : anti brute-force — 5 échecs / 15 min / IP → 429.
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}))
     const pin = String(body.pin || "").trim()
 
     if (!pin || pin !== getAdminPin()) {
+      if (!notePinFailure(req)) return pinRateLimitedResponse()
       return NextResponse.json(
         { error: "PIN incorrect. Réessaie." },
         { status: 401 },

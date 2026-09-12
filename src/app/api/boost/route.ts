@@ -3,12 +3,13 @@ import { db } from "@/lib/db"
 import { requireStoreOwner, quotaExceeded } from "@/lib/auth"
 import { isFeatureOn, getConfigValue } from "@/lib/config-registry"
 import { logAudit } from "@/lib/audit"
+import { isPaymentSimulationEnabled } from "@/lib/simulation"
 
 // Boost V10 — PROMOTION PAYANTE, indépendante de l'abonnement Premium :
 // Premium = fonctionnalités ; Boost = visibilité (accueil « Sponsorisé »).
 //
 // POST /api/boost { slug, days: 7|30 }       → campagne en attente de paiement
-// PATCH /api/boost { id, confirm: true }     → paiement confirmé → campagne active
+// PATCH /api/boost { id, confirm: true }     → DÉMO SEULE : paiement simulé → active
 // GET  /api/boost?slug=                      → campagnes de la boutique
 export async function POST(req: NextRequest) {
   try {
@@ -67,10 +68,23 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// PATCH : confirmation de paiement (simulateur agrégateur ; le vrai webhook Chariow
-// se branchera ici sans changer le contrat).
+// PATCH : confirmation de paiement — KILL-SWITCH (audit F-03) : le propriétaire
+// ne peut JAMAIS confirmer lui-même le paiement d'une campagne hors mode démo
+// explicite. En production, l'activation relève de l'ADMINISTRATION (paiement
+// vérifié via PATCH /api/admin/boost action "activate") ou d'un futur webhook
+// fournisseur — jamais d'une simple requête client.
 export async function PATCH(req: NextRequest) {
   try {
+    if (!isPaymentSimulationEnabled()) {
+      return NextResponse.json(
+        {
+          error:
+            "Le paiement de la campagne doit être vérifié par l'administration KinShop avant activation.",
+        },
+        { status: 403 },
+      )
+    }
+
     const body = await req.json()
     const id = String(body.id || "")
     if (!id) return NextResponse.json({ error: "id requis." }, { status: 400 })

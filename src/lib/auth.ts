@@ -139,10 +139,15 @@ export type OwnerGuard =
  * L'identifiant vient du serveur (slug ou id), jamais d'un champ arbitraire du client.
  * Les boutiques orphelines (ownerId null, créées avant les comptes) ne sont éditables
  * par personne côté vendeur : lecture publique seule.
+ *
+ * F-04 (audit Task 19) : une boutique SUSPENDUE par l'administration n'accepte
+ * AUCUNE opération propriétaire (lecture dashboard incluse) — 403 explicite,
+ * sauf opt-in allowSuspended pour un besoin futur documenté.
  */
 export async function requireStoreOwner(
   req: NextRequest,
   identifier: { slug?: string | null; id?: string | null },
+  opts?: { allowSuspended?: boolean },
 ): Promise<OwnerGuard> {
   const user = await getUserFromRequest(req)
   if (!user) return { ok: false, response: unauthorized() }
@@ -157,6 +162,15 @@ export async function requireStoreOwner(
 
   if (!store.ownerId || store.ownerId !== user.id) {
     return { ok: false, response: forbidden() }
+  }
+
+  if (store.status === "suspended" && !opts?.allowSuspended) {
+    return {
+      ok: false,
+      response: forbidden(
+        "Boutique suspendue par l'administration : contacte le support KinShop.",
+      ),
+    }
   }
 
   return { ok: true, user, store }

@@ -1,19 +1,26 @@
 // POST /api/premium/simulate-confirm — Active le Premium en MODE SIMULATION
 //
-// Uniquement disponible quand les clés Chariow ne sont PAS configurées (démo).
-// V8 : seul le PROPRIÉTAIRE authentifié de la boutique peut la simuler — plus
-// personne ne peut activer le Premium d'une boutique étrangère.
+// Kill-switch (audit F-01) : DÉSACTIVÉ par défaut — production incluse — même
+// quand Chariow n'est pas encore configuré. Nécessite PAYMENT_SIMULATION=on
+// dans l'environnement (mode démo explicite) ET Chariow non branché.
+// En production, le Premium ne peut être activé QUE par : paiement réel Chariow
+// (webhook Pulse HMAC, vérification à la demande) ou administration.
 
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { isChariowLiveAsync } from "@/lib/chariow"
 import { requireStoreOwner, forbidden } from "@/lib/auth"
 import { isFeatureOn } from "@/lib/config-registry"
+import { isPaymentSimulationEnabled, simulationDisabledResponse } from "@/lib/simulation"
 
 const PREMIUM_DAYS = 30
 
 export async function POST(req: NextRequest) {
   try {
+    // Kill-switch EN TÊTE : aucun traitement, aucune fuite d'information si
+    // la simulation n'est pas explicitement activée dans cet environnement.
+    if (!isPaymentSimulationEnabled()) return simulationDisabledResponse()
+
     if (await isChariowLiveAsync()) {
       return NextResponse.json(
         { error: "Simulation désactivée : le paiement réel Chariow est actif." },

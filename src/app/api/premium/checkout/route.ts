@@ -19,6 +19,7 @@ import { normalizePhone } from "@/lib/kinshop"
 import { requireStoreOwner, forbidden, unauthorized } from "@/lib/auth"
 import { isFeatureOn } from "@/lib/config-registry"
 import { verifyAndApplyPremium } from "@/lib/premium"
+import { isPaymentSimulationEnabled } from "@/lib/simulation"
 
 export async function POST(req: NextRequest) {
   try {
@@ -84,6 +85,18 @@ export async function POST(req: NextRequest) {
     // ─── MODE SIMULATION ───
     // Paiement réel = clé API (.env) + produit résolu dynamiquement (console admin ou .env)
     if (!(await isChariowLiveAsync())) {
+      // Kill-switch (audit F-01) : la démo de paiement n'existe que si
+      // PAYMENT_SIMULATION=on est explicitement défini dans l'environnement.
+      // Sinon (production) : pas de flux de paiement du tout — message honnête.
+      if (!isPaymentSimulationEnabled()) {
+        return NextResponse.json(
+          {
+            error:
+              "Le paiement Premium n'est pas encore disponible : le produit Chariow doit être configuré dans la console ADMIN → Paiements.",
+          },
+          { status: 503 },
+        )
+      }
       return NextResponse.json({
         mode: "sim" as const,
         slug,

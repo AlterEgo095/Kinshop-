@@ -97,6 +97,26 @@ export async function GET(req: NextRequest) {
     })
     if (!store) return NextResponse.json({ error: "Boutique introuvable." }, { status: 404 })
 
+    // F-04 (audit Task 19) : boutique SUSPENDUE → AUCUN contenu servi publiquement
+    // (produits, premium, taux…). Squelette minimal uniquement : l'UI vitrine
+    // affiche l'avis de suspension (store.status === "suspended"), le dashboard
+    // propriétaire ne divulgue rien, et les écritures restent bloquées côté
+    // requireStoreOwner. L'administration conserve l'accès via ses propres routes.
+    if (store.status === "suspended") {
+      return NextResponse.json(
+        {
+          store: {
+            slug: store.slug,
+            name: store.name,
+            logoEmoji: store.logoEmoji,
+            status: "suspended",
+            products: [],
+          },
+        },
+        { headers: { "Cache-Control": "no-store" } },
+      )
+    }
+
     // Réponse publique : masque les champs internes (Chariow, jeton de domaine, owner)
     const { chariowEmail, chariowPhone, chariowSaleId, domainToken, domainVerified, ownerId, ...publicStore } = store
     return NextResponse.json(

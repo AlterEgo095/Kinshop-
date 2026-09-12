@@ -1,12 +1,26 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { isMomoLive } from "@/lib/mobile-money"
+import { getUserFromRequest, unauthorized, forbidden } from "@/lib/auth"
+import { isAdminRequest } from "@/lib/admin"
+import { isPaymentSimulationEnabled, simulationDisabledResponse } from "@/lib/simulation"
 
-// POST /api/payments/simulate-confirm — Démo uniquement : simule la validation du
-// push USSD par le client (comme si le PIN avait été saisi sur son téléphone).
-// Refusé (403) dès que MOMO_TOKEN + MOMO_MERCHANT sont configurés (mode live).
+// POST /api/payments/simulate-confirm — simule la validation du push USSD par
+// le client (comme si le PIN avait été saisi sur son téléphone).
+//
+// Kill-switch (audit F-02) : DÉSACTIVÉ par défaut — production incluse — même
+// quand l'agrégateur mobile money n'est pas configuré. Nécessite
+// PAYMENT_SIMULATION=on (mode démo explicite) ET agrégateur absent.
+// Même en démo, la confirmation n'est JAMAIS anonyme : seul l'ACHETEUR de la
+// commande (session) ou l'ADMINISTRATEUR peut simuler la confirmation. Les
+// commandes legacy sans compte (userId null) ne sont confirmables que par
+// l'admin. En production : seul le webhook agrégateur confirme les paiements.
 export async function POST(req: NextRequest) {
   try {
+    // Kill-switch EN TÊTE : aucun traitement si la simulation n'est pas
+    // explicitement activée dans cet environnement (403 même anonyme).
+    if (!isPaymentSimulationEnabled()) return simulationDisabledResponse()
+
     if (isMomoLive()) {
       return NextResponse.json(
         { error: "Mode live actif : la simulation est désactivée. Le webhook agrégateur confirme les paiements." },
@@ -25,6 +39,19 @@ export async function POST(req: NextRequest) {
     }
     if (order.paymentStatus === "paid") {
       return NextResponse.json({ ok: true, duplicate: true, paymentStatus: "paid" })
+    }
+
+    // Authentification OBLIGATOIRE même en mode démo (audit F-02) :
+    // l'acheteur de la commande (session) ou l'administrateur — jamais un
+    // anonyme, jamais un tiers.
+    if (!isAdminRequest(req)) {
+      const user = await getUserFromRequest(req)
+      if (!user) return unauthorized()
+      if (!order.userId || order.userId !== user.id) {
+        return forbidden(
+          "Seul l'acheteur de cette commande peut simuler la confirmation de son paiement.",
+        )
+      }
     }
 
     const updated = await db.order.update({

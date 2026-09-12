@@ -4,6 +4,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getConfig, invalidateConfigCache } from "@/lib/config-registry"
+import { rateLimit, clientIp } from "@/lib/ratelimit"
 
 export const DEFAULT_ADMIN_PIN = "243243"
 
@@ -32,7 +33,33 @@ export function adminUnauthorized(): NextResponse {
 
 /** Garde-fou : renvoie la réponse 401 si le PIN ne correspond pas, sinon null. */
 export function guardAdmin(req: NextRequest): NextResponse | null {
-  return isAdminRequest(req) ? null : adminUnauthorized()
+  if (isAdminRequest(req)) return null
+  // F-05 (audit Task 19) : chaque tentative de PIN échouée est comptabilisée
+  // par IP — 5 échecs en 15 minutes → 429. Couvre TOUTES les routes admin
+  // (brute-force possible partout où le PIN est lu, pas seulement /api/admin/auth).
+  if (!notePinFailure(req)) return pinRateLimitedResponse()
+  return adminUnauthorized()
+}
+
+/* ─────────── Anti brute-force du PIN admin (audit F-05) ─────────── */
+
+const PIN_MAX_ATTEMPTS = 5
+const PIN_WINDOW_MS = 15 * 60 * 1000
+
+/**
+ * Enregistre une tentative de PIN ÉCHOUÉE. Renvoie false si la limite est
+ * atteinte (→ répondre 429). Les requêtes avec PIN correct ne comptent jamais.
+ */
+export function notePinFailure(req: NextRequest): boolean {
+  return rateLimit(`admin-pin:${clientIp(req)}`, PIN_MAX_ATTEMPTS, PIN_WINDOW_MS)
+}
+
+/** Réponse 429 standardisée (limite de tentatives PIN atteinte). */
+export function pinRateLimitedResponse(): NextResponse {
+  return NextResponse.json(
+    { error: "Trop de tentatives. Réessaie dans 15 minutes." },
+    { status: 429 },
+  )
 }
 
 /** Enregistre une action dans le journal d'audit (jamais bloquant). */

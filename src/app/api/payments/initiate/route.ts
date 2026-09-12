@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { PAYMENT_LABELS, normalizePhone } from "@/lib/kinshop"
 import { initiateMomoPayment } from "@/lib/mobile-money"
+import { isPaymentSimulationEnabled } from "@/lib/simulation"
 
 // POST /api/payments/initiate — Lance le paiement mobile money d'une commande
 // body : { ref, payerPhone? }
@@ -18,6 +19,22 @@ export async function POST(req: NextRequest) {
     }
     if (order.paymentStatus === "paid") {
       return NextResponse.json({ ok: true, alreadyPaid: true, paymentStatus: "paid" })
+    }
+
+    // Aucun fournisseur réel branché ET simulation désactivée (défaut, production
+    // incluse) → aucun flux de paiement proposé : on n'entre JAMAIS dans un
+    // parcours de démonstration non explicite (audit F-02).
+    const momoConfigured = Boolean(
+      process.env.MOMO_TOKEN?.trim() && process.env.MOMO_MERCHANT?.trim(),
+    )
+    if (!momoConfigured && !isPaymentSimulationEnabled()) {
+      return NextResponse.json(
+        {
+          error:
+            "Le paiement mobile money n'est pas encore disponible sur la plateforme. Contacte le vendeur pour convenir d'un paiement direct.",
+        },
+        { status: 503 },
+      )
     }
 
     const payerPhone = normalizePhone(String(body?.payerPhone || "") || order.customerPhone)
