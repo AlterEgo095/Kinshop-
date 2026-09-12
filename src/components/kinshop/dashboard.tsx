@@ -859,8 +859,24 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
       if (data.mode === "live" && data.url) {
-        // Paiement réel Chariow (mobile money) — redirection
-        window.location.href = data.url
+        // Paiement réel Chariow (mobile money) — POPUP : l'utilisateur reste
+        // sur son tableau de bord KinShop pendant le paiement.
+        setPremiumOpen(false)
+        const popup = window.open(
+          data.url,
+          "kinshop_chariow_checkout",
+          "popup=yes,width=480,height=760,left=80,top=80,scrollbars=yes",
+        )
+        if (popup) {
+          startPremiumWatch()
+          toast.message("Fenêtre de paiement ouverte", {
+            description: "Termine ton paiement mobile money — ta boutique passera Premium automatiquement.",
+            icon: "💳",
+          })
+        } else {
+          // Popup bloquée par le navigateur → redirection classique (retour via /#/premium/succes)
+          window.location.href = data.url
+        }
       } else {
         // Mode simulation
         setPremiumOpen(false)
@@ -893,6 +909,62 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
       setSimPaying(false)
     }
   }
+
+  // ─── Paiement réel Chariow : surveillance du popup de paiement ───
+  // L'utilisateur paie dans une fenêtre séparée SANS quitter KinShop : dès que
+  // le webhook Chariow active le Premium, le polling détecte le changement et
+  // l'interface se met à jour automatiquement (aucune navigation nécessaire).
+  const premiumWatchRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const stopPremiumWatch = useCallback(() => {
+    if (premiumWatchRef.current) {
+      clearInterval(premiumWatchRef.current)
+      premiumWatchRef.current = null
+    }
+  }, [])
+
+  const startPremiumWatch = useCallback(() => {
+    if (!slug || premiumWatchRef.current) return
+    let checks = 0
+    const verify = async () => {
+      checks += 1
+      if (checks > 150) {
+        // ~15 min : le popup est peut-être encore ouvert, on arrête la surveillance
+        stopPremiumWatch()
+        return
+      }
+      try {
+        const res = await fetch(`/api/stores?slug=${encodeURIComponent(slug)}`)
+        const data = await res.json()
+        if (res.ok && data.store?.isPremium && data.store?.premiumUntil &&
+            new Date(data.store.premiumUntil).getTime() > Date.now()) {
+          stopPremiumWatch()
+          setStore(data.store)
+          toast.success("Paiement confirmé — Premium activé ! ✨", {
+            description: `Actif jusqu'au ${new Date(data.store.premiumUntil).toLocaleDateString("fr-FR")}`,
+          })
+        }
+      } catch {
+        // silencieux — prochain tick
+      }
+    }
+    premiumWatchRef.current = setInterval(() => void verify(), 4000)
+  }, [slug, stopPremiumWatch])
+
+  // Message du popup de retour (premium-success) → vérification immédiate
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      if (e.origin !== window.location.origin) return
+      if (e.data?.type === "kinshop:premium_paid") {
+        stopPremiumWatch()
+        startPremiumWatch()
+      }
+    }
+    window.addEventListener("message", onMessage)
+    return () => {
+      window.removeEventListener("message", onMessage)
+      stopPremiumWatch()
+    }
+  }, [startPremiumWatch, stopPremiumWatch])
 
   const contactClient = (order: OrderData) => {
     const msg = `Bonjour ${order.customerName} 👋\nC'est ${store?.name ?? "la boutique"} (KinShop).\nTa commande ${order.ref} d'un montant de ${formatFC(order.totalFC)} a bien été reçue !\nNous revenons vers toi très vite pour la livraison. 🚚`

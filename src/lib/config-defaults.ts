@@ -155,6 +155,10 @@ export const CONFIG_DEFAULTS: PublicConfig = {
   "payment.airtel.label": "Airtel Money",
   "payment.orange.label": "Orange Money",
   "payment.cash.label": "Espèces à la livraison",
+  // Chariow — ID du produit d'abonnement Premium (dashboard Chariow → Produits).
+  // Vide = la clé API .env seule ne suffit pas → mode démo. Configurable depuis
+  // la console ADMIN (section Paiements) sans redéploiement.
+  "payments.chariowProductId": "",
 
   /* ─────────── Règles métier ─────────── */
   "business.maxStoresPerUser": 1, // un compte = N boutique(s)

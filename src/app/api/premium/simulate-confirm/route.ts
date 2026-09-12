@@ -6,7 +6,7 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
-import { isChariowLive } from "@/lib/chariow"
+import { isChariowLiveAsync } from "@/lib/chariow"
 import { requireStoreOwner, forbidden } from "@/lib/auth"
 import { isFeatureOn } from "@/lib/config-registry"
 
@@ -14,7 +14,7 @@ const PREMIUM_DAYS = 30
 
 export async function POST(req: NextRequest) {
   try {
-    if (isChariowLive()) {
+    if (await isChariowLiveAsync()) {
       return NextResponse.json(
         { error: "Simulation désactivée : le paiement réel Chariow est actif." },
         { status: 403 },

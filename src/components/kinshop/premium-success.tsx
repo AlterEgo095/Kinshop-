@@ -2,6 +2,11 @@
 
 // Écran de retour après paiement Premium (redirect_url Chariow : /#/premium/succes)
 // Vérifie l'état réel de l'abonnement côté base de données.
+//
+// MODE POPUP (paiement « sans quitter la plateforme ») : quand la page est
+// ouverte dans la fenêtre de paiement lancée depuis le tableau de bord, elle
+// prévient la fenêtre principale (postMessage) puis se ferme automatiquement
+// une fois le Premium confirmé — l'utilisateur ne quitte jamais KinShop.
 
 import { useCallback, useEffect, useState } from "react"
 import { motion } from "framer-motion"
@@ -21,6 +26,10 @@ export function PremiumSuccess({ ownerSlug, onGoDashboard, onGoHome }: PremiumSu
     active: false,
     until: null,
   })
+  // Mode popup : fenêtre de paiement ouverte par le tableau de bord
+  const [inPopup] = useState(
+    () => typeof window !== "undefined" && Boolean(window.opener && window.opener !== window),
+  )
 
   const check = useCallback(async () => {
     if (!ownerSlug) {
@@ -42,8 +51,16 @@ export function PremiumSuccess({ ownerSlug, onGoDashboard, onGoHome }: PremiumSu
       // silencieux : on affiche l'état en attente
     } finally {
       setChecking(false)
+      // Popup : on prévient la fenêtre principale qu'elle peut revérifier
+      if (inPopup && window.opener && !window.opener.closed) {
+        try {
+          window.opener.postMessage({ type: "kinshop:premium_paid" }, window.location.origin)
+        } catch {
+          // silencieux
+        }
+      }
     }
-  }, [ownerSlug])
+  }, [ownerSlug, inPopup])
 
   useEffect(() => {
     let cancelled = false
@@ -55,6 +72,13 @@ export function PremiumSuccess({ ownerSlug, onGoDashboard, onGoHome }: PremiumSu
       cancelled = true
     }
   }, [check])
+
+  // Popup + Premium confirmé → fermeture automatique (retour fluide au dashboard)
+  useEffect(() => {
+    if (!inPopup || !premium.active) return
+    const t = setTimeout(() => window.close(), 3500)
+    return () => clearTimeout(t)
+  }, [inPopup, premium.active])
 
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-b from-emerald-950 via-emerald-900 to-background">
@@ -101,13 +125,28 @@ export function PremiumSuccess({ ownerSlug, onGoDashboard, onGoHome }: PremiumSu
                       </p>
                     )}
                   </div>
-                  <Button
-                    className="w-full h-12 text-base"
-                    onClick={() => ownerSlug && onGoDashboard(ownerSlug)}
-                  >
-                    <LayoutDashboard className="w-5 h-5 mr-2" />
-                    Ouvrir mon tableau de bord
-                  </Button>
+                  {inPopup ? (
+                    <div className="space-y-2">
+                      <p className="text-xs text-muted-foreground">
+                        Cette fenêtre va se fermer toute seule — retourne sur ton tableau de bord.
+                      </p>
+                      <Button
+                        variant="outline"
+                        className="w-full h-11"
+                        onClick={() => window.close()}
+                      >
+                        Fermer cette fenêtre
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button
+                      className="w-full h-12 text-base"
+                      onClick={() => ownerSlug && onGoDashboard(ownerSlug)}
+                    >
+                      <LayoutDashboard className="w-5 h-5 mr-2" />
+                      Ouvrir mon tableau de bord
+                    </Button>
+                  )}
                 </>
               ) : (
                 <>
@@ -125,10 +164,16 @@ export function PremiumSuccess({ ownerSlug, onGoDashboard, onGoHome }: PremiumSu
                     <Button className="w-full h-12" onClick={() => void check()}>
                       J&apos;ai payé — Vérifier maintenant
                     </Button>
-                    {ownerSlug && (
-                      <Button variant="outline" className="w-full" onClick={() => onGoDashboard(ownerSlug)}>
-                        Retour au tableau de bord
+                    {inPopup ? (
+                      <Button variant="outline" className="w-full" onClick={() => window.close()}>
+                        Fermer et revenir sur KinShop
                       </Button>
+                    ) : (
+                      ownerSlug && (
+                        <Button variant="outline" className="w-full" onClick={() => onGoDashboard(ownerSlug)}>
+                          Retour au tableau de bord
+                        </Button>
+                      )
                     )}
                   </div>
                 </>

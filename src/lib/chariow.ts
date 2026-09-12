@@ -8,10 +8,19 @@
 //   CHARIOW_PULSE_SECRET  → secret webhook whsec_... (Automations → Pulses → Signing secret)
 //   APP_URL               → URL publique de l'app (pour redirect_url après paiement)
 //
+// ⚠️ CONTRAINTE PRODUIT (API publique Chariow) : seuls les produits de type
+//   « course », « downloadable », « license » et « bundle » sont payables via
+//   POST /v1/checkout. Les types « service »/« coaching » sont REFUSÉS (422).
+//   → Le produit « KinShop Premium » doit être créé dans le dashboard Chariow
+//     en type Course (ou Downloadable), publié, puis son ID collé dans la
+//     console ADMIN → Paiements (paramètre dynamique `payments.chariowProductId`,
+//     prioritaire sur la variable d'env).
+//
 // Sans CHARIOW_API_KEY, l'app tourne en MODE SIMULATION : le checkout est
 // simulé de bout en bout pour tester le parcours sans compte Chariow.
 
 import crypto from "crypto"
+import { getConfigValue } from "@/lib/config-registry"
 
 export const CHARIOW_API_URL = "https://api.chariow.com/v1"
 
@@ -34,6 +43,31 @@ export function getChariowConfig(): ChariowConfig {
 export function isChariowLive(): boolean {
   const cfg = getChariowConfig()
   return Boolean(cfg.apiKey && cfg.productId)
+}
+
+/**
+ * ID produit Chariow effectif — résolu DYNAMIQUEMENT :
+ * 1. Paramètre console admin `payments.chariowProductId` (prioritaire, sans redéploiement)
+ * 2. Variable d'environnement CHARIOW_PRODUCT_ID (fallback)
+ */
+export async function resolveChariowProductId(): Promise<string> {
+  let dynamic = ""
+  try {
+    dynamic = ((await getConfigValue<string>("payments.chariowProductId")) || "").trim()
+  } catch {
+    // Configuration indisponible → fallback variable d'env uniquement
+  }
+  return dynamic || process.env.CHARIOW_PRODUCT_ID?.trim() || ""
+}
+
+/**
+ * Mode paiement réel actif ? (clé API .env + produit résolu dynamiquement)
+ * Version asynchrone d'isChariowLive — à privilégier dans les routes API.
+ */
+export async function isChariowLiveAsync(): Promise<boolean> {
+  const cfg = getChariowConfig()
+  if (!cfg.apiKey) return false
+  return Boolean(await resolveChariowProductId())
 }
 
 /* ─────────── Checkout ─────────── */
@@ -111,6 +145,20 @@ export async function initiateCheckout(params: ChariowCheckoutParams): Promise<C
 
   if (!res.ok || !json) {
     const detail = json?.message ?? `HTTP ${res.status}`
+    // 422 : produit de type « service »/« coaching » — non supporté par l'API
+    // publique Chariow. Message actionnable pour l'admin KinShop.
+    if (res.status === 422 && /not supported/i.test(detail)) {
+      throw new Error(
+        "Le produit Chariow configuré est de type « Service/Coaching », non payable via l'API. " +
+        "Dans le dashboard Chariow, recrée (ou change) le produit en type « Course » ou « Downloadable », " +
+        "publie-le, puis colle son ID dans la console ADMIN → Paiements.",
+      )
+    }
+    if (res.status === 404 || /not found/i.test(detail)) {
+      throw new Error(
+        "Produit Chariow introuvable ou non publié. Vérifie l'ID (console ADMIN → Paiements) et que le produit est bien publié dans le dashboard Chariow.",
+      )
+    }
     throw new Error(`Chariow checkout a échoué : ${detail}`)
   }
 

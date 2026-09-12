@@ -9,7 +9,12 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
-import { isChariowLive, initiateCheckout, buildPremiumRedirectUrl, getChariowConfig } from "@/lib/chariow"
+import {
+  initiateCheckout,
+  buildPremiumRedirectUrl,
+  resolveChariowProductId,
+  isChariowLiveAsync,
+} from "@/lib/chariow"
 import { normalizePhone } from "@/lib/kinshop"
 import { requireStoreOwner, forbidden, unauthorized } from "@/lib/auth"
 import { isFeatureOn } from "@/lib/config-registry"
@@ -57,18 +62,20 @@ export async function POST(req: NextRequest) {
     })
 
     // ─── MODE SIMULATION ───
-    if (!isChariowLive()) {
+    // Paiement réel = clé API (.env) + produit résolu dynamiquement (console admin ou .env)
+    if (!(await isChariowLiveAsync())) {
       return NextResponse.json({
         mode: "sim" as const,
         slug,
-        message: "Mode démo : paiement simulé (clés Chariow non configurées).",
+        message:
+          "Mode démo : paiement simulé (produit Chariow non encore branché — colle l'ID produit dans la console ADMIN, section Paiements).",
       })
     }
 
     // ─── MODE LIVE (Chariow) ───
-    const cfg = getChariowConfig()
+    const productId = await resolveChariowProductId()
     const result = await initiateCheckout({
-      productId: cfg.productId,
+      productId,
       email,
       firstName,
       lastName,

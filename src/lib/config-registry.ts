@@ -304,6 +304,19 @@ export const CONFIG_SPECS: ConfigSpec[] = [
       label: `${m.toUpperCase()} — libellé affiché`,
     },
   ]),
+  {
+    key: "payments.chariowProductId",
+    section: "payments",
+    type: "string",
+    default: CONFIG_DEFAULTS["payments.chariowProductId"] as string,
+    public: false,
+    maxLength: 60,
+    label: "Chariow — ID produit Premium (prd_xxx)",
+    description:
+      "ID du produit « KinShop Premium » créé dans le dashboard Chariow. " +
+      "Colle-le ici après création : le paiement réel s'active instantanément, sans redéploiement. " +
+      "Vide (ou clé API absente) = mode démo.",
+  },
 
   /* ─────────── Règles métier ─────────── */
   {
