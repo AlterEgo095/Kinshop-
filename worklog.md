@@ -352,3 +352,26 @@ Work Log:
 Stage Summary:
 - Le taux admin est désormais vivant : modification → cascade DB immédiate + propagation UI ≤ 30 s (immédiate au focus de l'onglet) sur wizard, vitrines, dashboards et console admin.
 - Source de vérité unique : PlatformSetting.defaultRateFC ; boutiques vendeurs avec taux custom non affectées.
+
+---
+Task ID: 14
+Agent: Z.ai Code (main)
+Task: Audit complet (technique, fonctionnel, sécurité) du système de création/gestion des boutiques + recadrage architecture USER → STORE → PRODUCTS avec authentification obligatoire, propriété serveur, quotas FREE/PREMIUM.
+
+Work Log:
+- AUDIT statique : schéma Prisma sans modèle User ni ownerId ; « session vendeur » = slug en localStorage (kinshop_owner_slug) ; aucune auth sur ~30 handlers vendeur.
+- PENTEST pré-correctif (14/14 failles confirmées) : POST /api/stores 201 sans compte (création anonyme + spam x5), PATCH boutique étrangère 200 (prise de contrôle totale), fuite PII commandes (noms+téléphones), produits injectés/supprimés chez autrui, commandes annulées, modération d'avis, coupons/zones, factures, stats, journal SMS, jeton de domaine, Premium activé gratuitement (simulate-confirm), seul le guard PIN admin tenait.
+- ARCHITECTURE CIBLE : modèles User (scrypt, role) + Session (token opaque 32 octets, SHA-256 en base, cookie HttpOnly sameSite=lax secure en prod, TTL 30 j) ; Store.ownerId (nullable → orphelines) + @@index.
+- libs : src/lib/auth.ts (hashPassword/verifyPassword timing-safe, createSession/destroySession, getUserFromRequest, setSessionCookie, requireStoreOwner anti-IDOR qui dérive la propriété du SERVEUR), src/lib/plans.ts (matrice FREE/PREMIUM : produits 20/500, photos 1/5, coupons 3/30, zones 5/25, factures 15/500 par mois, stats 7/60 j, domaine premium, MAX_STORES_PER_USER=1), src/lib/ratelimit.ts (buckets mémoire, clientIp x-forwarded-for).
+- Routes API : /api/auth/register|login|logout|me (rate limits 30/h inscription, 60/15 min login, CGNAT-friendly) ; guards ownership sur stores PATCH, products POST/PATCH/DELETE, orders GET/PATCH (+« paid » autorisé, boutiques suspendues refusées en POST), invoices GET-slug/POST(quota mensuel)/PATCH/DELETE, coupons GET/POST(quota)/PATCH/DELETE, delivery-zones POST(quota)/PATCH/DELETE, reviews all=1/PATCH/DELETE (+anti-spam 30/h), stats (days clampé au plan, plan renvoyé), notifications, stores/domain GET/POST, premium/checkout + simulate-confirm (owner only) ; GET /api/stores public épuré (domainToken, ownerId, chariow*).
+- FRONTEND : AuthView (inscription/connexion, toasts, show/hide mdp) ; kinshop-app : état authUser/userStore/authReady via /api/auth/me, garde des vues create/dashboard (loader de session, pas de flash), transitions handleAuthed (dashboard↔create selon boutique existante), handleLogout, clé localStorage legacy supprimée, PremiumSuccess branché sur userStore ; landing header/CTA connecté/déconnecté ; create-wizard prérempli depuis le compte ; dashboard bouton Déconnexion.
+- MIGRATION : db:push (User+Session+ownerId), scripts/migrate-v8-accounts.ts (compte démo demo@kinshop.cd/demo1234 + rattachement maman-ngo), boutiques pré-V8 = orphelines (lecture publique seule) ; action admin « assign-owner » (réattribution, garde 1-boutique/compte, log d'audit) + doc README-DEPLOIEMENT (tableau quotas, curl d'exemple).
+- TESTS : tests/validation-v8.sh → 51/51 (Parcours 1 visiteur: 12 refus 401 + 4 flux publics 200 ; Parcours 2 FREE: inscription, 1-boutique/compte 409, quotas 402 (21e produit, 2e photo, 4e coupon, 6e zone), stats clampées 7 j ; Parcours 3 PREMIUM: activation owner, 21e produit 201, 5 photos 201, stats 30 j ; Parcours 4 IDOR: 13 vecteurs → 403 dont storeId falsifié, commande client publique préservée (KIN-…) et gestion owner 200 ; Parcours 5: orphelines 403, admin 401, login/logout/session détruite).
+- Constat au passage : rate limiter a bloqué nos propres tests (5 inscr./h) → seuils remontés pour CGNAT mobile RDC (30/h inscription, 60/15 min login, 30/h avis).
+- NAVIGATEUR (local) : landing → garde auth → inscription → wizard prérempli → création boutique → dashboard → ajout produit → déconnexion → vitrine publique sans compte → commande client complète (KIN-HOC6S3) → connexion → commande visible dans le dashboard → admin PIN OK ; mobile 390px OK ; 0 erreur console.
+- DÉPLOIEMENT : commit 33eb5ce (V8) + 1e77139 (V8.1) → push → /opt/KINSHOP/deploy/update.sh (build standalone OK, prisma db push, pm2 reload) ; vérifs prod : 401 sur tous les vecteurs anonymes, inscription+création boutique 201 avec ownerId lié, compte/boutique de test ensuite supprimés de la base prod (vérifié : 0 utilisateur), landing + garde auth confirmés dans le navigateur sur https://kinshop.aenews.digital.
+
+Stage Summary:
+- La faille signalée est corrigée à la racine : plus aucune boutique ne peut être créée ni gérée sans compte authentifié ; le serveur est l'autorité finale (sessions HttpOnly, propriété dérivée serveur, quotas imposés, premium non falsifiable).
+- Architecture USER → STORE → {products, orders, invoices, coupons, zones, reviews, settings, subscription} en place, rétrocompatible (orphelines publiques + réattribution admin), tous les flux publics (vitrine, panier, commande, suivi, avis, facture par numéro) préservés.
+- 51/51 tests de sécurité/fonctionnels verts en local ; production déployée et vérifiée (kinshop.aenews.digital).
