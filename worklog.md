@@ -334,3 +334,21 @@ Stage Summary:
 - Mode maintenance opérationnel plateforme entière (accueil, création, dashboards, vitrines, CV, factures, suivi) — la console admin reste la seule porte ouverte pour le désactiver.
 - Aucune indication d'accès admin côté utilisateur (footer nettoyé) ; accès propriétaire = URL directe #/admin + PIN serveur.
 - Annonces admin désormais visibles sur l'accueil en plus des vitrines.
+
+---
+Task ID: 13
+Agent: Z.ai Code (main)
+Task: Synchronisation temps réel du taux de change FC/$ — la modification du taux dans la console admin doit prendre effet immédiatement partout (wizard création, vitrines, dashboards).
+
+Work Log:
+- Diagnostic : le taux admin (defaultRateFC) n'était utilisé qu'À LA CRÉATION d'une boutique (gelé dans store.rateFC) ; le champ du wizard création était codé en dur « 2 850 FC » ; aucune propagation après modification admin.
+- Backend : /api/platform renvoie désormais defaultRateFC (Cache-Control: no-store) ; /api/admin/settings PATCH effectue une CASCADE serveur — db.store.updateMany({rateFC: ancien défaut} → nouveau) : toutes les boutiques alignées sur l'ancien taux suivent le nouveau instantanément, les taux personnalisés vendeurs sont préservés ; détail de la cascade dans le message du journal d'audit (ex. « taux par défaut : 3000 FC/$ (4 boutiques synchronisées) »).
+- /api/stores GET : header Cache-Control: no-store ajouté (jamais de prix périmés).
+- Frontend : kinshop-app (polling /api/platform 30 s + focus) transporte defaultRateFC vers CreateWizard (champ taux live, fini le hardcode), StoreView et Dashboard ; ces deux vues rechargent silencieusement la boutique dès que le taux plateforme change (useRef lastRateRef, sans spinner ni écrasement des formulaires en cours).
+- Admin console : stat « Volume d'affaires » utilise le taux en vigueur (fini le 2850 hardcode).
+- Fix au passage : double suffixe « FC FC » dans le wizard (formatFC ajoute déjà l'unité).
+- Tests : cascade vérifiée par API (4 boutiques 2850→3000→3300→2850) ; test navigateur E2E : vitrine ouverte, taux changé en admin → prix affichés passent de 7 500 à 8 250 FC sans rechargement de page ; wizard affiche le taux live ; lint OK.
+
+Stage Summary:
+- Le taux admin est désormais vivant : modification → cascade DB immédiate + propagation UI ≤ 30 s (immédiate au focus de l'onglet) sur wizard, vitrines, dashboards et console admin.
+- Source de vérité unique : PlatformSetting.defaultRateFC ; boutiques vendeurs avec taux custom non affectées.

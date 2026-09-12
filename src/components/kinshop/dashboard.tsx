@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { motion } from "framer-motion"
 import {
   ArrowLeft,
@@ -118,6 +118,8 @@ interface DashboardProps {
   slug: string
   onBack: () => void
   onViewStore: (slug: string) => void
+  /** Taux FC/$ plateforme (polling root) — un changement déclenche une synchronisation silencieuse */
+  platformRate?: number
 }
 
 const STATUS_CONFIG: Record<OrderStatus, { label: string; variant: "default" | "secondary" | "destructive" | "outline"; className: string }> = {
@@ -128,7 +130,7 @@ const STATUS_CONFIG: Record<OrderStatus, { label: string; variant: "default" | "
   cancelled: { label: "Annulée", variant: "destructive", className: "" },
 }
 
-export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
+export function Dashboard({ slug, onBack, onViewStore, platformRate }: DashboardProps) {
   const [store, setStore] = useState<StoreData | null>(null)
   const [products, setProducts] = useState<ProductData[]>([])
   const [orders, setOrders] = useState<OrderData[]>([])
@@ -579,6 +581,35 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
       cancelled = true
     }
   }, [slug, loadOrders, loadStats, loadNotifications, loadInvoices])
+
+  // Synchronisation temps réel du taux FC/$ : quand l'admin change le taux
+  // plateforme (cascade serveur sur les boutiques alignées), on recharge la
+  // boutique + produits silencieusement — sans toucher aux formulaires en cours.
+  const lastRateRef = useRef<number | undefined>(undefined)
+  useEffect(() => {
+    if (!platformRate || platformRate <= 0) return
+    if (lastRateRef.current === undefined) {
+      lastRateRef.current = platformRate
+      return
+    }
+    if (lastRateRef.current === platformRate) return
+    lastRateRef.current = platformRate
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch(`/api/stores?slug=${encodeURIComponent(slug)}`, { cache: "no-store" })
+        const data = await res.json()
+        if (cancelled || !res.ok || !data.store) return
+        setStore(data.store)
+        setProducts(data.store.products || [])
+      } catch {
+        // silencieux : le polling suivant réessaiera
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [platformRate, slug])
 
   const storeLink = store ? `${window.location.origin}/#/boutique/${store.slug}` : ""
 

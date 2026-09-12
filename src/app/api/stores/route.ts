@@ -70,13 +70,18 @@ export async function GET(req: NextRequest) {
 
     // Réponse publique : on masque les champs internes Chariow
     const { chariowEmail, chariowPhone, chariowSaleId, ...publicStore } = store
-    return NextResponse.json({
-      store: {
-        ...publicStore,
-        // V4 — galerie multi-photos normalisée (retombe sur imageUrl si vide)
-        products: publicStore.products.map((p) => ({ ...p, images: normalizeImages(p.images, p.imageUrl) })),
+    return NextResponse.json(
+      {
+        store: {
+          ...publicStore,
+          // V4 — galerie multi-photos normalisée (retombe sur imageUrl si vide)
+          products: publicStore.products.map((p) => ({ ...p, images: normalizeImages(p.images, p.imageUrl) })),
+        },
       },
-    })
+      // no-store : le taux FC/$ peut être modifié à tout moment par l'admin
+      // (synchronisation temps réel) — jamais de réponse périmée côté client.
+      { headers: { "Cache-Control": "no-store" } },
+    )
   } catch (e) {
     console.error("GET /api/stores", e)
     return NextResponse.json({ error: "Erreur serveur." }, { status: 500 })

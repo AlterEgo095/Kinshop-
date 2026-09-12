@@ -6,6 +6,7 @@ import {
   setPlatformSetting,
   SETTING_KEYS,
 } from "@/lib/admin"
+import { db } from "@/lib/db"
 
 // GET /api/admin/settings — Paramètres globaux de la plateforme
 export async function GET(req: NextRequest) {
@@ -46,8 +47,25 @@ export async function PATCH(req: NextRequest) {
 
     if (Number(body.defaultRateFC) > 0) {
       const rate = Math.round(Number(body.defaultRateFC))
+      // Taux actuellement en vigueur (avant modification) — base de la synchronisation
+      const previous = (await getPlatformSettings()).defaultRateFC
       await setPlatformSetting(SETTING_KEYS.defaultRateFC, String(rate))
-      changes.push(`taux par défaut : ${rate} FC/$`)
+      // Synchronisation temps réel : les boutiques alignées sur l'ancien taux par
+      // défaut suivent immédiatement le nouveau. Les boutiques ayant un taux
+      // personnalisé (fixé par le vendeur) ne sont pas touchées.
+      let cascaded = 0
+      if (previous !== rate) {
+        const res = await db.store.updateMany({
+          where: { rateFC: previous },
+          data: { rateFC: rate },
+        })
+        cascaded = res.count
+      }
+      changes.push(
+        cascaded > 0
+          ? `taux par défaut : ${rate} FC/$ (${cascaded} boutique${cascaded > 1 ? "s" : ""} synchronisée${cascaded > 1 ? "s" : ""})`
+          : `taux par défaut : ${rate} FC/$`,
+      )
     }
 
     if (changes.length === 0) {

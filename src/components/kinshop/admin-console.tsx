@@ -1289,7 +1289,7 @@ export function AdminConsole({
                     icon={TrendingUp}
                     label="Volume d'affaires"
                     value={formatUSD(ov.gmvUSD)}
-                    sub={formatFC(ov.gmvUSD * 2850) + " (taux moyen)"}
+                    sub={formatFC(ov.gmvUSD * (settings?.defaultRateFC || 2850)) + " (taux en vigueur)"}
                     tone="bg-amber-100 text-amber-700"
                   />
                   <Kpi

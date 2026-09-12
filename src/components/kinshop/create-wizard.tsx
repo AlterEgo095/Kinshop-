@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/select"
 import {
   CATEGORIES,
+  DEFAULT_RATE_FC,
   STORE_EMOJIS,
   formatFC,
   slugify,
@@ -35,9 +36,11 @@ interface DraftProduct {
 interface CreateWizardProps {
   onCreated: (slug: string) => void
   onCancel: () => void
+  /** Taux FC/$ de la plateforme, synchronisé en temps réel avec la console admin */
+  platformRate?: number
 }
 
-export function CreateWizard({ onCreated, onCancel }: CreateWizardProps) {
+export function CreateWizard({ onCreated, onCancel, platformRate = DEFAULT_RATE_FC }: CreateWizardProps) {
   const [step, setStep] = useState(1)
 
   // Étape 1 : infos boutique
@@ -266,7 +269,10 @@ export function CreateWizard({ onCreated, onCancel }: CreateWizardProps) {
                   </div>
                   <div className="space-y-2">
                     <Label>Taux de change (FC pour 1 $)</Label>
-                    <Input value="2 850 FC" disabled />
+                    <Input value={formatFC(platformRate)} disabled aria-live="polite" />
+                    <p className="text-[11px] text-muted-foreground/70">
+                      Taux officiel KinShop — appliqué automatiquement à ta boutique.
+                    </p>
                   </div>
                 </div>
 

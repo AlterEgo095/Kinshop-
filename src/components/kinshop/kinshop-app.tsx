@@ -12,7 +12,7 @@ import { InvoicePublicView } from "@/components/kinshop/facture-view"
 import { TrackOrderView } from "@/components/kinshop/track-order"
 import { PwaLayer } from "@/components/kinshop/pwa"
 import { PLATFORM_DOMAIN } from "@/lib/domain"
-import type { StoreData } from "@/lib/kinshop"
+import { DEFAULT_RATE_FC, type StoreData } from "@/lib/kinshop"
 import { Button } from "@/components/ui/button"
 
 type View =
@@ -32,9 +32,15 @@ const DEMO_SLUG = "maman-ngo"
 interface PlatformStatus {
   maintenance: boolean
   announcement: string
+  /** Taux FC pour 1 $ défini par l'admin — synchronisé en temps réel sur toute l'app */
+  defaultRateFC: number
 }
 
-const PLATFORM_STATUS_DEFAULT: PlatformStatus = { maintenance: false, announcement: "" }
+const PLATFORM_STATUS_DEFAULT: PlatformStatus = {
+  maintenance: false,
+  announcement: "",
+  defaultRateFC: DEFAULT_RATE_FC,
+}
 
 type HashTarget =
   | { type: "store"; slug: string }
@@ -214,7 +220,13 @@ export function KinShopApp({ initialSlug }: { initialSlug?: string }) {
       const res = await fetch("/api/platform", { cache: "no-store" })
       const data = (await res.json()) as Partial<PlatformStatus> | null
       if (data && typeof data.maintenance === "boolean") {
-        setPlatform({ maintenance: data.maintenance, announcement: data.announcement || "" })
+        const rate = Number(data.defaultRateFC)
+        setPlatform({
+          maintenance: data.maintenance,
+          announcement: data.announcement || "",
+          defaultRateFC:
+            Number.isFinite(rate) && rate > 0 ? rate : PLATFORM_STATUS_DEFAULT.defaultRateFC,
+        })
       }
     } catch {
       // réseau indisponible : on conserve l'état courant, on ne bloque jamais l'affichage
@@ -243,13 +255,13 @@ export function KinShopApp({ initialSlug }: { initialSlug?: string }) {
   let content: React.ReactNode
   switch (view.name) {
     case "create":
-      content = <CreateWizard onCreated={handleCreated} onCancel={goHome} />
+      content = <CreateWizard onCreated={handleCreated} onCancel={goHome} platformRate={platform.defaultRateFC} />
       break
     case "dashboard":
-      content = <Dashboard slug={view.slug} onBack={goHome} onViewStore={openStore} />
+      content = <Dashboard slug={view.slug} onBack={goHome} onViewStore={openStore} platformRate={platform.defaultRateFC} />
       break
     case "store":
-      content = <StoreView slug={view.slug} onBack={goHome} />
+      content = <StoreView slug={view.slug} onBack={goHome} platformRate={platform.defaultRateFC} />
       break
     case "premium-success":
       content = <PremiumSuccess ownerSlug={ownerSlug} onGoDashboard={openDashboard} onGoHome={goHome} />

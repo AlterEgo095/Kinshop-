@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import {
   AlertCircle,
@@ -54,6 +54,8 @@ import {
 interface StoreViewProps {
   slug: string
   onBack: () => void
+  /** Taux FC/$ plateforme (polling root) — un changement déclenche un rechargement silencieux */
+  platformRate?: number
 }
 
 interface CartLine {
@@ -124,7 +126,7 @@ function ReviewItem({ review }: { review: ReviewData }) {
   )
 }
 
-export function StoreView({ slug, onBack }: StoreViewProps) {
+export function StoreView({ slug, onBack, platformRate }: StoreViewProps) {
   const [store, setStore] = useState<StoreData | null>(null)
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
@@ -185,7 +187,7 @@ export function StoreView({ slug, onBack }: StoreViewProps) {
       try {
         const [resStore, resPlatform, resZones, resReviews] = await Promise.all([
           fetch(`/api/stores?slug=${encodeURIComponent(slug)}`),
-          fetch("/api/platform"),
+          fetch("/api/platform", { cache: "no-store" }),
           fetch(`/api/delivery-zones?slug=${encodeURIComponent(slug)}`).catch(() => null),
           fetch(`/api/reviews?slug=${encodeURIComponent(slug)}`).catch(() => null),
         ])
@@ -219,6 +221,33 @@ export function StoreView({ slug, onBack }: StoreViewProps) {
       cancelled = true
     }
   }, [slug])
+
+  // Synchronisation temps réel du taux FC/$ : quand le taux plateforme change
+  // (modification console admin → cascade serveur), on recharge la boutique
+  // silencieusement pour que tous les prix affichés suivent immédiatement.
+  const lastRateRef = useRef<number | undefined>(undefined)
+  useEffect(() => {
+    if (!platformRate || platformRate <= 0) return
+    if (lastRateRef.current === undefined) {
+      lastRateRef.current = platformRate
+      return
+    }
+    if (lastRateRef.current === platformRate) return
+    lastRateRef.current = platformRate
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch(`/api/stores?slug=${encodeURIComponent(slug)}`, { cache: "no-store" })
+        const data = await res.json()
+        if (!cancelled && res.ok && data.store) setStore(data.store)
+      } catch {
+        // silencieux : le polling suivant réessaiera
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [platformRate, slug])
 
   // V2 — Comptabiliser la visite (1× max par session navigateur et par boutique)
   useEffect(() => {
