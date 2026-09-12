@@ -296,3 +296,23 @@ Stage Summary:
 - Décisions clés : fonctionnalité réservée Premium (levier de monétisation 3 $/mois) ; vérification propriété par TXT obligatoire avant activation (aucune validation par défaut si DNS indisponible) ; routage A record en conseil non bloquant ; admin garde une voie de secours (validation manuelle + déliaison) ; endpoint domain-check minimal pour empêcher l'épuisement Let's Encrypt.
 - Artifacts : prisma/schema.prisma, src/lib/domain.ts, src/app/api/stores/domain/route.ts, src/app/api/domain-check/route.ts, src/app/api/admin/stores/route.ts, src/app/page.tsx, src/components/kinshop/{kinshop-app,dashboard,admin-console}.tsx, deploy/{Caddyfile,kinshop.service,deploy.sh,README-DEPLOIEMENT.md}.
 - Rappel sécurité : PAT GitHub toujours à révoquer ; en production changer ADMIN_PIN (défaut 243243).
+
+---
+Task ID: 11
+Agent: Z.ai Code (main)
+Task: Déploiement KinShop sur le VPS 95.111.226.63 dans /opt/ — audit des apps existantes puis réplication du modèle de déploiement observé.
+
+Work Log:
+- Connexion SSH vérifiée (aenews@95.111.226.63, Ubuntu 24.04, 11 Go RAM) via helper paramiko local (supprimé après usage, ne jamais committer les identifiants).
+- Audit production : 40+ apps dans /opt/, modèle uniforme = /opt/<APP> + PM2 v6 (service pm2-aenews, 21 process, pm2-logrotate) + build Next.js standalone (.next/standalone/server.js, cf. IAHUB) + nginx vhost par domaine + certbot/Let's Encrypt + ports locaux 127.0.0.1 (3000-4000).
+- Déploiement KinShop selon ce modèle : clone GitHub -> /opt/KINSHOP (b1c5a42) ; .env prod (DATABASE_URL=file:/opt/KINSHOP/db/kinshop.db, ADMIN_PIN fort 8 chiffres, NEXT_PUBLIC_PLATFORM_DOMAIN=kinshop.aenews.digital, PLATFORM_IPV4=95.111.226.63, chmod 600) ; bun install (875 paquets) ; prisma generate + db push (SQLite créé) ; bun run build OK.
+- PM2 : ecosystem.config.js (fork, 1 instance, PORT=3310, HOSTNAME=127.0.0.1, max_memory_restart 512M, logs /opt/KINSHOP/logs/) ; pm2 start + save (id 22, online). Port 3310 choisi libre (3300 pris).
+- nginx : vhost HTTP d'abord (sites-available/kinshop.aenews.digital), certbot certonly --webroot (cert émis, expire 2026-12-11, renouvellement auto), puis vhost HTTPS complet (proxy 3310, Host préservé, cache /_next/static, sw.js no-cache, client_max_body_size 50m). Catch-all 443 existant (return 444) laissé intact.
+- Scripts serveur : deploy/add-vendor-domain.sh (vhost+certbot par domaine vendeur, adapté nginx au lieu de Caddy on-demand) et deploy/update.sh (git fetch/reset + build + pm2 reload) ; rapatriés dans le dépôt (add-vendor-domain.sh, update-vps.sh) ; README-DEPLOIEMENT.md réécrit avec l'état réel.
+- Vérification : HTTP/2 200 + TLS OK depuis l'extérieur, /api/platform répond, manifest + sw.js 200, admin API 401 mauvais PIN / 200 bon PIN (DB vide : stores=[]), binding 3310 = 127.0.0.1 uniquement, erreurs "Server Action" dans les logs = probes bots publics (inoffensives).
+
+Stage Summary:
+- KinShop EN PRODUCTION sur https://kinshop.aenews.digital (HTTPS/TLS valides, PM2 autorestart, nginx, certbot auto-renew).
+- Modèle serveur respecté : /opt/KINSHOP + PM2 + nginx + certbot (le kit systemd/Caddy initial reste en archive pour déploiement alternatif).
+- Domaines vendeurs personnalisés : procédure nginx par domaine (add-vendor-domain.sh) documentée — le catch-all 444 bloque les SNI inconnus, chaque domaine vendeur a besoin d'un vhost (contrainte nginx vs Caddy on_demand_tls de la V7).
+- Ne pas committer : identifiants SSH/PAT dans les scripts (helper supprimé).

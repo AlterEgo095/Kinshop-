@@ -1,129 +1,85 @@
-# 🚀 Déploiement KinShop sur kinshop.aenews.digital
+# KinShop — Déploiement Production
 
-Guide complet pour mettre la plateforme en production sur ton serveur
-(**95.111.226.63**) avec le domaine **kinshop.aenews.digital**.
+## ✅ État actuel (mis en production le 2026-09-12)
 
-> ✅ DNS déjà vérifié : `kinshop.aenews.digital → 95.111.226.63` (A, « DNS uniquement »,
-> visible publiquement, TTL 300 s). Caddy obtiendra le certificat HTTPS automatiquement.
+**KinShop tourne en production** sur `https://kinshop.aenews.digital`
+
+| Élément | Valeur |
+|---------|--------|
+| Serveur | VPS Contabo `95.111.226.63` (vmi3058261, Ubuntu 24.04) |
+| Répertoire | `/opt/KINSHOP` (propriétaire `aenews`) |
+| Process | PM2 `kinshop` (id 22, fork, via service système `pm2-aenews`) |
+| Port local | `127.0.0.1:3310` (nginx seul point d'entrée) |
+| Reverse proxy | nginx — `/etc/nginx/sites-available/kinshop.aenews.digital` |
+| TLS | Let's Encrypt (certbot webroot, renouvellement auto, expire 2026-12-11) |
+| Base | SQLite `/opt/KINSHOP/db/kinshop.db` (vide en prod) |
+| Logs | `/opt/KINSHOP/logs/kinshop-{out,error}.log` (+ pm2-logrotate) |
+| `.env` | `/opt/KINSHOP/.env` (chmod 600) : DATABASE_URL, ADMIN_PIN fort, NEXT_PUBLIC_PLATFORM_DOMAIN, PLATFORM_IPV4 |
+
+**Modèle du serveur** (identique aux autres apps : IAHUB, wedding-platform…) :
+`/opt/<APP>` + build Next.js **standalone** + **PM2** + **nginx vhost** + **certbot**.
+
+## Mise à jour de l'application
+
+```bash
+# Sur le VPS (SSH aenews@95.111.226.63)
+/opt/KINSHOP/deploy/update-vps.sh          # git pull + build + pm2 reload
+```
+
+## Ajouter un domaine personnalisé vendeur
+
+Le serveur utilise nginx (pas Caddy on-demand TLS) : chaque domaine vendeur
+a besoin de son vhost + certificat.
+
+```bash
+# Sur le VPS — le domaine doit d'abord pointer (A) vers 95.111.226.63
+/opt/KINSHOP/deploy/add-vendor-domain.sh boutique-vendeur.cd
+```
+
+Le script : crée le vhost HTTP → émet le certificat certbot → installe le
+vhost HTTPS proxifié vers le port 3310 (le header Host est préservé, le
+routage vers la bonne boutique se fait dans `src/app/page.tsx`).
+
+Côté KinShop : le vendeur ajoute le domaine dans son onglet « Domaine »
+(Premium), vérifie le TXT `_kinshop-verify.<domaine>`, et l'admin peut
+valider manuellement depuis la console admin.
+
+## Opérations courantes
+
+```bash
+pm2 list | grep kinshop          # statut
+pm2 logs kinshop --lines 50      # logs
+pm2 restart kinshop              # redémarrage simple
+pm2 reload kinshop               # reload zero-downtime
+tail -f /var/log/nginx/kinshop-error.log
+```
+
+## Sauvegarde de la base
+
+```bash
+sqlite3 /opt/KINSHOP/db/kinshop.db ".backup /opt/KINSHOP/backups/kinshop-$(date +%F).db"
+# Cron recommandé (quotidien 03h) + conservation 30 jours
+```
+
+## ⚠️ Sécurité (à faire par le propriétaire du serveur)
+
+1. **Bascule auth SSH par clé** + désactiver PasswordAuthentication
+2. Changer le mot de passe `aenews` (partagé en clair pendant le déploiement)
+3. **ADMIN_PIN** : généré fort (8 chiffres) et stocké dans `/opt/KINSHOP/.env` — le communiquer à l'équipe puis le changer si besoin : `sed -i "s/ADMIN_PIN=.*/ADMIN_PIN=NOUVEAU/" /opt/KINSHOP/.env && pm2 restart kinshop`
+4. Révoquer le PAT GitHub exposé (GitHub → Settings → Developer settings)
+5. ufw : autoriser 22/80/443 uniquement si ce n'est pas déjà fait
 
 ---
 
-## 1. Prérequis sur le VPS (Ubuntu/Debian)
+## Déploiement initial (archivé — déjà exécuté)
 
-```bash
-# Mises à jour + outils de base
-sudo apt update && sudo apt upgrade -y
-sudo apt install -y curl git
+1. `git clone https://github.com/AlterEgo095/Kinshop-.git /opt/KINSHOP`
+2. `.env` de production (PIN admin fort généré)
+3. `bun install --frozen-lockfile && bunx prisma generate && bunx prisma db push`
+4. `bun run build` (script package.json copie static+public dans standalone)
+5. `ecosystem.config.js` PM2 → `pm2 start && pm2 save`
+6. vhost nginx HTTP → `certbot certonly --webroot` → vhost HTTPS
+7. Vérification : `curl https://kinshop.aenews.digital/api/platform`
 
-# Bun (runtime JS utilisé par KinShop)
-curl -fsSL https://bun.sh/install | bash
-source ~/.bashrc
-
-# Caddy (serveur web + HTTPS automatique)
-sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
-sudo apt update && sudo apt install -y caddy
-```
-
-Ouvrir les ports web :
-
-```bash
-sudo ufw allow 80/tcp && sudo ufw allow 443/tcp && sudo ufw allow 22/tcp
-sudo ufw enable   # si le pare-feu est inactif
-```
-
-## 2. Récupérer le code
-
-```bash
-sudo mkdir -p /opt/kinshop && sudo chown $USER /opt/kinshop
-git clone https://github.com/AlterEgo095/Kinshop-.git /opt/kinshop
-cd /opt/kinshop
-```
-
-## 3. Premier déploiement (automatisé)
-
-```bash
-bash deploy/deploy.sh
-```
-
-Le script :
-1. crée le fichier `.env` (PIN admin, base de données, domaine plateforme) ;
-2. installe les dépendances et génère le client Prisma ;
-3. crée/synchronise la base SQLite (`db/custom.db`) ;
-4. build l'application (sortie standalone) ;
-5. installe et démarre le service **systemd** `kinshop` (redémarrage auto en cas de crash/reboot).
-
-Vérifier :
-
-```bash
-curl -I http://127.0.0.1:3000        # → HTTP/1.1 200 OK
-```
-
-## 4. Activer HTTPS avec Caddy
-
-```bash
-sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
-sudo systemctl reload caddy
-```
-
-Patienter ~30 s puis tester : **https://kinshop.aenews.digital** 🎉
-
-> 💡 Le Caddyfile active le **TLS à la demande** : chaque domaine de boutique vérifié
-> reçoit son certificat automatiquement, sans toucher au serveur.
-
-## 5. Console d'administration
-
-- URL : `https://kinshop.aenews.digital/#/admin`
-- PIN : celui défini dans `.env` (`ADMIN_PIN` — par défaut `243243`, **change-le !**)
-
-```bash
-# Changer le PIN :
-nano /opt/kinshop/.env       # modifier ADMIN_PIN
-sudo systemctl restart kinshop
-```
-
-## 6. Domaines personnalisés des boutiques (fonctionnalité Premium)
-
-Chaque boutique **Premium** peut relier son propre domaine depuis
-**Tableau de bord → onglet « Domaine »** :
-
-1. Le vendeur saisit son domaine (ex. `maboutique.cd`) → KinShop génère un **jeton de vérification** ;
-2. Le vendeur ajoute chez son registrar :
-   - `TXT  _kinshop-verify.maboutique.cd  →  kinshop-verify=<jeton>` (propriété),
-   - `A    @  →  95.111.226.63` ou `CNAME www → kinshop.aenews.digital` (routage) ;
-3. Le vendeur clique **« Vérifier maintenant »** → KinShop contrôle le TXT en DNS-over-HTTPS ;
-4. Une fois vérifié : la vitrine s'affiche sur `https://maboutique.cd` avec HTTPS automatique,
-   et le domaine apparaît dans la **console admin** (validation manuelle possible, déliaison possible).
-
-Côté serveur, **rien à configurer** : Caddy demande l'autorisation à
-`/api/domain-check` avant d'émettre chaque certificat.
-
-## 7. Mises à jour
-
-```bash
-cd /opt/kinshop
-bash deploy/deploy.sh --update     # git pull + rebuild + restart
-```
-
-## 8. Dépannage
-
-| Symptôme | Commande / action |
-|---|---|
-| Le site ne répond pas | `sudo systemctl status kinshop` · `tail -50 /var/log/kinshop.err.log` |
-| Erreur 502 (Caddy ↔ app) | L'app est-elle lancée ? `curl -I http://127.0.0.1:3000` |
-| Pas de HTTPS | `sudo journalctl -u caddy --since "10 min ago"` — vérifier les ports 80/443 |
-| Certificat d'un domaine vendeur absent | Le domaine doit être **vérifié** (TXT) et pointer (A/CNAME) vers le serveur |
-| Base de données | `sqlite3 /opt/kinshop/db/custom.db` (sauvegarde : `cp db/custom.db db/backup-$(date +%F).db`) |
-
-## 9. Sauvegardes recommandées (cron)
-
-```bash
-crontab -e
-# Sauvegarde quotidienne de la base à 3 h du matin :
-0 3 * * * cp /opt/kinshop/db/custom.db /opt/kinshop/db/backup-$(date +\%F).db
-```
-
----
-
-🇨🇩 **KinShop** — ta boutique WhatsApp en 5 minutes. Propulsé par KinShop.
+Les fichiers `Caddyfile`, `deploy.sh`, `kinshop.service` (modèle
+systemd/Caddy) sont conservés pour un déploiement alternatif.
