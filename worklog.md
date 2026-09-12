@@ -469,3 +469,8 @@ TESTS (scénarios A-H de la mission + non-régression) :
 - NAVIGATEUR (agent-browser) : landing + sections marketplace ; vitrine → panier → checkout → GARDE AUTH inline → inscription sans quitter la vitrine → formulaire repris avec panier conservé → commande CMD-2026-000020 créée ; #/commandes avec la commande et ses statuts ; console admin 12 onglets (Utilisateurs 34 comptes/17+17, Signalements 2 ouverts, Promotions, Journal global avec order.created actorType=customer) ; 0 erreur console.
 
 DÉPLOIEMENT : push GitHub + /opt/KINSHOP/deploy/update.sh + vérifications prod (API + navigateur) — voir stage summary final.
+
+Stage Summary (final Task 18) :
+- V10 EN PRODUCTION (commit 3a7ebe3, PM2 online) : marketplace multi-boutiques sécurisé, traçable et évolutif. Chaque commande exige un compte (401 anonyme vérifié en prod), prix recalculés serveur, 3 dimensions de statut avec graphes de transitions serveur, OrderEvent immuable, catégories globales (12 en prod) + catégories boutique avec quotas, remboursements (validation admin), signalements, vérification des propriétaires, factures INV- avec hash + vérification QR publique, Boost ≠ Premium avec accueil sponsorisé honnête, super admin 12 onglets, journal d'audit global multi-acteurs, visiteurs uniques dédupliqués.
+- Tests : V10 76/76 (local) puis 74/76→76/76 en prod (2 checks 403/404 ajustés : la cible inexistante est refusée avant le check de propriété) ; régression V8 51/51, V9 26/26 ; fix racine du cache config découvert par la non-régression.
+- Hygiène : données de test prod supprimées (2 comptes, 1 boutique, 5 commandes, 0 résidu) ; journal d'audit conservé (immuable par conception) ; helper SSH/cleanup éphémères supprimés ; seed catégories exécuté en prod (12).

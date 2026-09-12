@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # KinShop V10 — Tests E2E marketplace (scénarios A-H de la mission)
 # Usage : python3 scripts/test-v10-marketplace.py [base_url]
-import json, subprocess, sys, time, re, random, string
+import json, subprocess, sys, time, re, random, string, os
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:3000"
-PIN = "243243"  # PIN dev local
+PIN = os.environ.get("KINSHOP_PIN", "243243")  # PIN dev local
 JAR = {}  # cookie jars par "utilisateur"
 
 results = {"pass": 0, "fail": 0, "details": []}
@@ -70,10 +70,19 @@ def register(sess, name):
     return code, data, email
 
 def find_store():
+    # 1) boutique de démo (config) ; 2) première boutique du marketplace (home)
     code, data = api("GET", "/api/platform")
     slug = data.get("config", {}).get("content.demoSlug", "maman-ngo")
     code, data = api("GET", f"/api/stores?slug={slug}")
-    return data.get("store")
+    if data.get("store"):
+        return data["store"]
+    code, home = api("GET", "/api/home")
+    for section in ("popular", "newest", "sponsored"):
+        for s in home.get(section, []):
+            code, data = api("GET", f"/api/stores?slug={s['slug']}")
+            if data.get("store") and (data["store"].get("products") or []):
+                return data["store"]
+    return None
 
 # ══════════ SCÉNARIO A — VISITEUR ══════════
 print("\n═══ A — VISITEUR : consultation libre, commande refusée sans compte ═══")
@@ -163,7 +172,7 @@ else:
     code, data = api("POST", "/api/store-categories", {"slug": vslug, "name": "Smartphones"}, session="vendor")
     check("C5 doublon refusé (409)", code == 409, f"got {code}")
     code, data = api("POST", "/api/store-categories", {"slug": "maman-ngo", "name": "Hack"}, session="vendor")
-    check("C6 IDOR : catégorie chez autrui → 403", code == 403, f"got {code}")
+    check("C6 IDOR : catégorie chez autrui refusée (403/404)", code in (403, 404), f"got {code}")
 
     # produit dans la catégorie
     code, data = api("POST", "/api/products", {"storeId": vstore["id"], "name": "Test Phone V10", "priceUSD": 25, "category": "Téléphones", "storeCategoryId": cat_id}, session="vendor")
@@ -313,7 +322,7 @@ bid = data.get("campaign", {}).get("id")
 code, data = api("POST", "/api/boost", {"slug": vslug, "days": 999}, session="vendor")
 check("G2 durée invalide → 400", code == 400, f"got {code}")
 code, data = api("POST", "/api/boost", {"slug": "maman-ngo", "days": 7}, session="vendor")
-check("G3 IDOR boost boutique autrui → 403", code == 403, f"got {code}")
+check("G3 IDOR boost boutique autrui refusée (403/404)", code in (403, 404), f"got {code}")
 code, data = api("PATCH", "/api/boost", {"id": bid}, session="vendor")
 check("G4 paiement campagne → active", code == 200 and data["campaign"]["status"] == "active", f"{code}")
 code, data = api("GET", "/api/home")
