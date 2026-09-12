@@ -105,6 +105,17 @@ export async function PATCH(req: NextRequest) {
         data = { isPremium: false, premiumUntil: null }
         logDetail = `Premium révoqué pour ${store.slug}`
         break
+      case "domain-verify":
+        if (!store.customDomain) {
+          return NextResponse.json({ error: "Cette boutique n'a aucun domaine personnalisé." }, { status: 400 })
+        }
+        data = { domainVerified: true }
+        logDetail = `Domaine ${store.customDomain} validé manuellement pour ${store.slug}`
+        break
+      case "domain-unlink":
+        data = { customDomain: null, domainVerified: false, domainToken: "" }
+        logDetail = `Domaine ${store.customDomain || ""} délié de ${store.slug}`
+        break
       default:
         return NextResponse.json({ error: "Action inconnue." }, { status: 400 })
     }
@@ -113,7 +124,15 @@ export async function PATCH(req: NextRequest) {
     await logAdminAction(`store.${action}`, `store:${store.slug}`, logDetail)
 
     return NextResponse.json({
-      store: { id: updated.id, slug: updated.slug, status: updated.status, isPremium: updated.isPremium, premiumUntil: updated.premiumUntil },
+      store: {
+        id: updated.id,
+        slug: updated.slug,
+        status: updated.status,
+        isPremium: updated.isPremium,
+        premiumUntil: updated.premiumUntil,
+        customDomain: updated.customDomain,
+        domainVerified: updated.domainVerified,
+      },
     })
   } catch (e) {
     console.error("PATCH /api/admin/stores", e)

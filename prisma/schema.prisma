@@ -29,6 +29,10 @@ model Store {
   chariowSaleId String  @default("")
   // Statut de modération (console admin)
   status      String    @default("active") // active | suspended
+  // V7 — Domaine personnalisé (réservé Premium)
+  customDomain   String? @unique // ex. maboutique.cd (null = aucun)
+  domainVerified Boolean @default(false) // vérifié par TXT DNS (_kinshop-verify.<domaine>)
+  domainToken    String  @default("") // jeton de vérification kinshop-verify=<token>
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   products    Product[]

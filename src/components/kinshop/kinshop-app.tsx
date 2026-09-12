@@ -11,6 +11,7 @@ import CvExpress from "@/components/kinshop/cv-express"
 import { InvoicePublicView } from "@/components/kinshop/facture-view"
 import { TrackOrderView } from "@/components/kinshop/track-order"
 import { PwaLayer } from "@/components/kinshop/pwa"
+import { PLATFORM_DOMAIN } from "@/lib/domain"
 import type { StoreData } from "@/lib/kinshop"
 
 type View =
@@ -51,8 +52,13 @@ function parseHash(): HashTarget {
   return null
 }
 
-export function KinShopApp() {
-  const [view, setView] = useState<View>({ name: "landing" })
+export function KinShopApp({ initialSlug }: { initialSlug?: string }) {
+  // V7 — Domaine personnalisé : si le serveur a résolu une boutique pour ce Host,
+  // on ouvre directement sa vitrine (mode domaine : URL propre, sans hash).
+  const isCustomDomain = Boolean(initialSlug)
+  const [view, setView] = useState<View>(
+    initialSlug ? { name: "store", slug: initialSlug } : { name: "landing" },
+  )
   const [ownerSlug, setOwnerSlug] = useState<string | null>(null)
   const [hydrated, setHydrated] = useState(false)
 
@@ -84,6 +90,8 @@ export function KinShopApp() {
     if (!hydrated) return
     if (view.name === "store") {
       const target = `#/boutique/${view.slug}`
+      // Mode domaine personnalisé : la vitrine d'origine reste à la racine (URL propre)
+      if (isCustomDomain && view.slug === initialSlug) return
       if (window.location.hash !== target) {
         window.history.pushState(null, "", target)
       }
@@ -122,7 +130,7 @@ export function KinShopApp() {
     ) {
       window.history.replaceState(null, "", window.location.pathname)
     }
-  }, [view, hydrated])
+  }, [view, hydrated, isCustomDomain, initialSlug])
 
   // Bouton retour navigateur pendant qu'on est dans une boutique
   useEffect(() => {
@@ -160,7 +168,14 @@ export function KinShopApp() {
     setView({ name: "store", slug })
   }, [])
 
-  const goHome = useCallback(() => setView({ name: "landing" }), [])
+  // Sur un domaine personnalisé, « retour accueil » renvoie vers la plateforme KinShop
+  const goHome = useCallback(() => {
+    if (isCustomDomain) {
+      window.location.href = `https://${PLATFORM_DOMAIN}`
+      return
+    }
+    setView({ name: "landing" })
+  }, [isCustomDomain])
 
   const openDashboard = useCallback((slug: string) => {
     setView({ name: "dashboard", slug })

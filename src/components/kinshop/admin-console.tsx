@@ -15,6 +15,7 @@ import {
   Eye,
   EyeOff,
   FileText,
+  Globe,
   History,
   Loader2,
   Lock,
@@ -177,6 +178,8 @@ interface AdminStoreRow {
   premiumUntil: string | null
   premiumActive: boolean
   status: string
+  customDomain: string | null
+  domainVerified: boolean
   createdAt: string
   productsCount: number
   ordersCount: number
@@ -793,6 +796,8 @@ export function AdminConsole({
                 isPremium: data.store.isPremium,
                 premiumUntil: data.store.premiumUntil,
                 premiumActive: data.store.isPremium,
+                customDomain: data.store.customDomain,
+                domainVerified: data.store.domainVerified,
               }
             : s,
         ),
@@ -802,6 +807,8 @@ export function AdminConsole({
         activate: "Boutique réactivée",
         "grant-premium": `Premium accordé (+${days ?? 30} j)`,
         "revoke-premium": "Premium révoqué",
+        "domain-verify": "Domaine validé manuellement",
+        "domain-unlink": "Domaine délié",
       }
       toast.success(labels[action] || "Action effectuée")
     } catch (e) {
@@ -1567,6 +1574,17 @@ export function AdminConsole({
                                     {s.premiumActive && <Crown className="w-3.5 h-3.5 text-amber-500 shrink-0" />}
                                   </p>
                                   <p className="text-xs text-muted-foreground truncate">/{s.slug}</p>
+                                  {s.customDomain && (
+                                    <p className="text-[11px] truncate flex items-center gap-1 text-primary">
+                                      <Globe className="w-3 h-3 shrink-0" />
+                                      <span className="font-mono">{s.customDomain}</span>
+                                      {s.domainVerified ? (
+                                        <Badge variant="outline" className="ml-1 px-1 py-0 text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200">Vérifié</Badge>
+                                      ) : (
+                                        <Badge variant="outline" className="ml-1 px-1 py-0 text-[10px] bg-amber-100 text-amber-800 border-amber-200">Attente</Badge>
+                                      )}
+                                    </p>
+                                  )}
                                 </div>
                               </div>
                             </TableCell>
@@ -1637,6 +1655,19 @@ export function AdminConsole({
                                     <DropdownMenuItem onClick={() => storeAction(s, "revoke-premium")}>
                                       <Ban className="w-4 h-4 mr-2" /> Révoquer le premium
                                     </DropdownMenuItem>
+                                  )}
+                                  {s.customDomain && (
+                                    <>
+                                      <DropdownMenuSeparator />
+                                      {!s.domainVerified && (
+                                        <DropdownMenuItem onClick={() => storeAction(s, "domain-verify")} className="text-emerald-700 focus:text-emerald-700">
+                                          <CheckCircle2 className="w-4 h-4 mr-2" /> Valider le domaine manuellement
+                                        </DropdownMenuItem>
+                                      )}
+                                      <DropdownMenuItem onClick={() => storeAction(s, "domain-unlink")} className="text-rose-600 focus:text-rose-600">
+                                        <Globe className="w-4 h-4 mr-2" /> Délier le domaine
+                                      </DropdownMenuItem>
+                                    </>
                                   )}
                                   <DropdownMenuSeparator />
                                   <DropdownMenuItem onClick={() => setDeleteStore(s)} className="text-rose-600 focus:text-rose-600 focus:bg-rose-50">

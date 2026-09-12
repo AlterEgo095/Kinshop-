@@ -270,3 +270,29 @@ Work Log:
 Stage Summary:
 - KinShop publié sur GitHub : V6 (avis vérifiés, codes promo, zones de livraison, suivi de commande) + console admin au complet (7 onglets, 9 routes /api/admin/* PIN-guardées).
 - PAT GitHub toujours à révoquer (exposé en clair dans le chat).
+
+---
+Task ID: 10
+Agent: Z.ai Code (principal)
+Task: V7 — Domaine personnalisé des boutiques + déploiement production sur kinshop.aenews.digital (95.111.226.63)
+
+Work Log:
+- Contexte : le client a fourni le domaine (capture DNS) — A record `kinshop.aenews.digital → 95.111.226.63` (Cloudflare, DNS only, TTL 300). Vérifié publiquement via DoH ; cette machine de dev n'ÉTANT PAS le serveur cible (IP publique 47.57.242.119), un kit de déploiement VPS complet a été produit.
+- Schéma Prisma : Store + customDomain (String? unique), domainVerified (Boolean, défaut false), domainToken (String) — `bun run db:push` OK.
+- src/lib/domain.ts : PLATFORM_DOMAIN / PLATFORM_IPV4 (env overridables), normalizeDomain (RFC simplifié, strip protocole/port/chemin), isPlatformDomain (rejet des domaines de la plateforme), dohQuery (Cloudflare DoH + repli Google, timeout 6 s), verifyDomainOwnership (TXT _kinshop-verify.<domaine> = kinshop-verify=<token>), checkDomainRouting (A record vs IP plateforme, conseil non bloquant).
+- API /api/stores/domain : GET (état + instructions), POST claim (normalisation, unicité, rejet domaine plateforme, token randomBytes 32 hex, réservé Premium → 402 sinon), POST verify (DoH réel → 400 avec message propagation si TXT absent, + routing advisory), POST remove — testée : 402 non-premium, 400 domaine plateforme, 400 invalide, claim OK (https://www.DivaBoutique.cd/ → www.divaboutique.cd), verify échoue proprement sans TXT, remove OK.
+- API /api/domain-check : endpoint public minimal « ask » pour Caddy on_demand_tls (200 si domaine vérifié, 403 sinon) — testé 403/403/200.
+- src/app/page.tsx : server component dynamique — lit l'en-tête Host, résout la boutique par customDomain vérifié, passe initialSlug à KinShopApp. Testé curl : Host divaboutique.cd → payload initialSlug=diva-mode ; Host normal → $undefined (landing).
+- kinshop-app.tsx : prop initialSlug → vue boutique initiale (sans mismatch d'hydratation), URL propre sans hash en mode domaine, goHome redirige vers la plateforme sur un domaine vendeur.
+- Dashboard vendeur : nouvel onglet « Domaine » (icône Globe) — upsell Premium si non-premium (testé avec maman-ngo), formulaire de réservation, instructions DNS en 2 étapes (TXT propriété + A/CNAME routage) avec boutons copier, vérification en direct, statut Actif/En attente, bannière succès, retrait avec AlertDialog — E2E navigateur complet sur diva-mode (claim divaboutique.cd → instructions → vérification échec propre → retrait → re-claim).
+- Admin : PATCH /api/admin/stores actions domain-verify / domain-unlink (PIN-guardées, journalisées) ; console : badge domaine « Vérifié/Attente » dans la table Boutiques + menu actions (valider manuellement / délier) — E2E : validation manuelle → badge « Vérifié » + DB verified=true ; unlink → customDomain null ; sans PIN → 401.
+- Kit de déploiement (deploy/) : Caddyfile (kinshop.aenews.digital + catch-all https:// avec on_demand_tls ask → /api/domain-check, HTTPS auto pour les domaines vendeurs vérifiés), kinshop.service (systemd, EnvironmentFile .env, restart auto, logs /var/log/kinshop*.log), deploy.sh (premier déploiement + --update : .env guidé, bun install, prisma generate/db push, build standalone, copie client Prisma, service systemd, test local), README-DEPLOIEMENT.md (guide FR complet : prérequis, Bun, Caddy, déploiement, PIN admin, domaines vendeurs, mises à jour, dépannage, sauvegardes cron).
+- Base de dev repeuplée (seeds kinshop + V6 + admin : 4 boutiques, 25 produits, 28 commandes) ; diva-mode conservée avec divaboutique.cd vérifié pour la démo.
+- Vérifications : lint 0 erreur, tsc 0 erreur (hors exemples), toutes les API 200, mobile 390 px propre (onglets scrollables, panneau Actif + bannière), dev.log sans erreur serveur.
+- Constat préexistant (hors périmètre) : warning d'hydratation React sur les accordéons Radix de la FAQ de la Landing — PRÉSENT également sans les changements V7 (testé par git stash), non bloquant, IDs aria divergents uniquement.
+
+Stage Summary:
+- La V7 « Domaine personnalisé » est livrée : chaque boutique Premium peut relier son propre domaine (vérification TXT par DNS-over-HTTPS, routage par Host côté serveur, HTTPS automatique côté Caddy à la demande), la plateforme est prête à être déployée sur kinshop.aenews.digital (kit deploy/ complet).
+- Décisions clés : fonctionnalité réservée Premium (levier de monétisation 3 $/mois) ; vérification propriété par TXT obligatoire avant activation (aucune validation par défaut si DNS indisponible) ; routage A record en conseil non bloquant ; admin garde une voie de secours (validation manuelle + déliaison) ; endpoint domain-check minimal pour empêcher l'épuisement Let's Encrypt.
+- Artifacts : prisma/schema.prisma, src/lib/domain.ts, src/app/api/stores/domain/route.ts, src/app/api/domain-check/route.ts, src/app/api/admin/stores/route.ts, src/app/page.tsx, src/components/kinshop/{kinshop-app,dashboard,admin-console}.tsx, deploy/{Caddyfile,kinshop.service,deploy.sh,README-DEPLOIEMENT.md}.
+- Rappel sécurité : PAT GitHub toujours à révoquer ; en production changer ADMIN_PIN (défaut 243243).

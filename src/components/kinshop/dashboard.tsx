@@ -14,6 +14,7 @@ import {
   ExternalLink,
   Eye,
   EyeOff,
+  Globe,
   Images,
   Loader2,
   Megaphone,
@@ -217,6 +218,21 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
       ? Math.round((visibleReviews.reduce((s, r) => s + r.rating, 0) / visibleReviews.length) * 10) / 10
       : 0
 
+  // V7 — Domaine personnalisé (Premium)
+  interface DomainInfo {
+    customDomain: string | null
+    verified: boolean
+    token: string
+    platformDomain: string
+    platformIPv4: string
+    verifyHost: string
+  }
+  const [domInfo, setDomInfo] = useState<DomainInfo | null>(null)
+  const [domLoading, setDomLoading] = useState(false)
+  const [domInput, setDomInput] = useState("")
+  const [domBusy, setDomBusy] = useState<"" | "claim" | "verify" | "remove">("")
+  const [domRemoveOpen, setDomRemoveOpen] = useState(false)
+
   const loadOrders = useCallback(async () => {
     try {
       const res = await fetch(`/api/orders?slug=${encodeURIComponent(slug)}`)
@@ -296,11 +312,105 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
     }
   }, [slug])
 
-  // Chargement paresseux des données V6 quand l'onglet correspondant est ouvert
+  // V7 — Domaine personnalisé
+  const applyDomain = useCallback((d: DomainInfo) => {
+    setDomInfo(d)
+  }, [])
+
+  const loadDomain = useCallback(async () => {
+    setDomLoading(true)
+    try {
+      const res = await fetch(`/api/stores/domain?slug=${encodeURIComponent(slug)}`)
+      const data = await res.json()
+      if (res.ok && data.domain) applyDomain(data.domain)
+    } catch {
+      // silencieux
+    } finally {
+      setDomLoading(false)
+    }
+  }, [slug, applyDomain])
+
+  const claimDomain = async () => {
+    if (!domInput.trim()) return toast.error("Entre ton nom de domaine (ex. maboutique.cd).")
+    setDomBusy("claim")
+    try {
+      const res = await fetch("/api/stores/domain", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slug, action: "claim", domain: domInput.trim() }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Erreur lors de la réservation du domaine.")
+      applyDomain(data.domain)
+      setDomInput("")
+      toast.success("Domaine réservé ! Configure maintenant tes DNS 🌍")
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur inconnue")
+    } finally {
+      setDomBusy("")
+    }
+  }
+
+  const verifyDomain = async () => {
+    setDomBusy("verify")
+    try {
+      const res = await fetch("/api/stores/domain", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slug, action: "verify" }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Vérification impossible pour le moment.")
+      applyDomain(data.domain)
+      toast.success(
+        data.routing?.ok
+          ? "Domaine vérifié et bien relié au serveur KinShop 🎉"
+          : "Domaine vérifié ! Ton serveur n'est pas encore relié (enregistrement A), le HTTPS pourrait tarder.",
+      )
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur inconnue")
+    } finally {
+      setDomBusy("")
+    }
+  }
+
+  const removeDomain = async () => {
+    setDomBusy("remove")
+    try {
+      const res = await fetch("/api/stores/domain", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slug, action: "remove" }),
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.error || "Erreur lors du retrait du domaine.")
+      }
+      toast.success("Domaine retiré. Ta boutique reste disponible sur KinShop.")
+      await loadDomain()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur inconnue")
+    } finally {
+      setDomBusy("")
+      setDomRemoveOpen(false)
+    }
+  }
+
+  const copyField = async (value: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(value)
+      toast.success(`${label} copié`)
+    } catch {
+      toast.error("Copie impossible — sélectionne le texte manuellement.")
+    }
+  }
+
+  // Chargement paresseux des données V6/V7 quand l'onglet correspondant est ouvert
   useEffect(() => {
     if (activeTab === "croissance") loadGrowth()
     if (activeTab === "avis") loadReviews()
-  }, [activeTab, loadGrowth, loadReviews])
+    if (activeTab === "domaine") loadDomain()
+  }, [activeTab, loadGrowth, loadReviews, loadDomain])
 
   const addZone = async () => {
     if (zName.trim().length < 2) return toast.error("Le nom de la zone est requis (2 caractères min).")
@@ -1049,6 +1159,10 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
             <TabsTrigger value="statut" className="px-4">
               <Sparkles className="w-4 h-4 mr-1.5 text-amber-500" />
               Statut
+            </TabsTrigger>
+            <TabsTrigger value="domaine" className="px-4">
+              <Globe className="w-4 h-4 mr-1.5" />
+              Domaine
             </TabsTrigger>
             <TabsTrigger value="reglages" className="px-4">
               <Settings className="w-4 h-4 mr-1.5" />
@@ -1834,6 +1948,206 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
             <StatusStudio store={store} storeLink={storeLink} />
           </TabsContent>
 
+          {/* ─── DOMAINE PERSONNALISÉ (V7 — Premium) ─── */}
+          <TabsContent value="domaine" className="space-y-4">
+            {!store.isPremium ? (
+              <Card className="max-w-2xl">
+                <CardContent className="p-6 text-center space-y-4">
+                  <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto">
+                    <Globe className="w-7 h-7 text-primary" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <h3 className="text-lg font-bold">Ton propre nom de domaine</h3>
+                    <p className="text-sm text-muted-foreground max-w-md mx-auto">
+                      Avec l&apos;offre Premium, relie ton domaine (ex. <span className="font-mono">maboutique.cd</span>) :
+                      ta boutique devient accessible directement sur ton adresse, avec HTTPS automatique. 🔒
+                    </p>
+                  </div>
+                  <Button onClick={() => setPremiumOpen(true)} className="bg-amber-500 hover:bg-amber-600 text-white">
+                    <Crown className="w-4 h-4 mr-1.5" />
+                    Passer Premium pour débloquer
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : domLoading ? (
+              <div className="max-w-2xl space-y-3">
+                <Skeleton className="h-20 w-full" />
+                <Skeleton className="h-40 w-full" />
+              </div>
+            ) : !domInfo?.customDomain ? (
+              <Card className="max-w-2xl">
+                <CardContent className="p-6 space-y-5">
+                  <div className="flex items-start gap-3">
+                    <div className="w-11 h-11 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+                      <Globe className="w-5.5 h-5.5 text-primary" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold">Relie ton nom de domaine</h3>
+                      <p className="text-sm text-muted-foreground">
+                        Ta boutique sera accessible sur <span className="font-medium text-foreground">https://ton-domaine.cd</span> en
+                        plus de ton lien KinShop habituel.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="domain-input">Nom de domaine</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        id="domain-input"
+                        placeholder="maboutique.cd"
+                        value={domInput}
+                        onChange={(e) => setDomInput(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && claimDomain()}
+                        className="font-mono"
+                        maxLength={253}
+                      />
+                      <Button onClick={claimDomain} disabled={domBusy === "claim"}>
+                        {domBusy === "claim" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4 mr-1" />}
+                        Réserver
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Tu dois posséder ce domaine (acheté chez un registrar comme Namecheap, OVH, Cloudflare…). Tu pourras le
+                      retirer à tout moment.
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="max-w-2xl space-y-4">
+                {/* Statut du domaine */}
+                <Card>
+                  <CardContent className="p-6 space-y-4">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <div className="w-11 h-11 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+                        <Globe className="w-5.5 h-5.5 text-primary" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-bold font-mono truncate">{domInfo.customDomain}</p>
+                        {domInfo.verified ? (
+                          <Badge variant="outline" className="mt-1 bg-emerald-50 text-emerald-700 border-emerald-200">
+                            <CheckCircle2 className="w-3 h-3 mr-1" /> Actif
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="mt-1 bg-amber-100 text-amber-800 border-amber-200">
+                            En attente de vérification DNS
+                          </Badge>
+                        )}
+                      </div>
+                      {domInfo.verified && (
+                        <Button variant="outline" size="sm" onClick={() => window.open(`https://${domInfo.customDomain}`, "_blank")}>
+                          <ExternalLink className="w-4 h-4 mr-1" />
+                          Ouvrir
+                        </Button>
+                      )}
+                    </div>
+                    {domInfo.verified && (
+                      <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-3 text-sm text-emerald-800">
+                        🎉 Ta boutique est aussi disponible sur{" "}
+                        <span className="font-semibold font-mono">https://{domInfo.customDomain}</span>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {!domInfo.verified && (
+                  <Card>
+                    <CardContent className="p-6 space-y-5">
+                      <h3 className="font-bold">Configuration DNS chez ton registrar</h3>
+                      <p className="text-sm text-muted-foreground -mt-3">
+                        Dans la gestion DNS de <span className="font-mono">{domInfo.customDomain}</span>, ajoute ces 2
+                        enregistrements :
+                      </p>
+
+                      {/* Étape 1 — TXT propriété */}
+                      <div className="rounded-lg border p-4 space-y-2.5">
+                        <p className="text-sm font-semibold">
+                          Étape 1 — Prouver que le domaine t&apos;appartient <span className="text-rose-600">*</span>
+                        </p>
+                        <div className="grid gap-2 sm:grid-cols-[auto_1fr_auto] sm:items-center text-sm">
+                          <span className="text-muted-foreground">Type</span>
+                          <span className="font-mono">TXT</span>
+                          <span />
+                          <span className="text-muted-foreground">Nom / Host</span>
+                          <span className="font-mono break-all">{domInfo.verifyHost}</span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => copyField(domInfo.verifyHost, "Nom TXT")}
+                            aria-label="Copier le nom TXT"
+                          >
+                            <Copy className="w-4 h-4" />
+                          </Button>
+                          <span className="text-muted-foreground">Valeur</span>
+                          <span className="font-mono break-all">kinshop-verify={domInfo.token}</span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => copyField(`kinshop-verify=${domInfo.token}`, "Valeur TXT")}
+                            aria-label="Copier la valeur TXT"
+                          >
+                            <Copy className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </div>
+
+                      {/* Étape 2 — A / CNAME routage */}
+                      <div className="rounded-lg border p-4 space-y-2.5">
+                        <p className="text-sm font-semibold">Étape 2 — Relier le domaine au serveur KinShop</p>
+                        <div className="grid gap-2 text-sm">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant="outline" className="font-mono">A</Badge>
+                            <span className="text-muted-foreground">si domaine racine :</span>
+                            <span className="font-mono">@ → {domInfo.platformIPv4}</span>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => copyField(domInfo.platformIPv4, "Adresse IP")}
+                              aria-label="Copier l'adresse IP"
+                            >
+                              <Copy className="w-4 h-4" />
+                            </Button>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant="outline" className="font-mono">CNAME</Badge>
+                            <span className="text-muted-foreground">si sous-domaine (www…) :</span>
+                            <span className="font-mono">www → {domInfo.platformDomain}</span>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => copyField(domInfo.platformDomain, "CNAME")}
+                              aria-label="Copier le CNAME"
+                            >
+                              <Copy className="w-4 h-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+
+                      <Button onClick={verifyDomain} disabled={domBusy === "verify"} className="w-full sm:w-auto">
+                        {domBusy === "verify" ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> Vérification DNS…
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle2 className="w-4 h-4 mr-1.5" /> Vérifier maintenant
+                          </>
+                        )}
+                      </Button>
+                    </CardContent>
+                  </Card>
+                )}
+
+                <div className="flex justify-end">
+                  <Button variant="outline" size="sm" onClick={() => setDomRemoveOpen(true)} className="text-rose-600 hover:text-rose-700">
+                    <Trash2 className="w-4 h-4 mr-1.5" /> Retirer ce domaine
+                  </Button>
+                </div>
+              </div>
+            )}
+          </TabsContent>
+
           {/* ─── RÉGLAGES ─── */}
           <TabsContent value="reglages">
             <Card className="max-w-2xl">
@@ -2275,6 +2589,30 @@ export function Dashboard({ slug, onBack, onViewStore }: DashboardProps) {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Confirmation retrait du domaine personnalisé (V7) */}
+      <AlertDialog open={domRemoveOpen} onOpenChange={setDomRemoveOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Retirer « {domInfo?.customDomain} » ?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Ta boutique ne sera plus accessible sur ce domaine. Elle reste disponible sur ton lien KinShop habituel. Tu
+              pourras relier un autre domaine à tout moment.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annuler</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={removeDomain}
+              disabled={domBusy === "remove"}
+              className="bg-destructive text-white hover:bg-destructive/90"
+            >
+              {domBusy === "remove" ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Trash2 className="w-4 h-4 mr-1" />}
+              Retirer
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Confirmation suppression produit */}
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
