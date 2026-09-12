@@ -40,6 +40,7 @@ const STATUS_LABELS: Record<string, string> = {
 
 export function InvoiceVerifyView({ initialNumber, onHome }: { initialNumber?: string; onHome?: () => void }) {
   const [number, setNumber] = useState(initialNumber ?? "")
+  const [checkedNumber, setCheckedNumber] = useState("")
   const [result, setResult] = useState<VerifyResult | null>(null)
   const [notFound, setNotFound] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -52,6 +53,7 @@ export function InvoiceVerifyView({ initialNumber, onHome }: { initialNumber?: s
     setChecked(true)
     setResult(null)
     setNotFound(false)
+    setCheckedNumber(num)
     try {
       const res = await fetch(`/api/invoices/verify?number=${encodeURIComponent(num)}`, { cache: "no-store" })
       if (res.status === 404) {
@@ -140,7 +142,7 @@ export function InvoiceVerifyView({ initialNumber, onHome }: { initialNumber?: s
               <div>
                 <p className="font-bold text-red-900">Facture inconnue de la plateforme</p>
                 <p className="mt-1 text-sm text-red-800">
-                  Le numéro <span className="font-mono font-semibold">{number.trim().toUpperCase()}</span> n&apos;a jamais été émis par
+                  Le numéro <span className="font-mono font-semibold">{checkedNumber}</span> n&apos;a jamais été émis par
                   KinShop. Ne payez pas ce document : contactez le vendeur ou signalez-le.
                 </p>
               </div>
