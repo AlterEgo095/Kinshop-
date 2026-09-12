@@ -3,6 +3,7 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
+import { getConfig, invalidateConfigCache } from "@/lib/config-registry"
 
 export const DEFAULT_ADMIN_PIN = "243243"
 
@@ -57,21 +58,31 @@ export interface PlatformSettings {
   defaultRateFC: number
 }
 
+/**
+ * Paramètres globaux — délègue au registre de configuration dynamique
+ * (config-registry.ts) qui fusionne les valeurs DB avec les défauts validés.
+ */
 export async function getPlatformSettings(): Promise<PlatformSettings> {
-  const rows = await db.platformSetting.findMany()
-  const map = new Map(rows.map((r) => [r.key, r.value]))
-  const rate = Number(map.get(SETTING_KEYS.defaultRateFC))
+  const all = await getConfig()
+  const rate = all["defaultRateFC"] // clé legacy (même stockage que /api/admin/settings)
+  const maintenance = await db.platformSetting.findUnique({ where: { key: SETTING_KEYS.maintenance } })
+  const announcement = await db.platformSetting.findUnique({ where: { key: SETTING_KEYS.announcement } })
   return {
-    maintenance: map.get(SETTING_KEYS.maintenance) === "on",
-    announcement: map.get(SETTING_KEYS.announcement) ?? "",
-    defaultRateFC: Number.isFinite(rate) && rate > 0 ? rate : 2850,
+    maintenance: maintenance?.value === "on",
+    announcement: announcement?.value ?? "",
+    defaultRateFC: typeof rate === "number" && rate > 0 ? rate : 2850,
   }
 }
 
+/**
+ * Écriture bas niveau d'un paramètre (legacy : /api/admin/settings).
+ * Invalide le cache du registre pour que la lecture suivante soit fraîche.
+ */
 export async function setPlatformSetting(key: string, value: string): Promise<void> {
   await db.platformSetting.upsert({
     where: { key },
     update: { value },
     create: { key, value },
   })
+  invalidateConfigCache()
 }

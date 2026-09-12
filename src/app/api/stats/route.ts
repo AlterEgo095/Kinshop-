@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { requireStoreOwner } from "@/lib/auth"
 import { planOf } from "@/lib/plans"
+import { getPlanQuotas } from "@/lib/config-registry"
 import type {
   DailyPoint,
   OrderItem,
@@ -32,8 +33,10 @@ export async function GET(req: NextRequest) {
     if (!guard.ok) return guard.response
     const plan = planOf(guard.store)
 
-    const requestedDays = Math.min(60, Math.max(7, Number(sp.get("days")) || 14))
-    const days = Math.min(requestedDays, plan.statsDays)
+    // Historique dynamique (plan configurable dans la console admin)
+    const quotas = await getPlanQuotas(plan.id)
+    const requestedDays = Math.min(730, Math.max(7, Number(sp.get("days")) || 14))
+    const days = Math.min(requestedDays, quotas.statsDays)
 
     // Série des N derniers jours (aujourd'hui inclus)
     const dayLabels: string[] = []

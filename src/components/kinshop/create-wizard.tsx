@@ -17,14 +17,13 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import {
-  CATEGORIES,
   DEFAULT_RATE_FC,
-  STORE_EMOJIS,
   formatFC,
   slugify,
   usdToFC,
   type StoreData,
 } from "@/lib/kinshop"
+import { configList, type PublicConfig } from "@/lib/config-defaults"
 
 interface DraftProduct {
   name: string
@@ -40,9 +39,11 @@ interface CreateWizardProps {
   platformRate?: number
   /** Utilisateur connecté (V8) — préremplit les infos sans les figer */
   user?: { name: string; whatsapp: string } | null
+  /** V9 — Configuration dynamique (catégories, villes, emojis administrables) */
+  config?: PublicConfig
 }
 
-export function CreateWizard({ onCreated, onCancel, platformRate = DEFAULT_RATE_FC, user = null }: CreateWizardProps) {
+export function CreateWizard({ onCreated, onCancel, platformRate = DEFAULT_RATE_FC, user = null, config = {} }: CreateWizardProps) {
   const [step, setStep] = useState(1)
 
   // Étape 1 : infos boutique (préremplies depuis le compte authentifié)
@@ -62,6 +63,14 @@ export function CreateWizard({ onCreated, onCancel, platformRate = DEFAULT_RATE_
   const [loading, setLoading] = useState(false)
   const [createdStore, setCreatedStore] = useState<StoreData | null>(null)
   const [copied, setCopied] = useState(false)
+
+  // V9 — Catalogue dynamique (console admin → Configuration · Catalogue)
+  const categories = useMemo(() => {
+    const list = configList(config, "catalog.categories")
+    return list.length > 0 ? list : ["Divers"]
+  }, [config])
+  const storeEmojis = useMemo(() => configList(config, "catalog.storeEmojis"), [config])
+  const cities = useMemo(() => configList(config, "catalog.cities"), [config])
 
   const finalSlug = useMemo(() => slugify(slug || name), [slug, name])
 
@@ -203,7 +212,7 @@ export function CreateWizard({ onCreated, onCancel, platformRate = DEFAULT_RATE_
                 <div className="space-y-2">
                   <Label>Choisis ton logo (emoji)</Label>
                   <div className="flex flex-wrap gap-2">
-                    {STORE_EMOJIS.map((e) => (
+                    {storeEmojis.map((e) => (
                       <button
                         key={e}
                         type="button"
@@ -267,7 +276,22 @@ export function CreateWizard({ onCreated, onCancel, platformRate = DEFAULT_RATE_
                 <div className="grid sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="city">Ville</Label>
-                    <Input id="city" value={city} onChange={(e) => setCity(e.target.value)} maxLength={40} />
+                    {cities.length > 0 ? (
+                      <Select value={city} onValueChange={setCity}>
+                        <SelectTrigger id="city" aria-label="Ville">
+                          <SelectValue placeholder="Choisis ta ville" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {cities.map((c) => (
+                            <SelectItem key={c} value={c}>
+                              {c}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <Input id="city" value={city} onChange={(e) => setCity(e.target.value)} maxLength={40} />
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label>Taux de change (FC pour 1 $)</Label>
@@ -352,7 +376,7 @@ export function CreateWizard({ onCreated, onCancel, platformRate = DEFAULT_RATE_
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {CATEGORIES.map((c) => (
+                        {categories.map((c) => (
                           <SelectItem key={c} value={c}>{c}</SelectItem>
                         ))}
                       </SelectContent>

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
-import { requireStoreOwner, quotaExceeded } from "@/lib/auth"
-import { planOf, PLANS } from "@/lib/plans"
+import { forbidden, requireStoreOwner, quotaExceeded } from "@/lib/auth"
+import { planOf } from "@/lib/plans"
+import { getPlanQuotas, isFeatureOn } from "@/lib/config-registry"
 
 // GET /api/delivery-zones?slug=xxx — Zones de livraison (public : la vitrine affiche les frais)
 export async function GET(req: NextRequest) {
@@ -40,13 +41,17 @@ export async function POST(req: NextRequest) {
     if (!guard.ok) return guard.response
     const plan = planOf(guard.store)
 
-    // ── Quota zones de livraison (serveur) ──
+    // ── Feature flag + quota zones de livraison (serveur, paramétrables admin) ──
+    if (!(await isFeatureOn("deliveryZones"))) {
+      return forbidden("Les zones de livraison sont momentanément désactivées sur la plateforme.")
+    }
+    const quotas = await getPlanQuotas(plan.id)
     const count = await db.deliveryZone.count({ where: { storeId: guard.store.id } })
-    if (count >= plan.maxDeliveryZones) {
+    if (count >= quotas.maxDeliveryZones) {
       return quotaExceeded(
         plan.id === "free"
-          ? `Limite du plan Free atteinte (${PLANS.free.maxDeliveryZones} zones). Passe Premium pour desservir davantage de quartiers.`
-          : `Limite de ${plan.maxDeliveryZones} zones atteinte.`,
+          ? `Limite du plan Free atteinte (${quotas.maxDeliveryZones} zones). Passe Premium pour desservir davantage de quartiers.`
+          : `Limite de ${quotas.maxDeliveryZones} zones atteinte.`,
       )
     }
 

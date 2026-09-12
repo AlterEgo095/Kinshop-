@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { randomBytes } from "crypto"
 import { db } from "@/lib/db"
-import { requireStoreOwner } from "@/lib/auth"
+import { requireStoreOwner, forbidden } from "@/lib/auth"
+import { isFeatureOn } from "@/lib/config-registry"
 import {
   normalizeDomain,
   isPlatformDomain,
@@ -52,6 +53,11 @@ export async function POST(req: NextRequest) {
     const guard = await requireStoreOwner(req, { slug })
     if (!guard.ok) return guard.response
     const store = guard.store
+
+    // Feature flag : domaines personnalisés pilotés depuis la console admin
+    if (action === "claim" && !(await isFeatureOn("customDomains"))) {
+      return forbidden("Les domaines personnalisés sont momentanément désactivés sur la plateforme.")
+    }
 
     // Fonctionnalité réservée aux boutiques Premium
     if (!store.isPremium || (store.premiumUntil && new Date(store.premiumUntil).getTime() < Date.now())) {

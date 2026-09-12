@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { guardAdmin, logAdminAction } from "@/lib/admin"
+import { getConfigValue } from "@/lib/config-registry"
 
 // GET /api/admin/stores — Liste complète des boutiques (avec compteurs & CA)
 export async function GET(req: NextRequest) {
@@ -91,7 +92,10 @@ export async function PATCH(req: NextRequest) {
         logDetail = `Boutique ${store.slug} réactivée`
         break
       case "grant-premium": {
-        const days = Math.min(Math.max(Number(body.days) || 30, 1), 365)
+        // Durées bornées par des règles métier paramétrables côté admin
+        const minDays = await getConfigValue<number>("business.premiumMinDays")
+        const maxDays = await getConfigValue<number>("business.premiumGrantMaxDays")
+        const days = Math.min(Math.max(Number(body.days) || 30, minDays), maxDays)
         const now = Date.now()
         const base =
           store.premiumUntil && new Date(store.premiumUntil).getTime() > now

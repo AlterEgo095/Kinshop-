@@ -14,8 +14,7 @@ import {
 } from "@/lib/kinshop"
 import { notifyNewOrder } from "@/lib/notifier"
 import { requireStoreOwner } from "@/lib/auth"
-
-const VALID_PAYMENTS: PaymentMethod[] = ["mpesa", "airtel", "orange", "cash"]
+import { getEnabledPayments, getConfigValue } from "@/lib/config-registry"
 
 // POST /api/orders — Créer une commande (calcul côté serveur) + lien WhatsApp
 export async function POST(req: NextRequest) {
@@ -47,12 +46,14 @@ export async function POST(req: NextRequest) {
     const dbProducts = await db.product.findMany({ where: { storeId: store.id } })
     const map = new Map(dbProducts.map((p) => [p.id, p]))
 
+    // Quantité max par article : règle métier paramétrable côté admin
+    const maxQty = await getConfigValue<number>("business.orderMaxQtyPerItem")
     const items: OrderItem[] = []
     let subtotalRaw = 0
     for (const r of requested) {
       const p = map.get(String(r.productId))
       if (!p) continue
-      const qty = Math.max(1, Math.min(99, Number(r.qty) || 1))
+      const qty = Math.max(1, Math.min(maxQty, Number(r.qty) || 1))
       items.push({ productId: p.id, name: p.name, emoji: p.emoji, priceUSD: p.priceUSD, qty })
       subtotalRaw += p.priceUSD * qty
     }
@@ -106,9 +107,17 @@ export async function POST(req: NextRequest) {
       rate: store.rateFC,
     })
 
-    const paymentMethod: PaymentMethod = VALID_PAYMENTS.includes(body.paymentMethod)
+    // Moyens de paiement actifs (paramétrables côté admin — autorité serveur)
+    const enabledPayments = await getEnabledPayments()
+    if (enabledPayments.length === 0) {
+      return NextResponse.json(
+        { error: "Aucun moyen de paiement n'est disponible pour le moment." },
+        { status: 503 },
+      )
+    }
+    const paymentMethod: PaymentMethod = enabledPayments.includes(body.paymentMethod)
       ? body.paymentMethod
-      : "mpesa"
+      : enabledPayments[0]
 
     const order = await db.order.create({
       data: {

@@ -50,12 +50,15 @@ import {
   type ReviewStats,
   type StoreData,
 } from "@/lib/kinshop"
+import { type PublicConfig } from "@/lib/config-defaults"
 
 interface StoreViewProps {
   slug: string
   onBack: () => void
   /** Taux FC/$ plateforme (polling root) — un changement déclenche un rechargement silencieux */
   platformRate?: number
+  /** V9 — Configuration dynamique (paiements actifs, feature flags) */
+  config?: PublicConfig
 }
 
 interface CartLine {
@@ -76,10 +79,10 @@ interface PaymentFlow {
 }
 
 const PAYMENTS: { id: PaymentMethod; label: string; sub: string; emoji: string }[] = [
-  { id: "mpesa", label: "M-Pesa", sub: "Vodacom", emoji: "🔴" },
-  { id: "airtel", label: "Airtel Money", sub: "Airtel", emoji: "🔴" },
-  { id: "orange", label: "Orange Money", sub: "Orange", emoji: "🟠" },
-  { id: "cash", label: "Espèces", sub: "À la livraison", emoji: "💵" },
+  { id: "mpesa", label: "M-Pesa (Vodacom)", sub: "Mobile money", emoji: "🔴" },
+  { id: "airtel", label: "Airtel Money", sub: "Mobile money", emoji: "🔴" },
+  { id: "orange", label: "Orange Money", sub: "Mobile money", emoji: "🟠" },
+  { id: "cash", label: "Espèces à la livraison", sub: "À la livraison", emoji: "💵" },
 ]
 
 const ZONES_KIN = [
@@ -126,7 +129,7 @@ function ReviewItem({ review }: { review: ReviewData }) {
   )
 }
 
-export function StoreView({ slug, onBack, platformRate }: StoreViewProps) {
+export function StoreView({ slug, onBack, platformRate, config = {} }: StoreViewProps) {
   const [store, setStore] = useState<StoreData | null>(null)
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
@@ -273,6 +276,23 @@ export function StoreView({ slug, onBack, platformRate }: StoreViewProps) {
     return Array.from(new Set(store.products.map((p) => p.category)))
   }, [store])
 
+  // V9 — Paiements actifs + libellés (console admin → Configuration · Paiements).
+  // Le serveur revalide à la commande : ce filtre n'est qu'une adaptation d'UI.
+  const payMethods = useMemo(
+    () =>
+      PAYMENTS.filter((pm) => config[`payment.${pm.id}.enabled`] !== false).map((pm) => {
+        const label = config[`payment.${pm.id}.label`]
+        return typeof label === "string" && label.trim() ? { ...pm, label: label.trim() } : pm
+      }),
+    [config],
+  )
+  const effectivePayment: PaymentMethod =
+    payMethods.find((p) => p.id === cPayment)?.id ?? payMethods[0]?.id ?? "cash"
+  // V9 — Feature flags (avis / coupons / zones) : masqués en UI, refusés côté serveur
+  const reviewsEnabled = config["feature.reviews"] !== false
+  const couponsEnabled = config["feature.coupons"] !== false
+  const zonesEnabled = config["feature.deliveryZones"] !== false
+
   const filtered = useMemo(() => {
     if (!store?.products) return []
     return store.products.filter((p) => {
@@ -286,7 +306,7 @@ export function StoreView({ slug, onBack, platformRate }: StoreViewProps) {
   const totalUSD = cart.reduce((s, l) => s + l.product.priceUSD * l.qty, 0)
 
   // V6 — Prévisualisation des totaux (sous-total − remise + livraison). Le serveur fait foi.
-  const activeZones = useMemo(() => zones.filter((z) => z.active), [zones])
+  const activeZones = useMemo(() => (zonesEnabled ? zones.filter((z) => z.active) : []), [zones, zonesEnabled])
   const selectedZone = activeZones.find((z) => z.id === cZoneId) || null
   const discountUSD = coupon ? computeCouponDiscount(coupon, totalUSD) : 0
   const previewTotals = computeOrderTotals({
@@ -415,7 +435,7 @@ export function StoreView({ slug, onBack, platformRate }: StoreViewProps) {
           zone: selectedZone ? selectedZone.name : cZone,
           zoneId: selectedZone?.id || "",
           couponCode: coupon && discountUSD > 0 ? coupon.code : "",
-          paymentMethod: cPayment,
+          paymentMethod: effectivePayment,
           note: cNote,
           items: cart.map((l) => ({ productId: l.product.id, qty: l.qty })),
         }),
@@ -431,12 +451,12 @@ export function StoreView({ slug, onBack, platformRate }: StoreViewProps) {
       setCart([])
       setCartOpen(false)
       setCoupon(null)
-      if (cPayment !== "cash") {
+      if (effectivePayment !== "cash") {
         // V2 — Passer à l'écran de paiement mobile money (push USSD)
         setPayerPhone(cPhone)
         setPayment({
           ...done,
-          operatorLabel: PAYMENTS.find((p) => p.id === cPayment)?.label || "mobile money",
+          operatorLabel: payMethods.find((p) => p.id === effectivePayment)?.label || "mobile money",
           status: "idle",
           mode: null,
         })
@@ -764,7 +784,8 @@ export function StoreView({ slug, onBack, platformRate }: StoreViewProps) {
           </Card>
         </section>
 
-        {/* V6 — Avis clients */}
+        {/* V6 — Avis clients (section masquée si fonctionnalité désactivée par l'admin) */}
+        {reviewsEnabled && (
         <section className="mb-6" aria-label="Avis clients">
           <Card className="bg-white/70">
             <CardContent className="p-5">
@@ -805,6 +826,7 @@ export function StoreView({ slug, onBack, platformRate }: StoreViewProps) {
             </CardContent>
           </Card>
         </section>
+        )}
       </main>
 
       {/* Barre panier collante */}
@@ -1334,7 +1356,7 @@ export function StoreView({ slug, onBack, platformRate }: StoreViewProps) {
                 </DialogDescription>
               </DialogHeader>
               <div className="rounded-xl bg-amber-50 border border-amber-200 p-4 text-sm text-left">
-                <p className="font-semibold mb-1">💳 Paiement — {PAYMENTS.find((p) => p.id === cPayment)?.label}</p>
+                <p className="font-semibold mb-1">💳 Paiement — {payMethods.find((p) => p.id === effectivePayment)?.label}</p>
                 <p className="text-muted-foreground">
                   {cPayment === "cash"
                     ? "Tu paieras en espèces à la livraison."
@@ -1421,13 +1443,13 @@ export function StoreView({ slug, onBack, platformRate }: StoreViewProps) {
                 <div className="space-y-1.5">
                   <Label>Mode de paiement</Label>
                   <div className="grid grid-cols-2 gap-2">
-                    {PAYMENTS.map((pm) => (
+                    {payMethods.map((pm) => (
                       <button
                         key={pm.id}
                         type="button"
                         onClick={() => setCPayment(pm.id)}
                         className={`rounded-xl border-2 p-3 text-left transition-all ${
-                          cPayment === pm.id ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"
+                          effectivePayment === pm.id ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"
                         }`}
                       >
                         <p className="font-semibold text-sm">{pm.emoji} {pm.label}</p>
@@ -1437,7 +1459,8 @@ export function StoreView({ slug, onBack, platformRate }: StoreViewProps) {
                   </div>
                 </div>
 
-                {/* V6 — Code promo */}
+                {/* V6 — Code promo (masqué si fonctionnalité désactivée par l'admin) */}
+                {couponsEnabled && (
                 <div className="space-y-1.5">
                   <Label htmlFor="cCoupon">Code promo</Label>
                   {coupon ? (
@@ -1477,6 +1500,7 @@ export function StoreView({ slug, onBack, platformRate }: StoreViewProps) {
                     </div>
                   )}
                 </div>
+                )}
 
                 <div className="space-y-1.5">
                   <Label htmlFor="cNote">Note (optionnel)</Label>

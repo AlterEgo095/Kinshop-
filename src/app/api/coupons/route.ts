@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import type { CouponType } from "@/lib/kinshop"
-import { requireStoreOwner, quotaExceeded } from "@/lib/auth"
-import { planOf, PLANS } from "@/lib/plans"
+import { requireStoreOwner, forbidden, quotaExceeded } from "@/lib/auth"
+import { planOf } from "@/lib/plans"
+import { getPlanQuotas, isFeatureOn } from "@/lib/config-registry"
 
 const CODE_RE = /^[A-Z0-9]{3,16}$/
 
@@ -49,13 +50,17 @@ export async function POST(req: NextRequest) {
     if (!guard.ok) return guard.response
     const plan = planOf(guard.store)
 
-    // ── Quota codes promo (serveur) ──
+    // ── Feature flag + quota codes promo (serveur, paramétrables admin) ──
+    if (!(await isFeatureOn("coupons"))) {
+      return forbidden("Les codes promo sont momentanément désactivés sur la plateforme.")
+    }
+    const quotas = await getPlanQuotas(plan.id)
     const existingCount = await db.coupon.count({ where: { storeId: guard.store.id } })
-    if (existingCount >= plan.maxCoupons) {
+    if (existingCount >= quotas.maxCoupons) {
       return quotaExceeded(
         plan.id === "free"
-          ? `Limite du plan Free atteinte (${PLANS.free.maxCoupons} codes promo). Passe Premium pour en créer davantage.`
-          : `Limite de ${plan.maxCoupons} codes promo atteinte.`,
+          ? `Limite du plan Free atteinte (${quotas.maxCoupons} codes promo). Passe Premium pour en créer davantage.`
+          : `Limite de ${quotas.maxCoupons} codes promo atteinte.`,
       )
     }
 

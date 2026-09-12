@@ -11,10 +11,16 @@ import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { isChariowLive, initiateCheckout, buildPremiumRedirectUrl, getChariowConfig } from "@/lib/chariow"
 import { normalizePhone } from "@/lib/kinshop"
-import { requireStoreOwner, unauthorized } from "@/lib/auth"
+import { requireStoreOwner, forbidden, unauthorized } from "@/lib/auth"
+import { isFeatureOn } from "@/lib/config-registry"
 
 export async function POST(req: NextRequest) {
   try {
+    // Feature flag : programme Premium piloté depuis la console admin
+    if (!(await isFeatureOn("premiumProgram"))) {
+      return forbidden("Le programme Premium est momentanément désactivé sur la plateforme.")
+    }
+
     const body = await req.json()
     const slug = String(body.slug || "").trim()
     const email = String(body.email || "").trim().toLowerCase()

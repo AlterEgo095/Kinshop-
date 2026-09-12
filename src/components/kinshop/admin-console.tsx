@@ -87,6 +87,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { AdminConfigTab } from "@/components/kinshop/admin-config-tab"
 import {
   buildWhatsAppLink,
   couponLabel,
@@ -110,6 +111,7 @@ type AdminTab =
   | "products"
   | "reviews"
   | "growth"
+  | "config"
   | "settings"
 
 interface SeriesPoint {
@@ -1237,6 +1239,9 @@ export function AdminConsole({
             </TabsTrigger>
             <TabsTrigger value="growth" className="gap-1.5 shrink-0">
               <Tag className="w-4 h-4" /> Croissance
+            </TabsTrigger>
+            <TabsTrigger value="config" className="gap-1.5 shrink-0">
+              <Wrench className="w-4 h-4" /> Configuration
             </TabsTrigger>
             <TabsTrigger value="settings" className="gap-1.5 shrink-0">
               <Settings2 className="w-4 h-4" /> Paramètres
@@ -2372,6 +2377,11 @@ export function AdminConsole({
                 )}
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* ════ CONFIGURATION (V9 — centre de contrôle dynamique) ════ */}
+          <TabsContent value="config" className="space-y-6">
+            <AdminConfigTab />
           </TabsContent>
 
           {/* ════ PARAMÈTRES ════ */}

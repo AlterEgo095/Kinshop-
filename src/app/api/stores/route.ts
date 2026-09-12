@@ -3,7 +3,7 @@ import { db } from "@/lib/db"
 import { normalizeImages, slugify } from "@/lib/kinshop"
 import { getPlatformSettings } from "@/lib/admin"
 import { getUserFromRequest, requireStoreOwner, unauthorized } from "@/lib/auth"
-import { MAX_STORES_PER_USER } from "@/lib/plans"
+import { getConfigValue } from "@/lib/config-registry"
 import { rateLimit } from "@/lib/ratelimit"
 
 // POST /api/stores — Créer une boutique (V8 : compte authentifié OBLIGATOIRE)
@@ -25,7 +25,9 @@ export async function POST(req: NextRequest) {
     }
 
     const ownedCount = await db.store.count({ where: { ownerId: user.id } })
-    if (ownedCount >= MAX_STORES_PER_USER) {
+    // Règle métier dynamique : boutiques max par compte (paramétrable côté admin)
+    const maxStores = await getConfigValue<number>("business.maxStoresPerUser")
+    if (ownedCount >= Math.max(1, maxStores)) {
       return NextResponse.json(
         { error: "Tu possèdes déjà ta boutique — un compte KinShop correspond à une boutique." },
         { status: 409 },

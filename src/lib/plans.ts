@@ -1,7 +1,15 @@
-// KinShop — Matrice des plans & quotas (V8)
+// KinShop — Types & référence des plans (client + serveur)
 // ⚠️ Fichier partagé client + serveur : AUCUN secret ici.
-// Les quotas sont appliqués CÔTÉ SERVEUR (routes API) — le frontend ne fait
-// qu'afficher les limites ; il ne constitue jamais une mesure de sécurité.
+//
+// DEPUIS LA V9 (centre de contrôle dynamique) : les QUOTAS et le prix Premium
+// sont des paramètres administrables depuis la console ADMIN (clés
+// plan.free.* / plan.premium.* dans la table PlatformSetting). Le serveur lit
+// les valeurs réelles via getPlanQuotas() (src/lib/config-registry.ts) à
+// CHAQUE vérification — ce fichier ne fournit plus que :
+//   - les TYPES partagés (PlanId, PlanQuota),
+//   - les DÉFAUTS de référence pour le frontend (affichage, fallback hors ligne),
+//   - la détection du plan effectif d'une boutique (isPremiumActive / planOf).
+// Modifier un quota = console ADMIN, sans intervention dans le code.
 
 export type PlanId = "free" | "premium"
 
@@ -29,6 +37,7 @@ export interface PlanQuota {
   prioritySupport: boolean
 }
 
+/** Défauts de référence (fallback frontend). La source de vérité serveur = config dynamique. */
 export const PLANS: Record<PlanId, PlanQuota> = {
   free: {
     id: "free",
@@ -59,9 +68,6 @@ export const PLANS: Record<PlanId, PlanQuota> = {
     prioritySupport: true,
   },
 }
-
-/** Un utilisateur = une boutique (règle produit V8, appliquée côté serveur). */
-export const MAX_STORES_PER_USER = 1
 
 /** Indique si l'abonnement Premium de la boutique est réellement actif (date incluse). */
 export function isPremiumActive(store: {

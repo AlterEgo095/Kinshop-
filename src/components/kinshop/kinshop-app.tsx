@@ -14,6 +14,7 @@ import { TrackOrderView } from "@/components/kinshop/track-order"
 import { PwaLayer } from "@/components/kinshop/pwa"
 import { PLATFORM_DOMAIN } from "@/lib/domain"
 import { DEFAULT_RATE_FC, type StoreData } from "@/lib/kinshop"
+import { CONFIG_DEFAULTS, configBool, configNum, configStr, type PublicConfig } from "@/lib/config-defaults"
 import { Button } from "@/components/ui/button"
 import { Loader2 } from "lucide-react"
 
@@ -53,12 +54,15 @@ interface PlatformStatus {
   announcement: string
   /** Taux FC pour 1 $ défini par l'admin — synchronisé en temps réel sur toute l'app */
   defaultRateFC: number
+  /** V9 — Configuration dynamique (feature flags, plans, catalogue, paiements, contenus) */
+  config: PublicConfig
 }
 
 const PLATFORM_STATUS_DEFAULT: PlatformStatus = {
   maintenance: false,
   announcement: "",
   defaultRateFC: DEFAULT_RATE_FC,
+  config: { ...CONFIG_DEFAULTS },
 }
 
 type HashTarget =
@@ -174,16 +178,20 @@ export function KinShopApp({ initialSlug }: { initialSlug?: string }) {
         window.history.pushState(null, "", target)
       }
     } else if (
-      window.location.hash.startsWith("#/boutique/") ||
+      // Nettoyage du hash APRÈS hydratation uniquement : sinon ce replaceState
+      // court-circuite le parseHash du montage et casse les deep-links (#/admin,
+      // #/boutique/…) sur un chargement à froid (course d'effets corrigée V9).
+      authReady &&
+      (window.location.hash.startsWith("#/boutique/") ||
       window.location.hash.startsWith("#/premium/") ||
       window.location.hash.startsWith("#/admin") ||
       window.location.hash.startsWith("#/facture/") ||
       window.location.hash.startsWith("#/suivi/") ||
-      window.location.hash.startsWith("#/cv")
+      window.location.hash.startsWith("#/cv"))
     ) {
       window.history.replaceState(null, "", window.location.pathname)
     }
-  }, [view, isCustomDomain, initialSlug])
+  }, [view, isCustomDomain, initialSlug, authReady])
 
   // Bouton retour navigateur pendant qu'on est dans une boutique
   useEffect(() => {
@@ -274,20 +282,21 @@ export function KinShopApp({ initialSlug }: { initialSlug?: string }) {
     [authReady, authUser],
   )
 
-  // Préchargement silencieux de la démo pour éviter l'écran vide si non seedée
+  // Préchargement silencieux de la démo (slug administrable — Configuration · Contenus)
   const openDemo = useCallback(async () => {
+    const demoSlug = configStr(platform.config, "content.demoSlug") || "maman-ngo"
     try {
-      const res = await fetch(`/api/stores?slug=maman-ngo`)
+      const res = await fetch(`/api/stores?slug=${encodeURIComponent(demoSlug)}`)
       const data = await res.json()
       if (res.ok && (data as { store: StoreData }).store) {
-        openStore("maman-ngo")
+        openStore(demoSlug)
       } else {
         setView({ name: "create" })
       }
     } catch {
       setView({ name: "create" })
     }
-  }, [openStore])
+  }, [openStore, platform.config])
 
   // Mode maintenance global : surveillance /api/platform (polling 30 s + refetch au focus)
   // → l'overlay couvre TOUTES les vues publiques ; seule la console admin (#/admin) reste
@@ -295,15 +304,17 @@ export function KinShopApp({ initialSlug }: { initialSlug?: string }) {
   const refreshPlatform = useCallback(async () => {
     try {
       const res = await fetch("/api/platform", { cache: "no-store" })
-      const data = (await res.json()) as Partial<PlatformStatus> | null
+      const data = (await res.json()) as (Partial<PlatformStatus> & { config?: PublicConfig }) | null
       if (data && typeof data.maintenance === "boolean") {
         const rate = Number(data.defaultRateFC)
-        setPlatform({
-          maintenance: data.maintenance,
+        setPlatform((prev) => ({
+          maintenance: data.maintenance ?? false,
           announcement: data.announcement || "",
           defaultRateFC:
             Number.isFinite(rate) && rate > 0 ? rate : PLATFORM_STATUS_DEFAULT.defaultRateFC,
-        })
+          // Fusion conservatrice : les clés non exposées publiquement gardent leur défaut
+          config: { ...prev.config, ...(data.config ?? {}) },
+        }))
       }
     } catch {
       // réseau indisponible : on conserve l'état courant, on ne bloque jamais l'affichage
@@ -363,9 +374,9 @@ export function KinShopApp({ initialSlug }: { initialSlug?: string }) {
         )
       } else if (userStore) {
         // Un compte = une boutique : si elle existe déjà, on va au dashboard
-        content = <Dashboard slug={userStore.slug} onBack={goHome} onViewStore={openStore} platformRate={platform.defaultRateFC} onLogout={handleLogout} />
+        content = <Dashboard slug={userStore.slug} onBack={goHome} onViewStore={openStore} platformRate={platform.defaultRateFC} onLogout={handleLogout} config={platform.config} />
       } else {
-        content = <CreateWizard onCreated={handleCreated} onCancel={goHome} platformRate={platform.defaultRateFC} user={authUser} />
+        content = <CreateWizard onCreated={handleCreated} onCancel={goHome} platformRate={platform.defaultRateFC} user={authUser} config={platform.config} />
       }
       break
     case "dashboard":
@@ -382,11 +393,11 @@ export function KinShopApp({ initialSlug }: { initialSlug?: string }) {
           />
         )
       } else {
-        content = <Dashboard slug={view.slug} onBack={goHome} onViewStore={openStore} platformRate={platform.defaultRateFC} onLogout={handleLogout} />
+        content = <Dashboard slug={view.slug} onBack={goHome} onViewStore={openStore} platformRate={platform.defaultRateFC} onLogout={handleLogout} config={platform.config} />
       }
       break
     case "store":
-      content = <StoreView slug={view.slug} onBack={goHome} platformRate={platform.defaultRateFC} />
+      content = <StoreView slug={view.slug} onBack={goHome} platformRate={platform.defaultRateFC} config={platform.config} />
       break
     case "premium-success":
       content = <PremiumSuccess ownerSlug={userStore?.slug ?? null} onGoDashboard={openDashboard} onGoHome={goHome} />
@@ -395,7 +406,12 @@ export function KinShopApp({ initialSlug }: { initialSlug?: string }) {
       content = <AdminConsole onBack={goHome} onOpenStore={openStore} />
       break
     case "cv":
-      content = <CvExpress onHome={goHome} onCreateStore={() => setView({ name: "create" })} />
+      // Feature flag : CV Express désactivable depuis la console admin (Configuration · Fonctionnalités)
+      content = configBool(platform.config, "feature.cvExpress") ? (
+        <CvExpress onHome={goHome} onCreateStore={() => setView({ name: "create" })} />
+      ) : (
+        <FeatureDisabledView onBack={goHome} />
+      )
       break
     case "invoice-public":
       content = <InvoicePublicView number={view.number} onHome={goHome} />
@@ -415,22 +431,24 @@ export function KinShopApp({ initialSlug }: { initialSlug?: string }) {
           onOpenDashboard={openDashboard}
           onCvExpress={() => setView({ name: "cv" })}
           announcement={platform.announcement}
+          config={platform.config}
         />
       )
   }
 
   // Mode maintenance plateforme : écran plein pour toutes les vues publiques.
-  // La console admin (#/admin, accès sans trace côté utilisateur) reste disponible
-  // pour permettre à l'administrateur de désactiver le mode.
+  // Titre et message administrables (Configuration · Contenus). La console admin
+  // (#/admin, accès sans trace côté utilisateur) reste disponible pour désactiver le mode.
   if (platform.maintenance && view.name !== "admin") {
     return (
       <div className="min-h-screen flex items-center justify-center px-4 bg-gradient-to-b from-emerald-50/50 to-background">
         <div className="text-center space-y-4 max-w-md">
           <p className="text-6xl" aria-hidden="true">🛠️</p>
-          <h1 className="text-2xl font-bold">KinShop en maintenance</h1>
+          <h1 className="text-2xl font-bold">
+            {configStr(platform.config, "content.maintenanceTitle") || "KinShop en maintenance"}
+          </h1>
           <p className="text-muted-foreground">
-            La plateforme est momentanément en maintenance. Reviens dans quelques minutes —
-            toutes les boutiques seront de retour très vite&nbsp;!
+            {configStr(platform.config, "content.maintenanceMessage")}
           </p>
           <Button onClick={refreshPlatform} variant="outline">
             Réessayer
@@ -456,6 +474,24 @@ function AuthGateLoader() {
       <div className="flex flex-col items-center gap-3 text-muted-foreground">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
         <p className="text-sm">Vérification de ta session…</p>
+      </div>
+    </div>
+  )
+}
+
+/** Écran « fonctionnalité désactivée » (feature flag administrable). */
+function FeatureDisabledView({ onBack }: { onBack: () => void }) {
+  return (
+    <div className="min-h-screen flex items-center justify-center px-4 bg-background">
+      <div className="text-center space-y-4 max-w-md">
+        <p className="text-5xl" aria-hidden="true">🔒</p>
+        <h1 className="text-xl font-bold">Fonctionnalité momentanément indisponible</h1>
+        <p className="text-muted-foreground">
+          Cet outil est désactivé pour le moment. Reviens plus tard&nbsp;!
+        </p>
+        <Button onClick={onBack} variant="outline">
+          Retour à l&apos;accueil
+        </Button>
       </div>
     </div>
   )

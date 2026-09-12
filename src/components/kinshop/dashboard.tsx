@@ -76,7 +76,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import {
-  CATEGORIES,
   PAYMENT_LABELS,
   STORE_EMOJIS,
   buildWhatsAppLink,
@@ -108,6 +107,7 @@ import {
   type InvoiceItem,
   type InvoiceStatus,
 } from "@/lib/kinfacture"
+import { configList, type PublicConfig } from "@/lib/config-defaults"
 import {
   InvoiceCanvas,
   downloadInvoicePNG,
@@ -123,6 +123,8 @@ interface DashboardProps {
   platformRate?: number
   /** V8 — Déconnexion (session serveur) */
   onLogout?: () => void
+  /** V9 — Configuration dynamique (catégories administrables, feature flags) */
+  config?: PublicConfig
 }
 
 const STATUS_CONFIG: Record<OrderStatus, { label: string; variant: "default" | "secondary" | "destructive" | "outline"; className: string }> = {
@@ -133,7 +135,13 @@ const STATUS_CONFIG: Record<OrderStatus, { label: string; variant: "default" | "
   cancelled: { label: "Annulée", variant: "destructive", className: "" },
 }
 
-export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout }: DashboardProps) {
+export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, config = {} }: DashboardProps) {
+  // V9 — Catégories dynamiques (console admin → Configuration · Catalogue)
+  const categories = useMemo(() => {
+    const list = configList(config, "catalog.categories")
+    return list.length > 0 ? list : ["Divers"]
+  }, [config])
+
   const [store, setStore] = useState<StoreData | null>(null)
   const [products, setProducts] = useState<ProductData[]>([])
   const [orders, setOrders] = useState<OrderData[]>([])
@@ -2279,7 +2287,7 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout }:
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {CATEGORIES.map((c) => (
+                    {categories.map((c) => (
                       <SelectItem key={c} value={c}>{c}</SelectItem>
                     ))}
                   </SelectContent>
@@ -2338,7 +2346,7 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout }:
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {CATEGORIES.map((c) => (
+                  {categories.map((c) => (
                     <SelectItem key={c} value={c}>{c}</SelectItem>
                   ))}
                 </SelectContent>

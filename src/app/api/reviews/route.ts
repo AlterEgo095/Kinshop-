@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
-import { requireStoreOwner } from "@/lib/auth"
+import { forbidden, requireStoreOwner } from "@/lib/auth"
 import { clientIp, rateLimit } from "@/lib/ratelimit"
+import { isFeatureOn } from "@/lib/config-registry"
 
 // GET /api/reviews?slug=xxx — Avis publics d'une boutique + statistiques (moyenne, distribution)
 export async function GET(req: NextRequest) {
@@ -67,6 +68,11 @@ export async function POST(req: NextRequest) {
 
     const store = await db.store.findUnique({ where: { slug } })
     if (!store) return NextResponse.json({ error: "Boutique introuvable." }, { status: 404 })
+
+    // Feature flag : avis désactivés côté admin → écriture refusée (403 serveur)
+    if (!(await isFeatureOn("reviews"))) {
+      return forbidden("Les avis clients sont momentanément désactivés sur la plateforme.")
+    }
 
     // Anti-spam avis : 30 avis/heure/IP
     if (!rateLimit(`review:${clientIp(req)}`, 30, 60 * 60 * 1000)) {

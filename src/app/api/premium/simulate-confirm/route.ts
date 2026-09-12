@@ -7,7 +7,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { isChariowLive } from "@/lib/chariow"
-import { requireStoreOwner } from "@/lib/auth"
+import { requireStoreOwner, forbidden } from "@/lib/auth"
+import { isFeatureOn } from "@/lib/config-registry"
 
 const PREMIUM_DAYS = 30
 
@@ -18,6 +19,11 @@ export async function POST(req: NextRequest) {
         { error: "Simulation désactivée : le paiement réel Chariow est actif." },
         { status: 403 },
       )
+    }
+
+    // Feature flag : programme Premium piloté depuis la console admin
+    if (!(await isFeatureOn("premiumProgram"))) {
+      return forbidden("Le programme Premium est momentanément désactivé sur la plateforme.")
     }
 
     const body = await req.json()

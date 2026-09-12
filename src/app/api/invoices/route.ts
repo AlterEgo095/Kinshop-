@@ -6,8 +6,9 @@ import {
   sumInvoiceItems,
   type InvoiceItem,
 } from "@/lib/kinfacture"
-import { requireStoreOwner, quotaExceeded } from "@/lib/auth"
-import { planOf, PLANS } from "@/lib/plans"
+import { requireStoreOwner, forbidden, quotaExceeded } from "@/lib/auth"
+import { planOf } from "@/lib/plans"
+import { getPlanQuotas, isFeatureOn } from "@/lib/config-registry"
 
 const VALID_STATUSES = ["draft", "sent", "paid"]
 
@@ -26,18 +27,24 @@ export async function POST(req: NextRequest) {
     const { store } = guard
     const plan = planOf(store)
 
+    // ── Feature flag KinFacture (serveur, paramétrable admin) ──
+    if (!(await isFeatureOn("invoices"))) {
+      return forbidden("KinFacture est momentanément désactivé sur la plateforme.")
+    }
+
     // ── Quota mensuel KinFacture (mois civile UTC) ──
+    const quotas = await getPlanQuotas(plan.id)
     const monthStart = new Date()
     monthStart.setUTCDate(1)
     monthStart.setUTCHours(0, 0, 0, 0)
     const monthCount = await db.invoice.count({
       where: { storeId: store.id, createdAt: { gte: monthStart } },
     })
-    if (monthCount >= plan.maxInvoicesPerMonth) {
+    if (monthCount >= quotas.maxInvoicesPerMonth) {
       return quotaExceeded(
         plan.id === "free"
-          ? `Quota du plan Free atteint (${PLANS.free.maxInvoicesPerMonth} factures ce mois). Passe Premium pour émettre davantage de factures.`
-          : `Quota de ${plan.maxInvoicesPerMonth} factures par mois atteint.`,
+          ? `Quota du plan Free atteint (${quotas.maxInvoicesPerMonth} factures ce mois). Passe Premium pour émettre davantage de factures.`
+          : `Quota de ${quotas.maxInvoicesPerMonth} factures par mois atteint.`,
       )
     }
 

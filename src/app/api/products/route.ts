@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { normalizeImages } from "@/lib/kinshop"
 import { requireStoreOwner, quotaExceeded } from "@/lib/auth"
-import { planOf, PLANS } from "@/lib/plans"
+import { planOf } from "@/lib/plans"
+import { getPlanQuotas } from "@/lib/config-registry"
 
 // POST /api/products — Ajouter un produit (V8 : propriétaire + quota du plan)
 export async function POST(req: NextRequest) {
@@ -23,24 +24,26 @@ export async function POST(req: NextRequest) {
     if (!guard.ok) return guard.response
     const { store } = guard
     const plan = planOf(store)
+    // Quotas dynamiques (paramétrables dans la console admin → appliqués côté serveur)
+    const quotas = await getPlanQuotas(plan.id)
 
     // ── Quota produits (appliqué côté serveur, jamais côté client seul) ──
     const count = await db.product.count({ where: { storeId: store.id } })
-    if (count >= plan.maxProducts) {
+    if (count >= quotas.maxProducts) {
       return quotaExceeded(
         plan.id === "free"
-          ? `Limite du plan Free atteinte (${PLANS.free.maxProducts} produits). Passe Premium pour en ajouter davantage.`
-          : `Limite de ${plan.maxProducts} produits atteinte.`,
+          ? `Limite du plan Free atteinte (${quotas.maxProducts} produits). Passe Premium pour en ajouter davantage.`
+          : `Limite de ${quotas.maxProducts} produits atteinte.`,
       )
     }
 
-    // V4 — galerie multi-photos (5 max, 1re = principale). Rétrocompat imageUrl.
+    // V4 — galerie multi-photos (limite plan dynamique, 1re = principale). Rétrocompat imageUrl.
     const images = normalizeImages(body.images, typeof body.imageUrl === "string" ? body.imageUrl : undefined)
-    if (images.length > plan.maxProductImages) {
+    if (images.length > quotas.maxProductImages) {
       return quotaExceeded(
         plan.id === "free"
-          ? `Le plan Free autorise ${PLANS.free.maxProductImages} seule photo par produit — passe Premium pour les galeries (jusqu'à ${PLANS.premium.maxProductImages} photos).`
-          : `Maximum ${plan.maxProductImages} photos par produit.`,
+          ? `Le plan Free autorise ${quotas.maxProductImages} seule photo par produit — passe Premium pour les galeries.`
+          : `Maximum ${quotas.maxProductImages} photos par produit.`,
       )
     }
 
@@ -83,6 +86,7 @@ export async function PATCH(req: NextRequest) {
     const guard = await requireStoreOwner(req, { id: product.storeId })
     if (!guard.ok) return guard.response
     const plan = planOf(guard.store)
+    const quotas = await getPlanQuotas(plan.id)
 
     const data: Record<string, string | number> = {}
 
@@ -95,11 +99,11 @@ export async function PATCH(req: NextRequest) {
     // V4 — galerie : remplacée intégralement si le champ images est fourni (quota plan)
     if (Array.isArray(body.images) || typeof body.images === "string") {
       const images = normalizeImages(body.images)
-      if (images.length > plan.maxProductImages) {
+      if (images.length > quotas.maxProductImages) {
         return quotaExceeded(
           plan.id === "free"
-            ? `Le plan Free autorise ${PLANS.free.maxProductImages} seule photo par produit — passe Premium pour les galeries.`
-            : `Maximum ${plan.maxProductImages} photos par produit.`,
+            ? `Le plan Free autorise ${quotas.maxProductImages} seule photo par produit — passe Premium pour les galeries.`
+            : `Maximum ${quotas.maxProductImages} photos par produit.`,
         )
       }
       data.images = JSON.stringify(images)

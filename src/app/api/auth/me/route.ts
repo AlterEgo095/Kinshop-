@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getUserFromRequest } from "@/lib/auth"
 import { planOf } from "@/lib/plans"
+import { getPlanQuotas } from "@/lib/config-registry"
 
 export async function GET(req: NextRequest) {
   try {
@@ -28,14 +29,18 @@ export async function GET(req: NextRequest) {
       },
     })
 
+    // Quota dynamique (plans paramétrables dans la console admin — le serveur fait foi)
+    const planId = store ? planOf(store).id : "free"
+    const quota = await getPlanQuotas(planId)
+
     return NextResponse.json(
       {
         user,
         store: store
           ? {
               ...store,
-              plan: planOf(store).id,
-              quota: planOf(store),
+              plan: planId,
+              quota,
             }
           : null,
       },

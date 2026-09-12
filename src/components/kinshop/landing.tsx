@@ -30,6 +30,8 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion"
+import { configNum, configStr, type PublicConfig } from "@/lib/config-defaults"
+import { buildWhatsAppLink, formatPhoneDisplay } from "@/lib/kinshop"
 
 interface LandingProps {
   /** Utilisateur connecté (session serveur) — null = visiteur */
@@ -44,11 +46,25 @@ interface LandingProps {
   onCvExpress: () => void
   /** Bandeau d'annonce globale défini dans la console d'administration (vide = aucun) */
   announcement?: string
+  /** V9 — Configuration dynamique (feature flags, contenus, paiements, prix premium) */
+  config?: PublicConfig
 }
 
-const DEMO_SLUG = "maman-ngo"
+export function Landing({ user, userStore, onCreateStore, onAuth, onLogout, onDemo, onOpenDashboard, onCvExpress, announcement = "", config = {} }: LandingProps) {
+  // V9 — Feature flags & contenus administrables (fallbacks = valeurs par défaut)
+  const cvEnabled = config["feature.cvExpress"] !== false
+  const invoicesEnabled = config["feature.invoices"] !== false
+  const demoEnabled = config["feature.demoStore"] !== false
+  const footerTagline = configStr(config, "content.footerTagline")
+  const supportWhatsapp = configStr(config, "general.supportWhatsapp")
+  const premiumPrice = configNum(config, "plan.premium.priceUSD") || 3
+  const activePayments = [
+    { id: "mpesa", label: configStr(config, "payment.mpesa.label") || "M-Pesa", cls: "border-2 border-red-500/60 text-red-600 font-semibold" },
+    { id: "airtel", label: configStr(config, "payment.airtel.label") || "Airtel Money", cls: "border-2 border-red-600/60 text-red-700 font-semibold" },
+    { id: "orange", label: configStr(config, "payment.orange.label") || "Orange Money", cls: "border-2 border-orange-500/60 text-orange-600 font-semibold" },
+    { id: "cash", label: configStr(config, "payment.cash.label") || "💵 Espèces", cls: "font-semibold" },
+  ].filter((p) => config[`payment.${p.id}.enabled`] !== false)
 
-export function Landing({ user, userStore, onCreateStore, onAuth, onLogout, onDemo, onOpenDashboard, onCvExpress, announcement = "" }: LandingProps) {
   return (
     <div className="min-h-screen flex flex-col bg-background">
       {/* Bandeau d'annonce globale (console admin) */}
@@ -151,10 +167,12 @@ export function Landing({ user, userStore, onCreateStore, onAuth, onLogout, onDe
                   <Store className="w-5 h-5 mr-2" />
                   {userStore ? "Gérer ma boutique" : "Créer ma boutique gratuitement"}
                 </Button>
-                <Button size="lg" variant="outline" onClick={onDemo} className="text-base h-12">
-                  <Eye className="w-5 h-5 mr-2" />
-                  Voir une boutique démo
-                </Button>
+                {demoEnabled && (
+                  <Button size="lg" variant="outline" onClick={onDemo} className="text-base h-12">
+                    <Eye className="w-5 h-5 mr-2" />
+                    Voir une boutique démo
+                  </Button>
+                )}
               </motion.div>
               <motion.div
                 initial={{ opacity: 0 }}
@@ -215,18 +233,11 @@ export function Landing({ user, userStore, onCreateStore, onAuth, onLogout, onDe
         <section className="border-y bg-muted/40">
           <div className="max-w-6xl mx-auto px-4 py-6 flex flex-wrap items-center justify-center gap-3">
             <span className="text-sm text-muted-foreground mr-2">Encaisse avec :</span>
-            <Badge variant="outline" className="px-4 py-1.5 text-sm border-2 border-red-500/60 text-red-600 font-semibold">
-              M-Pesa
-            </Badge>
-            <Badge variant="outline" className="px-4 py-1.5 text-sm border-2 border-red-600/60 text-red-700 font-semibold">
-              Airtel Money
-            </Badge>
-            <Badge variant="outline" className="px-4 py-1.5 text-sm border-2 border-orange-500/60 text-orange-600 font-semibold">
-              Orange Money
-            </Badge>
-            <Badge variant="outline" className="px-4 py-1.5 text-sm font-semibold">
-              💵 Espèces
-            </Badge>
+            {activePayments.map((p) => (
+              <Badge key={p.id} variant="outline" className={`px-4 py-1.5 text-sm ${p.cls}`}>
+                {p.label}
+              </Badge>
+            ))}
           </div>
         </section>
 
@@ -375,7 +386,8 @@ export function Landing({ user, userStore, onCreateStore, onAuth, onLogout, onDe
           </div>
         </section>
 
-        {/* Démo */}
+        {/* Démo (masquée si fonctionnalité désactivée par l'admin) */}
+        {demoEnabled && (
         <section className="max-w-6xl mx-auto px-4 pb-16 md:pb-24">
           <motion.div
             initial={{ opacity: 0, y: 16 }}
@@ -401,6 +413,7 @@ export function Landing({ user, userStore, onCreateStore, onAuth, onLogout, onDe
             </Card>
           </motion.div>
         </section>
+        )}
 
         {/* Outils gratuits (V3) */}
         <section className="max-w-6xl mx-auto px-4 pb-16 md:pb-24">
@@ -416,6 +429,7 @@ export function Landing({ user, userStore, onCreateStore, onAuth, onLogout, onDe
             </p>
           </div>
           <div className="grid md:grid-cols-2 gap-5">
+            {cvEnabled && (
             <motion.div
               initial={{ opacity: 0, y: 16 }}
               whileInView={{ opacity: 1, y: 0 }}
@@ -447,6 +461,8 @@ export function Landing({ user, userStore, onCreateStore, onAuth, onLogout, onDe
                 </CardContent>
               </Card>
             </motion.div>
+            )}
+            {invoicesEnabled && (
             <motion.div
               initial={{ opacity: 0, y: 16 }}
               whileInView={{ opacity: 1, y: 0 }}
@@ -483,6 +499,7 @@ export function Landing({ user, userStore, onCreateStore, onAuth, onLogout, onDe
                 </CardContent>
               </Card>
             </motion.div>
+            )}
           </div>
         </section>
 
@@ -530,7 +547,7 @@ export function Landing({ user, userStore, onCreateStore, onAuth, onLogout, onDe
             {[
               {
                 q: "C'est vraiment gratuit ?",
-                a: "Oui ! Créer ta boutique, ajouter tes produits et recevoir tes commandes est 100% gratuit. Plus tard, une option premium apportera un nom de domaine perso et des statistiques avancées — mais l'essentiel restera toujours gratuit.",
+                a: `Oui ! Créer ta boutique, ajouter tes produits et recevoir tes commandes est 100% gratuit. Une option Premium à ${premiumPrice} $/mois apporte un nom de domaine perso, des statistiques avancées et des quotas élargis — mais l'essentiel reste toujours gratuit.`,
               },
               {
                 q: "Mes clients ont-ils besoin d'une application ?",
@@ -581,9 +598,19 @@ export function Landing({ user, userStore, onCreateStore, onAuth, onLogout, onDe
             <span className="font-bold">Kin<span className="text-primary">Shop</span></span>
           </div>
           <p className="text-sm text-muted-foreground text-center">
-            Fait avec ❤️ à Kinshasa pour les entrepreneurs de la RDC
+            {footerTagline || "Fait avec ❤️ à Kinshasa pour les entrepreneurs de la RDC"}
           </p>
           <div className="flex flex-col items-center sm:items-end gap-1">
+            {supportWhatsapp && (
+              <a
+                href={buildWhatsAppLink(supportWhatsapp, "Bonjour KinShop, j'ai besoin d'aide.")}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm font-medium text-primary hover:underline"
+              >
+                💬 Support WhatsApp : {formatPhoneDisplay(supportWhatsapp)}
+              </a>
+            )}
             <p className="text-xs text-muted-foreground">© 2025 KinShop · M-Pesa, Airtel Money et Orange Money sont des marques de leurs propriétaires</p>
           </div>
         </div>
