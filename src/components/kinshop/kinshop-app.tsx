@@ -13,6 +13,7 @@ import { TrackOrderView } from "@/components/kinshop/track-order"
 import { PwaLayer } from "@/components/kinshop/pwa"
 import { PLATFORM_DOMAIN } from "@/lib/domain"
 import type { StoreData } from "@/lib/kinshop"
+import { Button } from "@/components/ui/button"
 
 type View =
   | { name: "landing" }
@@ -27,6 +28,13 @@ type View =
 
 const OWNER_KEY = "kinshop_owner_slug"
 const DEMO_SLUG = "maman-ngo"
+
+interface PlatformStatus {
+  maintenance: boolean
+  announcement: string
+}
+
+const PLATFORM_STATUS_DEFAULT: PlatformStatus = { maintenance: false, announcement: "" }
 
 type HashTarget =
   | { type: "store"; slug: string }
@@ -61,6 +69,8 @@ export function KinShopApp({ initialSlug }: { initialSlug?: string }) {
   )
   const [ownerSlug, setOwnerSlug] = useState<string | null>(null)
   const [hydrated, setHydrated] = useState(false)
+  // Maintenance globale + annonce (paramètres console admin) — surveillés en continu
+  const [platform, setPlatform] = useState<PlatformStatus>(PLATFORM_STATUS_DEFAULT)
 
   // Hydratation : session vendeur + deep-link boutique (#/boutique/slug)
   // (async IIFE : évite un setState synchrone dans l'effet → rendus en cascade)
@@ -196,6 +206,40 @@ export function KinShopApp({ initialSlug }: { initialSlug?: string }) {
     }
   }, [openStore])
 
+  // Mode maintenance global : surveillance /api/platform (polling 30 s + refetch au focus)
+  // → l'overlay couvre TOUTES les vues publiques ; seule la console admin (#/admin) reste
+  //   accessible afin de pouvoir désactiver le mode.
+  const refreshPlatform = useCallback(async () => {
+    try {
+      const res = await fetch("/api/platform", { cache: "no-store" })
+      const data = (await res.json()) as Partial<PlatformStatus> | null
+      if (data && typeof data.maintenance === "boolean") {
+        setPlatform({ maintenance: data.maintenance, announcement: data.announcement || "" })
+      }
+    } catch {
+      // réseau indisponible : on conserve l'état courant, on ne bloque jamais l'affichage
+    }
+  }, [])
+
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval> | undefined
+    const onFocus = () => {
+      refreshPlatform()
+    }
+    // Différé d'un tick : la première vérification part juste après le montage
+    // (le state est mis à jour de façon asynchrone → compatible react-hooks)
+    const initial = setTimeout(refreshPlatform, 0)
+    interval = setInterval(refreshPlatform, 30_000)
+    window.addEventListener("focus", onFocus)
+    document.addEventListener("visibilitychange", onFocus)
+    return () => {
+      clearTimeout(initial)
+      if (interval) clearInterval(interval)
+      window.removeEventListener("focus", onFocus)
+      document.removeEventListener("visibilitychange", onFocus)
+    }
+  }, [refreshPlatform])
+
   let content: React.ReactNode
   switch (view.name) {
     case "create":
@@ -229,10 +273,31 @@ export function KinShopApp({ initialSlug }: { initialSlug?: string }) {
           onCreateStore={() => setView({ name: "create" })}
           onDemo={openDemo}
           onOpenDashboard={openDashboard}
-          onAdmin={() => setView({ name: "admin" })}
           onCvExpress={() => setView({ name: "cv" })}
+          announcement={platform.announcement}
         />
       )
+  }
+
+  // Mode maintenance plateforme : écran plein pour toutes les vues publiques.
+  // La console admin (#/admin, accès sans trace côté utilisateur) reste disponible
+  // pour permettre à l'administrateur de désactiver le mode.
+  if (platform.maintenance && view.name !== "admin") {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4 bg-gradient-to-b from-emerald-50/50 to-background">
+        <div className="text-center space-y-4 max-w-md">
+          <p className="text-6xl" aria-hidden="true">🛠️</p>
+          <h1 className="text-2xl font-bold">KinShop en maintenance</h1>
+          <p className="text-muted-foreground">
+            La plateforme est momentanément en maintenance. Reviens dans quelques minutes —
+            toutes les boutiques seront de retour très vite&nbsp;!
+          </p>
+          <Button onClick={refreshPlatform} variant="outline">
+            Réessayer
+          </Button>
+        </div>
+      </div>
+    )
   }
 
   // PWA V4 : couche installation + hors-ligne (masquée dans la boutique publique pour ne pas gêner le panier)

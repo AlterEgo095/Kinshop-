@@ -316,3 +316,21 @@ Stage Summary:
 - Modèle serveur respecté : /opt/KINSHOP + PM2 + nginx + certbot (le kit systemd/Caddy initial reste en archive pour déploiement alternatif).
 - Domaines vendeurs personnalisés : procédure nginx par domaine (add-vendor-domain.sh) documentée — le catch-all 444 bloque les SNI inconnus, chaque domaine vendeur a besoin d'un vhost (contrainte nginx vs Caddy on_demand_tls de la V7).
 - Ne pas committer : identifiants SSH/PAT dans les scripts (helper supprimé).
+
+---
+Task ID: 12
+Agent: Z.ai Code (main)
+Task: Correction du mode maintenance (rien ne se passe à l'activation) + suppression de toute indication d'accès admin côté utilisateur.
+
+Work Log:
+- Diagnostic : /api/platform renvoyait bien maintenance:true (activé en prod), mais seul StoreView (vitrine) consommait le flag — la Landing et toutes les autres vues l'ignoraient → « rien ne se passe ».
+- Fix kinshop-app.tsx : état platform (maintenance+annonce) surveillé en continu (fetch initial différé, polling 30 s, refetch focus/visibilitychange, cache:no-store) ; overlay maintenance plein écran pour TOUTES les vues publiques ; console admin (#/admin) exemptée pour permettre la désactivation ; bouton « Réessayer ».
+- Fix landing.tsx : bandeau d'annonce globale (prop announcement) désormais affiché aussi sur l'accueil ; SUPPRESSION du bouton « Espace admin » du footer (seule trace visible d'accès admin côté user) — prop onAdmin retirée, route #/admin conservée (accès propriétaire sans trace, PIN serveur).
+- Lint : corrigé react-hooks/set-state-in-effect (fetch initial via setTimeout 0).
+- Tests navigateur (agent-browser) : maintenance ON → écran 🛠️ sur accueil (desktop + mobile 390px, capture) ; #/admin accessible pendant maintenance, switch cohérent, OFF → accueil restauré ; 0 occurrence « admin » dans le DOM ; bandeau d'annonce visible sur landing.
+- Déploiement prod via /opt/KINSHOP/deploy/update-vps.sh (git reset + build + pm2 reload) après commit/push.
+
+Stage Summary:
+- Mode maintenance opérationnel plateforme entière (accueil, création, dashboards, vitrines, CV, factures, suivi) — la console admin reste la seule porte ouverte pour le désactiver.
+- Aucune indication d'accès admin côté utilisateur (footer nettoyé) ; accès propriétaire = URL directe #/admin + PIN serveur.
+- Annonces admin désormais visibles sur l'accueil en plus des vitrines.

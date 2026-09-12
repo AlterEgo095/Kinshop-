@@ -34,15 +34,22 @@ interface LandingProps {
   onCreateStore: () => void
   onDemo: () => void
   onOpenDashboard: (slug: string) => void
-  onAdmin: () => void
   onCvExpress: () => void
+  /** Bandeau d'annonce globale défini dans la console d'administration (vide = aucun) */
+  announcement?: string
 }
 
 const DEMO_SLUG = "maman-ngo"
 
-export function Landing({ ownerSlug, onCreateStore, onDemo, onOpenDashboard, onAdmin, onCvExpress }: LandingProps) {
+export function Landing({ ownerSlug, onCreateStore, onDemo, onOpenDashboard, onCvExpress, announcement = "" }: LandingProps) {
   return (
     <div className="min-h-screen flex flex-col bg-background">
+      {/* Bandeau d'annonce globale (console admin) */}
+      {announcement && (
+        <div className="bg-amber-100 border-b border-amber-200 text-amber-900 text-sm px-4 py-2.5 text-center font-medium">
+          📣 {announcement}
+        </div>
+      )}
       {/* Header sticky */}
       <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur-md">
         <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
@@ -549,13 +556,6 @@ export function Landing({ ownerSlug, onCreateStore, onDemo, onOpenDashboard, onA
           </p>
           <div className="flex flex-col items-center sm:items-end gap-1">
             <p className="text-xs text-muted-foreground">© 2025 KinShop · M-Pesa, Airtel Money et Orange Money sont des marques de leurs propriétaires</p>
-            <button
-              onClick={onAdmin}
-              className="text-[11px] text-muted-foreground/50 hover:text-foreground transition-colors underline underline-offset-2"
-              aria-label="Accéder à la console d'administration"
-            >
-              Espace admin
-            </button>
           </div>
         </div>
       </footer>
