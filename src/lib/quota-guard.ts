@@ -15,7 +15,7 @@
 import { db } from "@/lib/db"
 import type { Prisma } from "@prisma/client"
 
-type TxClient = Prisma.TransactionClient
+export type TxClient = Prisma.TransactionClient
 
 const locks = new Map<string, Promise<unknown>>()
 

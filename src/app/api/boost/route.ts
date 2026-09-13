@@ -4,6 +4,8 @@ import { requireStoreOwner, quotaExceeded } from "@/lib/auth"
 import { isFeatureOn, getConfigValue } from "@/lib/config-registry"
 import { logAudit } from "@/lib/audit"
 import { isPaymentSimulationEnabled } from "@/lib/simulation"
+import { expireDueCampaigns } from "@/lib/boost"
+import { withStoreQuotaWrite, type TxClient } from "@/lib/quota-guard"
 
 // Boost V10 — PROMOTION PAYANTE, indépendante de l'abonnement Premium :
 // Premium = fonctionnalités ; Boost = visibilité (accueil « Sponsorisé »).
@@ -32,24 +34,43 @@ export async function POST(req: NextRequest) {
 
     // Prix : DÉCIDÉ PAR LE SERVEUR (config admin) — jamais par le frontend
     const costUSD = await getConfigValue<number>(days === 7 ? "boost.price7USD" : "boost.price30USD")
-
-    // Max de campagnes actives simultanées (anti-saturation de l'accueil)
     const maxActive = await getConfigValue<number>("boost.maxActivePerStore")
-    const activeCount = await db.boostCampaign.count({
-      where: { storeId: store.id, status: { in: ["pending_payment", "active"] } },
+
+    // P6 F6-1 — purge paresseuse hors tx (UX : la campagne expirée du owner
+    // cesse immédiatement de polluer le compteur) puis vérification FAIS FOI
+    // DANS la transaction (P6 F6-2 — anti-TOCTOU, même pattern que F-07) :
+    // expiration + count + create dans la même unité atomique par boutique.
+    const result = await withStoreQuotaWrite(store.id, async (tx: TxClient) => {
+      const now = new Date()
+      const stalePendingBefore = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+      await tx.boostCampaign.updateMany({
+        where: { storeId: store.id, status: "active", endAt: { lt: now } },
+        data: { status: "ended" },
+      })
+      await tx.boostCampaign.updateMany({
+        where: { storeId: store.id, status: "pending_payment", createdAt: { lt: stalePendingBefore } },
+        data: { status: "expired" },
+      })
+
+      const activeCount = await tx.boostCampaign.count({
+        where: { storeId: store.id, status: { in: ["pending_payment", "active"] } },
+      })
+      if (activeCount >= maxActive) return { overQuota: true as const, campaign: null, activeCount }
+
+      const startAt = new Date()
+      const endAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000)
+      const campaign = await tx.boostCampaign.create({
+        data: { storeId: store.id, placement: "home_featured", startAt, endAt, costUSD, status: "pending_payment" },
+      })
+      return { overQuota: false as const, campaign }
     })
-    if (activeCount >= maxActive) {
+
+    if (result.overQuota || !result.campaign) {
       return quotaExceeded(
-        `Tu as déjà ${activeCount} campagne(s) en cours (max ${maxActive}). Attends la fin de la campagne en cours.`,
+        `Tu as déjà ${result.activeCount} campagne(s) en cours (max ${maxActive}). Attends la fin de la campagne en cours.`,
       )
     }
-
-    const startAt = new Date()
-    const endAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000)
-
-    const campaign = await db.boostCampaign.create({
-      data: { storeId: store.id, placement: "home_featured", startAt, endAt, costUSD, status: "pending_payment" },
-    })
+    const campaign = result.campaign
 
     await logAudit({
       action: "boost.created",
@@ -122,7 +143,8 @@ export async function PATCH(req: NextRequest) {
   }
 }
 
-// GET : campagnes de la boutique
+// GET : campagnes de la boutique (F6-1 — purge paresseuse avant lecture :
+// le owner voit des statuts réels, jamais une campagne périmée « active »)
 export async function GET(req: NextRequest) {
   try {
     const slug = req.nextUrl.searchParams.get("slug")
@@ -130,6 +152,8 @@ export async function GET(req: NextRequest) {
 
     const guard = await requireStoreOwner(req, { slug })
     if (!guard.ok) return guard.response
+
+    await expireDueCampaigns(guard.store.id)
 
     const campaigns = await db.boostCampaign.findMany({
       where: { storeId: guard.store.id },

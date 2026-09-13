@@ -59,7 +59,7 @@ export async function GET(req: NextRequest) {
     const planSince = new Date(since)
     planSince.setUTCDate(planSince.getUTCDate() - (quotas.statsDays - days))
 
-    const [visitRows, orderRows, viewsAgg, allOrders] = await Promise.all([
+    const [visitRows, orderRows, viewsAgg, uniquesAgg, allOrders] = await Promise.all([
       db.storeVisit.findMany({
         where: { storeId: guard.store.id, day: { gte: since } },
         orderBy: { day: "asc" },
@@ -83,6 +83,12 @@ export async function GET(req: NextRequest) {
         where: { storeId: guard.store.id, day: { gte: planSince } },
         _sum: { count: true },
       }),
+      // P7 F7-3 — visiteurs UNIQUES (V10 G18 enfin visibles) clampés à l'horizon
+      // du plan (même règle F-06 que les vues)
+      db.storeVisit.aggregate({
+        where: { storeId: guard.store.id, day: { gte: planSince } },
+        _sum: { unique: true },
+      }),
       // F-06 — total de commandes clampé à l'horizon du plan (plus de compteur all-time)
       db.order.findMany({
         where: { storeId: guard.store.id, createdAt: { gte: planSince } },
@@ -91,6 +97,11 @@ export async function GET(req: NextRequest) {
     ])
 
     const viewsSeries = fillSeries(visitRows, dayLabels)
+    // P7 F7-3 — série des visiteurs uniques (dédup hash ip|ua|jour)
+    const uniquesSeries = fillSeries(
+      visitRows.map((r) => ({ day: r.day, count: r.unique })),
+      dayLabels,
+    )
     const ordersSeries: DailyPoint[] = dayLabels.map((day) => ({ day, count: 0 }))
     for (const o of orderRows) {
       const k = dayKey(o.createdAt)
@@ -167,6 +178,12 @@ export async function GET(req: NextRequest) {
         total: viewsAgg._sum.count ?? 0,
         period: viewsPeriod,
         series: viewsSeries,
+        // P7 F7-3 — visiteurs uniques (horizon du plan)
+        uniques: {
+          total: uniquesAgg._sum.unique ?? 0,
+          period: uniquesSeries.reduce((s, p) => s + p.count, 0),
+          series: uniquesSeries,
+        },
       },
       orders: { total: allOrders.length, period: ordersPeriod, series: ordersSeries },
       conversionPct,

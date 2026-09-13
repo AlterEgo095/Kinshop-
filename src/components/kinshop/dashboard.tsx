@@ -38,6 +38,7 @@ import {
   Trophy,
   Truck,
   Users,
+  UserCheck,
   XCircle,
   PackageCheck,
   LogOut,
@@ -1740,7 +1741,7 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
             ) : (
               <>
                 {/* KPIs */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
                   <Card>
                     <CardContent className="p-4 space-y-1">
                       <p className="text-xs text-muted-foreground flex items-center gap-1">
@@ -1756,6 +1757,15 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
                         {stats.trendPct >= 0 ? "+" : ""}
                         {stats.trendPct}% vs 7 j précédents
                       </p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="p-4 space-y-1">
+                      <p className="text-xs text-muted-foreground flex items-center gap-1">
+                        <UserCheck className="w-3.5 h-3.5" /> Visiteurs uniques (14 j)
+                      </p>
+                      <p className="text-2xl font-extrabold">{stats.views.uniques?.period ?? 0}</p>
+                      <p className="text-xs text-muted-foreground">{stats.views.uniques?.total ?? 0} sur l&apos;horizon du plan</p>
                     </CardContent>
                   </Card>
                   <Card>

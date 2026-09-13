@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
+import { createHash } from "crypto"
+import { expireDueCampaigns } from "@/lib/boost"
 
 // GET /api/home — Données de la page d'accueil MARKETPLACE (V10, public)
 //
 // HONNÊTETÉ DE L'AFFICHAGE :
-// - sponsorisé   = campagnes Boost PAYÉES et actives uniquement — clairement étiquetées ;
-// - populaire    = classement RÉEL (visites cumulées 30 j) — jamais fabriqué ;
+// - sponsorisé   = campagnes Boost PAYÉES et actives uniquement — clairement étiquetées
+//                  (P6 : boutique avec ≥1 produit, rotation équitable par jour) ;
+// - populaire    = classement RÉEL par VISITEURS UNIQUES dédupliqués (30 j) —
+//                  jamais fabriqué (P7 F7-6 : plus de classement par pages vues brutes,
+//                  falsifiable par refresh) ;
 // - nouveautés   = boutiques les plus récentes.
 //
 // P2 — NAVIGATION PAR CATÉGORIES GLOBALES :
@@ -17,6 +22,11 @@ import { db } from "@/lib/db"
 export async function GET(req: NextRequest) {
   try {
     const now = new Date()
+
+    // P6 F6-1 — purge paresseuse : les campagnes expirées quittent l'accueil
+    // ET leur statut DB devient honnête (ended) pour le compteur maxActive,
+    // le GET owner et la console admin.
+    await expireDueCampaigns()
 
     // ── P2 — résolution du filtre catégorie (optionnel) ──
     const catSlug = req.nextUrl.searchParams.get("cat")
@@ -50,25 +60,43 @@ export async function GET(req: NextRequest) {
     })
 
     // 1) Boutiques sponsorisées (campagnes actives payées)
+    // P6 F6-5 — prise ÉLARGIE (24) AVANT filtres : sous ?cat=, prendre 6
+    // globalement puis filtrer laissait la section vide à tort.
+    // P6 F6-6 — la boutique sponsorisée doit avoir ≥ 1 produit (jamais de
+    // publicité payante vers une boutique vide).
     const activeBoosts = await db.boostCampaign.findMany({
       where: { status: "active", startAt: { lte: now }, endAt: { gte: now } },
       orderBy: { startAt: "asc" },
-      take: 6,
-      include: { store: { select: { id: true, slug: true, name: true, logoEmoji: true, city: true, description: true, status: true, isPremium: true, premiumUntil: true, verificationStatus: true } } },
+      take: 24,
+      include: {
+        store: {
+          select: {
+            id: true, slug: true, name: true, logoEmoji: true, city: true, description: true,
+            status: true, isPremium: true, premiumUntil: true, verificationStatus: true,
+            _count: { select: { products: true } },
+          },
+        },
+      },
     })
-    const sponsored = activeBoosts
-      .map((b) => ({ campaignId: b.id, store: b.store }))
-      .filter((x) => x.store.status === "active")
-      .filter((x) => !selectedCategory || catStoreIds.includes(x.store.id))
+    const eligible = activeBoosts
+      .filter((b) => b.store.status === "active" && b.store._count.products > 0)
+      .filter((b) => !selectedCategory || catStoreIds.includes(b.store.id))
+    // P6 F6-5 — rotation ÉQUITAble déterministe par jour (les mêmes 6 anciennes
+    // n'écrasent plus indéfiniment les suivantes quand il y a plus de 6 campagnes)
+    const dayIndex = Math.floor(now.getTime() / 86_400_000)
+    const rotated = eligible.length > 0 ? eligible.map((_, i) => eligible[(i + dayIndex) % eligible.length]) : []
+    const sponsored = rotated.slice(0, 6).map((b) => ({ campaignId: b.id, store: b.store }))
 
-    // 2) Boutiques populaires : visites cumulées sur 30 jours (données réelles)
+    // 2) Boutiques populaires : VISITEURS UNIQUES dédupliqués sur 30 jours
+    //    (P7 F7-6 — le classement par pages vues brutes était falsifiable par
+    //    refresh ; le compteur unique est dédupliqué hash(ip|ua|jour))
     const since = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
     const visits = await db.storeVisit.groupBy({
       by: ["storeId"],
       where: { day: { gte: since } },
-      _sum: { count: true },
+      _sum: { count: true, unique: true },
     })
-    const visitMap = new Map(visits.map((v) => [v.storeId, v._sum.count ?? 0]))
+    const visitMap = new Map(visits.map((v) => [v.storeId, v._sum.unique ?? 0]))
     const stores = await db.store.findMany({
       where: {
         status: "active",
@@ -78,9 +106,9 @@ export async function GET(req: NextRequest) {
       select: { id: true, slug: true, name: true, logoEmoji: true, city: true, description: true, isPremium: true, premiumUntil: true, verificationStatus: true, createdAt: true },
     })
     const popular = stores
-      .map((s) => ({ ...s, visits30d: visitMap.get(s.id) ?? 0 }))
-      .sort((a, b) => b.visits30d - a.visits30d)
-      .filter((s) => s.visits30d > 0)
+      .map((s) => ({ ...s, visitors30d: visitMap.get(s.id) ?? 0 }))
+      .sort((a, b) => b.visitors30d - a.visitors30d)
+      .filter((s) => s.visitors30d > 0)
       .slice(0, 8)
 
     // 3) Nouveautés : dernières boutiques actives
@@ -108,11 +136,35 @@ export async function GET(req: NextRequest) {
         store: { name: p.store.name, slug: p.store.slug },
       }))
 
-    // Incrément d'impressions des campagnes affichées (mesure honnête, non bloquante)
+    // Incrément d'impressions des campagnes AFFICHÉES (mesure honnête, non bloquante)
+    // P6 F6-3 — dédup journalier par visiteur×campagne (hash ip|ua|jour) :
+    // un refresh ne gonfle plus les impressions. Best effort, jamais bloquant.
     if (sponsored.length > 0) {
-      db.boostCampaign
-        .updateMany({ where: { id: { in: sponsored.map((s) => s.campaignId) } }, data: { impressions: { increment: 1 } } })
-        .catch(() => {})
+      void (async () => {
+        try {
+          const ip = (req.headers.get("x-forwarded-for") || "").split(",")[0].trim() || "local"
+          const ua = (req.headers.get("user-agent") || "").slice(0, 120)
+          const day = new Date()
+          day.setUTCHours(0, 0, 0, 0)
+          const dayStr = day.toISOString().slice(0, 10)
+          for (const s of sponsored) {
+            const key = createHash("sha256")
+              .update(`boostimp|${s.campaignId}|${ip}|${ua}|${dayStr}`)
+              .digest("hex")
+            try {
+              await db.visitDedup.create({ data: { key } })
+              await db.boostCampaign.update({
+                where: { id: s.campaignId },
+                data: { impressions: { increment: 1 } },
+              })
+            } catch {
+              // déjà comptée aujourd'hui pour ce visiteur
+            }
+          }
+        } catch {
+          // mesure honnête, jamais bloquante
+        }
+      })()
     }
 
     return NextResponse.json(
@@ -134,7 +186,7 @@ export async function GET(req: NextRequest) {
           logoEmoji: s.logoEmoji,
           city: s.city,
           description: s.description,
-          visits30d: s.visits30d,
+          visitors30d: s.visitors30d,
           isPremium: s.isPremium,
           verified: s.verificationStatus === "verified",
         })),

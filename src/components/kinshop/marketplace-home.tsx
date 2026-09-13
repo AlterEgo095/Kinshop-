@@ -21,7 +21,7 @@ interface HomeCategory {
 
 interface HomeData {
   sponsored: { campaignId: string; slug: string; name: string; logoEmoji: string; city: string; description: string; verified?: boolean }[]
-  popular: { slug: string; name: string; logoEmoji: string; city: string; description: string; visits30d: number; verified?: boolean }[]
+  popular: { slug: string; name: string; logoEmoji: string; city: string; description: string; visitors30d: number; verified?: boolean }[]
   newest: { slug: string; name: string; logoEmoji: string; city: string; description: string }[]
   products: { id: string; name: string; emoji: string; imageUrl: string; priceUSD: number; category: string; store: { name: string; slug: string } }[]
   // P2 — navigation par catégories globales (barre d'icônes + filtre actif)
@@ -192,7 +192,7 @@ export function MarketplaceHome({ onOpenStore }: { onOpenStore: (slug: string) =
         </div>
       )}
 
-      {/* Populaires — classement réel (visites 30 j) */}
+      {/* Populaires — classement réel (visiteurs uniques 30 j, dédupliqués) */}
       {data && data.popular.length > 0 && (
         <div className="space-y-3">
           <p className="font-extrabold text-lg flex items-center gap-2">
@@ -208,7 +208,7 @@ export function MarketplaceHome({ onOpenStore }: { onOpenStore: (slug: string) =
                 city={s.city}
                 description={s.description}
                 verified={s.verified}
-                badge={<span className="text-[11px] text-muted-foreground">{s.visits30d} visites</span>}
+                badge={<span className="text-[11px] text-muted-foreground">{s.visitors30d} visiteurs</span>}
                 onOpen={() => onOpenStore(s.slug)}
               />
             ))}

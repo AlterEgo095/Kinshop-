@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { guardAdmin, logAdminAction } from "@/lib/admin"
+import { expireDueCampaigns } from "@/lib/boost"
 
 // GET /api/admin/boost — Toutes les campagnes de promotion (Super Admin)
 export async function GET(req: NextRequest) {
   const denied = guardAdmin(req)
   if (denied) return denied
   try {
+    // P6 F6-1 — purge paresseuse globale : l'admin voit des statuts réels
+    // (actives réellement en cours, pendings réellement en attente).
+    await expireDueCampaigns()
     const campaigns = await db.boostCampaign.findMany({
       orderBy: { createdAt: "desc" },
       take: 200,
@@ -21,6 +25,14 @@ export async function GET(req: NextRequest) {
 
 // PATCH /api/admin/boost — Valider / rejeter / clore une campagne
 // Body : { id, action: "activate" | "reject" | "end" }
+//
+// P6 F6-4 — graphe de transitions appliqué côté serveur :
+//   activate : pending_payment | active | ended  (re-lance une expirée :
+//              décision admin délibérée, re-datée maintenant → +30 j)
+//              — JAMAIS depuis rejected (un rejet est définitif ; la
+//                boutique peut recréer une campagne à la place)
+//   reject   : pending_payment uniquement (jamais une campagne payée/active)
+//   end      : pending_payment | active uniquement
 export async function PATCH(req: NextRequest) {
   const denied = guardAdmin(req)
   if (denied) return denied
@@ -34,6 +46,20 @@ export async function PATCH(req: NextRequest) {
 
     const campaign = await db.boostCampaign.findUnique({ where: { id }, include: { store: true } })
     if (!campaign) return NextResponse.json({ error: "Campagne introuvable." }, { status: 404 })
+
+    const allowedFrom: Record<string, string[]> = {
+      activate: ["pending_payment", "active", "ended"],
+      reject: ["pending_payment"],
+      end: ["pending_payment", "active"],
+    }
+    if (!allowedFrom[action].includes(campaign.status)) {
+      return NextResponse.json(
+        {
+          error: `Transition impossible : une campagne « ${campaign.status} » ne peut pas passer à « ${action} ».`,
+        },
+        { status: 400 },
+      )
+    }
 
     const now = new Date()
     const data: { status?: string; startAt?: Date; endAt?: Date } = {}
@@ -53,7 +79,7 @@ export async function PATCH(req: NextRequest) {
     await logAdminAction(
       `boost.${action}`,
       `boost:${id}`,
-      `Campagne ${campaign.store.name} → ${updated.status} (impressions ${updated.impressions}, clics ${updated.clicks})`,
+      `Campagne ${campaign.store.name} (${campaign.status}) → ${updated.status} (impressions ${updated.impressions}, clics ${updated.clicks})`,
     )
 
     return NextResponse.json({ campaign: updated })

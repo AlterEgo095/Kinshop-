@@ -138,7 +138,13 @@ export interface TopProductStat {
 }
 
 export interface VendorStats {
-  views: { total: number; period: number; series: DailyPoint[] }
+  views: {
+    total: number
+    period: number
+    series: DailyPoint[]
+    // P7 — visiteurs uniques dédupliqués (hash ip|ua|jour), horizon du plan (F-06)
+    uniques: { total: number; period: number; series: DailyPoint[] }
+  }
   orders: { total: number; period: number; series: DailyPoint[] }
   conversionPct: number
   avgBasketUSD: number

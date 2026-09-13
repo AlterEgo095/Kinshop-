@@ -589,7 +589,8 @@ export function BoostPanel({ slug }: { slug: string }) {
         </p>
         <p className="text-xs text-muted-foreground">
           Met ta boutique en tête de l&apos;accueil, étiquetée « Sponsorisé ».{" "}
-          <strong>Indépendant de l&apos;abonnement Premium</strong> (qui donne des fonctionnalités).
+          <strong>Indépendant de l&apos;abonnement Premium</strong> (qui donne des fonctionnalités).{" "}
+          La boutique doit avoir <strong>au moins 1 produit</strong> pour apparaître en Sponsorisé.
         </p>
 
         {active ? (
@@ -624,8 +625,14 @@ export function BoostPanel({ slug }: { slug: string }) {
                     {new Date(c.startAt).toLocaleDateString("fr-FR")} → {new Date(c.endAt).toLocaleDateString("fr-FR")}
                   </span>
                   <span>
-                    {c.status === "pending_payment" ? "Paiement en attente" : c.status === "ended" ? "Terminée" : "Rejetée"} ·{" "}
-                    {c.impressions} vues
+                    {c.status === "pending_payment"
+                      ? "Paiement en attente"
+                      : c.status === "ended"
+                        ? "Terminée"
+                        : c.status === "expired"
+                          ? "Expirée"
+                          : "Rejetée"}{" "}
+                    · {c.impressions} vues
                   </span>
                 </div>
               ))}

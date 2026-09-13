@@ -448,16 +448,34 @@ export function AdminBoostTab() {
                           : "bg-muted"
                     }
                   >
-                    {c.status === "active" ? "Active" : c.status === "pending_payment" ? "En attente" : c.status === "ended" ? "Terminée" : "Rejetée"}
+                    {c.status === "active"
+                      ? "Active"
+                      : c.status === "pending_payment"
+                        ? "En attente"
+                        : c.status === "ended"
+                          ? "Terminée"
+                          : c.status === "expired"
+                            ? "Expirée"
+                            : "Rejetée"}
                   </Badge>
-                  {c.status !== "ended" && c.status !== "rejected" && (
+                  {c.status !== "ended" && c.status !== "rejected" && c.status !== "expired" && (
                     <Button size="sm" variant="outline" className="h-7 text-xs" disabled={busy} onClick={() => act(c.id, "end")}>
                       Clore
                     </Button>
                   )}
                   {c.status === "pending_payment" && (
-                    <Button size="sm" className="h-7 text-xs" disabled={busy} onClick={() => act(c.id, "activate")}>
-                      Activer
+                    <>
+                      <Button size="sm" className="h-7 text-xs" disabled={busy} onClick={() => act(c.id, "activate")}>
+                        Activer
+                      </Button>
+                      <Button size="sm" variant="outline" className="h-7 text-xs text-red-600 hover:text-red-700" disabled={busy} onClick={() => act(c.id, "reject")}>
+                        Rejeter
+                      </Button>
+                    </>
+                  )}
+                  {c.status === "ended" && (
+                    <Button size="sm" variant="outline" className="h-7 text-xs" disabled={busy} onClick={() => act(c.id, "activate")}>
+                      Relancer
                     </Button>
                   )}
                 </div>
