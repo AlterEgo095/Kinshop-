@@ -61,7 +61,13 @@ export interface AuthUser {
   role: string
 }
 
-/** Récupère l'utilisateur authentifié via le cookie de session (null si visiteur). */
+/**
+ * Récupère l'utilisateur authentifié via le cookie de session (null si visiteur).
+ * P5 (F5-3) — FAIL-CLOSED : un compte SUSPENDU par l'administration est traité
+ * comme non authentifié (toutes les routes renvoient 401/403 pour lui) — la
+ * suppression préalable de ses sessions par l'admin garantit la déconnexion,
+ * ce garde couvre toute session recréée ou résiduelle.
+ */
 export async function getUserFromRequest(req: NextRequest): Promise<AuthUser | null> {
   const token = req.cookies.get(SESSION_COOKIE)?.value
   if (!token) return null
@@ -77,6 +83,9 @@ export async function getUserFromRequest(req: NextRequest): Promise<AuthUser | n
     await db.session.delete({ where: { id: session.id } }).catch(() => {})
     return null
   }
+
+  // P5 (F5-3) — compte suspendu : aucune identité active
+  if (session.user.status === "suspended") return null
 
   return {
     id: session.user.id,

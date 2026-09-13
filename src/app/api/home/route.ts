@@ -54,7 +54,7 @@ export async function GET(req: NextRequest) {
       where: { status: "active", startAt: { lte: now }, endAt: { gte: now } },
       orderBy: { startAt: "asc" },
       take: 6,
-      include: { store: { select: { id: true, slug: true, name: true, logoEmoji: true, city: true, description: true, status: true, isPremium: true, premiumUntil: true } } },
+      include: { store: { select: { id: true, slug: true, name: true, logoEmoji: true, city: true, description: true, status: true, isPremium: true, premiumUntil: true, verificationStatus: true } } },
     })
     const sponsored = activeBoosts
       .map((b) => ({ campaignId: b.id, store: b.store }))
@@ -75,7 +75,7 @@ export async function GET(req: NextRequest) {
         // P2 — sous filtre catégorie : la boutique doit exposer la catégorie
         ...(selectedCategory ? { id: { in: catStoreIds } } : {}),
       },
-      select: { id: true, slug: true, name: true, logoEmoji: true, city: true, description: true, isPremium: true, premiumUntil: true, createdAt: true },
+      select: { id: true, slug: true, name: true, logoEmoji: true, city: true, description: true, isPremium: true, premiumUntil: true, verificationStatus: true, createdAt: true },
     })
     const popular = stores
       .map((s) => ({ ...s, visits30d: visitMap.get(s.id) ?? 0 }))
@@ -125,6 +125,8 @@ export async function GET(req: NextRequest) {
           city: s.store.city,
           description: s.store.description,
           isPremium: s.store.isPremium,
+          // P5 (F5-1) — badge « Vérifiée » exposé honnêtement (statut réel)
+          verified: s.store.verificationStatus === "verified",
         })),
         popular: popular.map((s) => ({
           slug: s.slug,
@@ -134,6 +136,7 @@ export async function GET(req: NextRequest) {
           description: s.description,
           visits30d: s.visits30d,
           isPremium: s.isPremium,
+          verified: s.verificationStatus === "verified",
         })),
         newest: newest.map((s) => ({
           slug: s.slug,
@@ -142,6 +145,7 @@ export async function GET(req: NextRequest) {
           city: s.city,
           description: s.description,
           isPremium: s.isPremium,
+          verified: s.verificationStatus === "verified",
         })),
         products,
         // P2 — navigation catégories

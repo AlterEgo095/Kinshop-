@@ -86,11 +86,14 @@ export async function verifyAndApplyPremium(
     if (!s.completedAt && hintSaleId !== s.id) continue // listing sans date → exige l'indice précis
 
     // Idempotence course : on ne réapplique JAMAIS la même vente
-    // (OR null obligatoire : en SQL, NULL <> valeur n'est jamais vrai)
+    // (chariowSaleId est String @default("") — NON nullable : la branche
+    // « pas encore de vente enregistrée » filtre sur la chaîne vide, et le
+    // `not` couvre tout id différent ; en SQL, NULL <> valeur n'existant pas
+    // ici, une vente déjà appliquée est exclue par le not)
     const updated = await db.store.updateMany({
       where: {
         id: store.id,
-        OR: [{ chariowSaleId: null }, { chariowSaleId: { not: s.id } }],
+        OR: [{ chariowSaleId: "" }, { chariowSaleId: { not: s.id } }],
       },
       data: {
         isPremium: true,

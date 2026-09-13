@@ -17,6 +17,7 @@ import {
   Search,
   ShoppingBag,
   ShoppingCart,
+  ShieldCheck,
   Smartphone,
   Star,
   TicketPercent,
@@ -726,7 +727,15 @@ export function StoreView({ slug, onBack, platformRate, config = {}, authUser = 
             {store.logoEmoji}
           </div>
           <div className="flex-1">
-            <h1 className="text-3xl font-extrabold tracking-tight">{store.name}</h1>
+            <h1 className="text-3xl font-extrabold tracking-tight flex items-center gap-2 flex-wrap">
+              {store.name}
+              {/* P5 (F5-1) — badge Vérifiée : statut réel confirmé par l'administration */}
+              {store.verificationStatus === "verified" && (
+                <Badge className="bg-emerald-100 text-emerald-800 border border-emerald-300 gap-1" aria-label="Boutique vérifiée par KinShop">
+                  <ShieldCheck className="w-3.5 h-3.5" /> Vérifiée
+                </Badge>
+              )}
+            </h1>
             {store.description && <p className="text-muted-foreground mt-1">{store.description}</p>}
             <div className="flex flex-wrap gap-2 mt-3">
               <Badge variant="secondary" className="gap-1">

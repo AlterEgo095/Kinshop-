@@ -8,8 +8,10 @@ import { motion } from "framer-motion"
 import {
   ArrowLeft,
   Ban,
+  BadgeCheck,
   CheckCircle2,
   ChevronDown,
+  Clock,
   Crown,
   ExternalLink,
   Eye,
@@ -24,6 +26,7 @@ import {
   MessageCircle,
   Package,
   RefreshCw,
+  RotateCcw,
   Search,
   Settings2,
   ShieldCheck,
@@ -36,6 +39,7 @@ import {
   TrendingUp,
   Truck,
   Users as UsersIcon,
+  XCircle,
   ShieldAlert as ShieldAlertIcon,
   Megaphone as MegaphoneIcon,
   ScrollText as ScrollTextIcon,
@@ -78,6 +82,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
@@ -195,6 +202,7 @@ interface AdminStoreRow {
   premiumUntil: string | null
   premiumActive: boolean
   status: string
+  verificationStatus: string
   customDomain: string | null
   domainVerified: boolean
   createdAt: string
@@ -792,12 +800,12 @@ export function AdminConsole({
     toast.success("Déconnecté de la console admin.")
   }
 
-  const storeAction = async (store: AdminStoreRow, action: string, days?: number) => {
+  const storeAction = async (store: AdminStoreRow, action: string, days?: number, verificationStatus?: string) => {
     setStoreActionBusy(store.id + action)
     try {
       const res = await adminFetch("/api/admin/stores", {
         method: "PATCH",
-        body: JSON.stringify({ id: store.id, action, days }),
+        body: JSON.stringify({ id: store.id, action, days, verificationStatus }),
       })
       const data = await res.json()
       if (!res.ok) {
@@ -815,6 +823,7 @@ export function AdminConsole({
                 premiumActive: data.store.isPremium,
                 customDomain: data.store.customDomain,
                 domainVerified: data.store.domainVerified,
+                verificationStatus: data.store.verificationStatus,
               }
             : s,
         ),
@@ -824,6 +833,7 @@ export function AdminConsole({
         activate: "Boutique réactivée",
         "grant-premium": `Premium accordé (+${days ?? 30} j)`,
         "revoke-premium": "Premium révoqué",
+        verify: "Statut de vérification mis à jour",
         "domain-verify": "Domaine validé manuellement",
         "domain-unlink": "Domaine délié",
       }
@@ -1673,6 +1683,35 @@ export function AdminConsole({
                                       <CheckCircle2 className="w-4 h-4 mr-2" /> Réactiver la boutique
                                     </DropdownMenuItem>
                                   )}
+                                  {/* P5 (F5-1) — vérification des boutiques désormais pilotable depuis la console */}
+                                  <DropdownMenuSub>
+                                    <DropdownMenuSubTrigger>
+                                      <ShieldCheck className="w-4 h-4 mr-2" />
+                                      Vérification ({s.verificationStatus === "verified" ? "vérifiée" : s.verificationStatus === "pending" ? "en attente" : s.verificationStatus === "rejected" ? "refusée" : "non vérifiée"})
+                                    </DropdownMenuSubTrigger>
+                                    <DropdownMenuSubContent>
+                                      {s.verificationStatus !== "verified" && (
+                                        <DropdownMenuItem onClick={() => storeAction(s, "verify", undefined, "verified")} className="text-emerald-700 focus:text-emerald-700">
+                                          <BadgeCheck className="w-4 h-4 mr-2" /> Marquer vérifiée
+                                        </DropdownMenuItem>
+                                      )}
+                                      {s.verificationStatus !== "pending" && (
+                                        <DropdownMenuItem onClick={() => storeAction(s, "verify", undefined, "pending")}>
+                                          <Clock className="w-4 h-4 mr-2" /> Marquer en attente
+                                        </DropdownMenuItem>
+                                      )}
+                                      {s.verificationStatus !== "rejected" && (
+                                        <DropdownMenuItem onClick={() => storeAction(s, "verify", undefined, "rejected")} className="text-amber-700 focus:text-amber-700">
+                                          <XCircle className="w-4 h-4 mr-2" /> Refuser (rejetée)
+                                        </DropdownMenuItem>
+                                      )}
+                                      {s.verificationStatus !== "unverified" && (
+                                        <DropdownMenuItem onClick={() => storeAction(s, "verify", undefined, "unverified")}>
+                                          <RotateCcw className="w-4 h-4 mr-2" /> Réinitialiser (non vérifiée)
+                                        </DropdownMenuItem>
+                                      )}
+                                    </DropdownMenuSubContent>
+                                  </DropdownMenuSub>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuItem onClick={() => storeAction(s, "grant-premium", 30)}>
                                     <Crown className="w-4 h-4 mr-2" /> Premium +30 jours

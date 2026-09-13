@@ -6,7 +6,7 @@
 
 import { useEffect, useState } from "react"
 import { motion } from "framer-motion"
-import { Flame, Loader2, Sparkles, Megaphone, Package } from "lucide-react"
+import { Flame, Loader2, Sparkles, Megaphone, Package, ShieldCheck } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -20,8 +20,8 @@ interface HomeCategory {
 }
 
 interface HomeData {
-  sponsored: { campaignId: string; slug: string; name: string; logoEmoji: string; city: string; description: string }[]
-  popular: { slug: string; name: string; logoEmoji: string; city: string; description: string; visits30d: number }[]
+  sponsored: { campaignId: string; slug: string; name: string; logoEmoji: string; city: string; description: string; verified?: boolean }[]
+  popular: { slug: string; name: string; logoEmoji: string; city: string; description: string; visits30d: number; verified?: boolean }[]
   newest: { slug: string; name: string; logoEmoji: string; city: string; description: string }[]
   products: { id: string; name: string; emoji: string; imageUrl: string; priceUSD: number; category: string; store: { name: string; slug: string } }[]
   // P2 — navigation par catégories globales (barre d'icônes + filtre actif)
@@ -35,6 +35,7 @@ function StoreCard({
   city,
   description,
   badge,
+  verified,
   onOpen,
 }: {
   emoji: string
@@ -42,6 +43,7 @@ function StoreCard({
   city: string
   description: string
   badge?: React.ReactNode
+  verified?: boolean
   onOpen: () => void
 }) {
   return (
@@ -58,7 +60,11 @@ function StoreCard({
             <span className="text-2xl" aria-hidden="true">{emoji}</span>
             {badge}
           </div>
-          <p className="font-bold text-sm truncate">{name}</p>
+          <p className="font-bold text-sm truncate flex items-center gap-1">
+            {name}
+            {/* P5 (F5-1) — statut vérifié confirmé par l'administration */}
+            {verified && <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" aria-label="Boutique vérifiée" />}
+          </p>
           <p className="text-xs text-muted-foreground">📍 {city}</p>
           {description && <p className="text-xs text-muted-foreground/80 line-clamp-2">{description}</p>}
         </CardContent>
@@ -174,6 +180,7 @@ export function MarketplaceHome({ onOpenStore }: { onOpenStore: (slug: string) =
                 name={s.name}
                 city={s.city}
                 description={s.description}
+                verified={s.verified}
                 badge={<Badge className="bg-amber-100 text-amber-800 border border-amber-300 text-[10px]">Sponsorisé</Badge>}
                 onOpen={() => {
                   trackClick(s.campaignId)
@@ -200,6 +207,7 @@ export function MarketplaceHome({ onOpenStore }: { onOpenStore: (slug: string) =
                 name={s.name}
                 city={s.city}
                 description={s.description}
+                verified={s.verified}
                 badge={<span className="text-[11px] text-muted-foreground">{s.visits30d} visites</span>}
                 onOpen={() => onOpenStore(s.slug)}
               />

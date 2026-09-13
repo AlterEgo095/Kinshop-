@@ -15,10 +15,12 @@ import {
   Gauge,
   LayoutGrid,
   Loader2,
+  Megaphone,
   RotateCcw,
   Scale,
   Save,
   Settings2,
+  ShieldCheck,
   ToggleRight,
   Type as TypeIcon,
   Wallet,
@@ -64,6 +66,8 @@ const SECTION_ICONS: Record<string, React.ComponentType<{ className?: string }>>
   catalog: LayoutGrid,
   payments: Wallet,
   business: Scale,
+  boost: Megaphone,
+  governance: ShieldCheck,
   content: TypeIcon,
 }
 

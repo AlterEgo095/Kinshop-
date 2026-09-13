@@ -62,13 +62,14 @@ export function pinRateLimitedResponse(): NextResponse {
   )
 }
 
-/** Enregistre une action dans le journal d'audit (jamais bloquant). */
+/**
+ * Enregistre une action admin dans le journal d'audit (jamais bloquant).
+ * P5 (F5-4) : délègue à logAudit pour entrer dans la CHAÎNE D'INTÉGRITÉ
+ * (chaque entrée scelle la précédente — altération détectable).
+ */
 export async function logAdminAction(action: string, target: string, detail = "") {
-  try {
-    await db.adminAction.create({ data: { action, target, detail: detail.slice(0, 500) } })
-  } catch (e) {
-    console.error("logAdminAction", e)
-  }
+  const { logAudit } = await import("@/lib/audit")
+  await logAudit({ action, target, detail, actorType: "admin" })
 }
 
 /* ─────────── Paramètres plateforme ─────────── */

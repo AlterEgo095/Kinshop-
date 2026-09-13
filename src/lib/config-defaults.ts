@@ -24,6 +24,7 @@ export type ConfigSectionId =
   | "payments"
   | "business"
   | "boost"
+  | "governance"
   | "content"
 
 export interface ConfigSectionMeta {
@@ -82,6 +83,13 @@ export const CONFIG_SECTIONS: ConfigSectionMeta[] = [
     description:
       "Mise en avant payante sur la page d'accueil (sponsorisé) — indépendante de l'abonnement Premium.",
     icon: "Megaphone",
+  },
+  {
+    id: "governance",
+    title: "Gouvernance",
+    description:
+      "Règles de modération et de vérification des boutiques (demandes des propriétaires, délais anti-spam).",
+    icon: "ShieldCheck",
   },
   {
     id: "content",
@@ -166,6 +174,9 @@ export const CONFIG_DEFAULTS: PublicConfig = {
   "business.orderMaxQtyPerItem": 99, // quantité max par article d'une commande
   "business.premiumMinDays": 1, // durée min d'un cadeau premium (console admin)
   "business.maxOpenRefundsPerStore": 5, // V10 — demandes de remboursement ouvertes max par boutique
+
+  /* ─────────── Gouvernance (P5) ─────────── */
+  "governance.verificationCooldownDays": 7, // délai anti-spam entre deux demandes de vérification
 
   /* ─────────── Contenus ─────────── */
   "content.maintenanceTitle": "KinShop en maintenance",

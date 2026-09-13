@@ -14,6 +14,8 @@ model Store {
   id          String    @id @default(cuid())
   // V10 — Vérification des propriétaires (proportionnelle au risque, gérée admin) : unverified | pending | verified | rejected
   verificationStatus String @default("unverified")
+  // P5 — Demande de vérification du propriétaire (anti-spam : cooldown gouvernance)
+  verificationRequestedAt DateTime?
   slug        String    @unique
   name        String
   ownerName   String
@@ -65,6 +67,11 @@ model User {
   name         String
   whatsapp     String    @default("")
   role         String    @default("user") // user | admin (réservé)
+  // P5 — Gouvernance : suspension de compte (administration) — un compte suspendu
+  // perd ses sessions et ne peut plus se connecter tant que la suspension tient.
+  status          String    @default("active") // active | suspended
+  suspendedAt     DateTime?
+  suspendedReason String    @default("")
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   stores       Store[]
@@ -408,7 +415,11 @@ model AdminAction {
   actorId    String   @default("")
   entityType String   @default("") // store | product | order | invoice | report | refund | boost | config | auth
   entityId   String   @default("")
-  createdAt  DateTime @default(now())
+  // P5 — Chaîne d'intégrité du journal : chaque entrée scelle la précédente
+  // (hash = sha256(prevHash + payload)). Entrées héritées pré-P5 : hash vide.
+  prevHash  String   @default("")
+  hash      String   @default("")
+  createdAt DateTime @default(now())
 
   @@index([createdAt])
   @@index([entityType, entityId])

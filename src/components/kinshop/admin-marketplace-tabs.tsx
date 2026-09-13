@@ -33,6 +33,9 @@ interface AdminUser {
   name: string
   whatsapp: string
   role: string
+  status: string
+  suspendedAt: string | null
+  suspendedReason: string
   createdAt: string
   premiumActive: boolean
   stores: { name: string; slug: string; status: string; verificationStatus: string }[]
@@ -41,8 +44,9 @@ interface AdminUser {
 
 export function AdminUsersTab() {
   const [users, setUsers] = useState<AdminUser[] | null>(null)
-  const [stats, setStats] = useState<{ total: number; owners: number; customers: number } | null>(null)
+  const [stats, setStats] = useState<{ total: number; owners: number; customers: number; suspended: number } | null>(null)
   const [q, setQ] = useState("")
+  const [busyId, setBusyId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -72,12 +76,38 @@ export function AdminUsersTab() {
     (u) => !q || u.email.toLowerCase().includes(q.toLowerCase()) || u.name.toLowerCase().includes(q.toLowerCase()),
   )
 
+  // P5 (F5-3) — suspension de compte (motif obligatoire, sessions révoquées)
+  const accountAction = async (id: string, action: "suspend" | "unsuspend") => {
+    let reason = ""
+    if (action === "suspend") {
+      reason = window.prompt("Motif de suspension (obligatoire, 4 caractères min) :") || ""
+      if (reason.trim().length < 4) return
+    }
+    setBusyId(id)
+    try {
+      const res = await fetch("/api/admin/users", {
+        method: "PATCH",
+        headers: PIN_HEADERS(),
+        body: JSON.stringify({ id, action, reason }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      toast.success(action === "suspend" ? "Compte suspendu — sessions révoquées ✅" : "Suspension levée ✅")
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur")
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <Card><CardContent className="p-3 text-center"><p className="text-2xl font-extrabold">{stats?.total ?? "…"}</p><p className="text-xs text-muted-foreground">Comptes</p></CardContent></Card>
         <Card><CardContent className="p-3 text-center"><p className="text-2xl font-extrabold">{stats?.owners ?? "…"}</p><p className="text-xs text-muted-foreground">Propriétaires</p></CardContent></Card>
         <Card><CardContent className="p-3 text-center"><p className="text-2xl font-extrabold">{stats?.customers ?? "…"}</p><p className="text-xs text-muted-foreground">Clients</p></CardContent></Card>
+        <Card><CardContent className="p-3 text-center"><p className="text-2xl font-extrabold text-rose-600">{stats?.suspended ?? "…"}</p><p className="text-xs text-muted-foreground">Suspendus</p></CardContent></Card>
       </div>
 
       <div className="relative">
@@ -108,6 +138,22 @@ export function AdminUsersTab() {
                 <div className="flex flex-col items-end gap-1 shrink-0">
                   {u.role === "admin" && <Badge className="bg-slate-800 text-white">Admin</Badge>}
                   {u.premiumActive && <Badge className="bg-amber-100 text-amber-800 border-amber-200">Premium</Badge>}
+                  {u.status === "suspended" && (
+                    <Badge className="bg-rose-100 text-rose-700 border-rose-200" title={u.suspendedReason || undefined}>
+                      Suspendu
+                    </Badge>
+                  )}
+                  {u.role !== "admin" && (
+                    u.status === "suspended" ? (
+                      <Button size="sm" variant="outline" className="h-7 text-xs" disabled={busyId === u.id} onClick={() => accountAction(u.id, "unsuspend")}>
+                        Réactiver
+                      </Button>
+                    ) : (
+                      <Button size="sm" variant="outline" className="h-7 text-xs text-rose-600 hover:text-rose-700" disabled={busyId === u.id} onClick={() => accountAction(u.id, "suspend")}>
+                        Suspendre
+                      </Button>
+                    )
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -179,17 +225,48 @@ export function AdminReportsTab() {
     }
   }, [load])
 
-  const transition = async (id: string, status: string) => {
+  const transition = async (id: string, status: string, resolutionNote?: string) => {
     setBusy(true)
     try {
       const res = await fetch("/api/admin/reports", {
         method: "PATCH",
         headers: PIN_HEADERS(),
-        body: JSON.stringify({ id, status, resolutionNote: `Décision console admin (${status})` }),
+        body: JSON.stringify({ id, status, resolutionNote }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
       toast.success("Signalement mis à jour ✅")
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // P5 (F5-6) — clôture avec décision écrite OBLIGATOIRE + passerelle modération
+  const closeWithNote = async (id: string, status: "resolved" | "dismissed") => {
+    const note = window.prompt(status === "resolved" ? "Décision / résolution (obligatoire, 4 caractères min) :" : "Motif du rejet (obligatoire, 4 caractères min) :") || ""
+    if (note.trim().length < 4) {
+      if (note.trim().length > 0) toast.error("Note trop courte (4 caractères min).")
+      return
+    }
+    await transition(id, status, note)
+  }
+
+  // P5 (F5-6) — suspendre directement la boutique ciblée par le signalement
+  const suspendStore = async (id: string) => {
+    const note = window.prompt("Motif de suspension de la boutique (optionnel) :") || ""
+    setBusy(true)
+    try {
+      const res = await fetch("/api/admin/reports", {
+        method: "PATCH",
+        headers: PIN_HEADERS(),
+        body: JSON.stringify({ id, action: "suspend_store", resolutionNote: note }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      toast.success("Boutique suspendue et signalement marqué « Action requise » ✅")
       await load()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Erreur")
@@ -245,13 +322,28 @@ export function AdminReportsTab() {
                   </Badge>
                 </div>
                 <p className="text-sm bg-muted/50 rounded-lg p-2">{r.details}</p>
+                {r.resolutionNote && (
+                  <p className="text-xs text-muted-foreground italic">Décision : {r.resolutionNote}</p>
+                )}
+                {r.targetType === "store" && r.status !== "resolved" && r.status !== "dismissed" && (
+                  <Button size="sm" variant="outline" className="h-7 text-xs text-rose-600 hover:text-rose-700" disabled={busy} onClick={() => suspendStore(r.id)}>
+                    <ShieldAlert className="w-3 h-3 mr-1" />
+                    Suspendre cette boutique
+                  </Button>
+                )}
                 {(REPORT_NEXT_ACTIONS[r.status] ?? []).length > 0 && (
                   <div className="flex flex-wrap gap-1.5">
-                    {(REPORT_NEXT_ACTIONS[r.status] ?? []).map((a) => (
-                      <Button key={a.status} size="sm" variant={a.tone as "default" | "outline"} className="h-7 text-xs" disabled={busy} onClick={() => transition(r.id, a.status)}>
-                        {a.label}
-                      </Button>
-                    ))}
+                    {(REPORT_NEXT_ACTIONS[r.status] ?? []).map((a) =>
+                      a.status === "resolved" || a.status === "dismissed" ? (
+                        <Button key={a.status} size="sm" variant={a.tone as "default" | "outline"} className="h-7 text-xs" disabled={busy} onClick={() => closeWithNote(r.id, a.status as "resolved" | "dismissed")}>
+                          {a.label}
+                        </Button>
+                      ) : (
+                        <Button key={a.status} size="sm" variant={a.tone as "default" | "outline"} className="h-7 text-xs" disabled={busy} onClick={() => transition(r.id, a.status)}>
+                          {a.label}
+                        </Button>
+                      ),
+                    )}
                   </div>
                 )}
               </CardContent>
@@ -398,6 +490,9 @@ export function AdminAuditTab() {
   const [q, setQ] = useState("")
   const [actorType, setActorType] = useState("all")
   const [entityType, setEntityType] = useState("all")
+  // P5 (F5-4) — verdict d'intégrité de la chaîne d'audit
+  const [verdict, setVerdict] = useState<{ intact: boolean; checked: number; legacy: number; brokenAt: { id: string; seq: number; reason: string } | null } | null>(null)
+  const [verifying, setVerifying] = useState(false)
 
   const load = useCallback(async () => {
     const params = new URLSearchParams({ type: "audit", limit: "120" })
@@ -423,8 +518,56 @@ export function AdminAuditTab() {
     }
   }, [load])
 
+  // P5 (F5-4) — vérification de la chaîne d'intégrité (recalcul côté serveur)
+  const checkIntegrity = async () => {
+    setVerifying(true)
+    try {
+      const res = await fetch("/api/admin/logs?verify=1", { headers: { "x-admin-pin": localStorage.getItem("kinshop_admin_pin") || "" }, cache: "no-store" })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setVerdict(data.verdict)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur")
+    } finally {
+      setVerifying(false)
+    }
+  }
+
   return (
     <div className="space-y-3">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <p className="text-xs text-muted-foreground">
+          Chaque entrée scelle la précédente (empreinte SHA-256) — toute altération ou suppression est détectable.
+        </p>
+        <Button size="sm" variant="outline" onClick={checkIntegrity} disabled={verifying}>
+          {verifying ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+          Vérifier l&apos;intégrité
+        </Button>
+      </div>
+      {verdict && (
+        <div
+          role="status"
+          className={`rounded-xl border p-3 text-sm flex items-start gap-2 ${
+            verdict.intact ? "border-emerald-300 bg-emerald-50 text-emerald-900" : "border-rose-300 bg-rose-50 text-rose-900"
+          }`}
+        >
+          {verdict.intact ? <ShieldCheck className="w-4 h-4 mt-0.5 shrink-0" /> : <ShieldAlert className="w-4 h-4 mt-0.5 shrink-0" />}
+          <div>
+            <p className="font-bold">
+              {verdict.intact
+                ? `Chaîne intacte — ${verdict.checked} entrée(s) vérifiée(s)`
+                : `CHAÎNE COMPROMISE à l'entrée #${verdict.brokenAt?.seq}`}
+            </p>
+            <p className="text-xs">
+              {verdict.intact
+                ? verdict.legacy > 0
+                  ? `${verdict.legacy} entrée(s) héritée(s) antérieure(s) à la mise en place de la chaîne (non scellées).`
+                  : "Toutes les empreintes et l'enchaînement ont été recalculés avec succès."
+                : verdict.brokenAt?.reason}
+            </p>
+          </div>
+        </div>
+      )}
       <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto] gap-2">
         <Input placeholder="Rechercher dans le journal…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Recherche journal" />
         <Select value={actorType} onValueChange={setActorType}>
@@ -452,6 +595,8 @@ export function AdminAuditTab() {
             <SelectItem value="report">Signalements</SelectItem>
             <SelectItem value="boost">Promotions</SelectItem>
             <SelectItem value="config">Configuration</SelectItem>
+            <SelectItem value="auth">Authentification</SelectItem>
+            <SelectItem value="user">Comptes</SelectItem>
           </SelectContent>
         </Select>
       </div>

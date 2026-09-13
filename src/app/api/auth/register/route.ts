@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { createSession, hashPassword, setSessionCookie } from "@/lib/auth"
 import { clientIp, rateLimit } from "@/lib/ratelimit"
+import { logAudit } from "@/lib/audit"
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -59,6 +60,18 @@ export async function POST(req: NextRequest) {
     })
 
     const { token, expiresAt } = await createSession(user.id)
+
+    // P5 (F5-5) — création de compte tracée (jamais de mot de passe dans le journal)
+    await logAudit({
+      action: "auth.register",
+      target: `auth:${user.email.slice(0, 120)}`,
+      detail: `Nouveau compte créé — IP ${clientIp(req)}`,
+      actorType: "user",
+      actorId: user.id,
+      entityType: "auth",
+      entityId: user.id,
+    })
+
     const res = NextResponse.json(
       {
         user: { id: user.id, email: user.email, name: user.name, whatsapp: user.whatsapp },

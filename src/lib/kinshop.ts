@@ -111,6 +111,9 @@ export interface StoreData {
   isPremium: boolean
   premiumUntil: string | null
   status: string
+  // P5 — gouvernance : vérification de la boutique
+  verificationStatus?: string // unverified | pending | verified | rejected
+  verificationRequestedAt?: string | null
   createdAt: string
   products?: ProductData[]
   orders?: OrderData[]

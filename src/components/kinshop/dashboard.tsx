@@ -27,6 +27,7 @@ import {
   RotateCcw,
   Settings,
   Share2,
+  ShieldCheck,
   ShoppingCart,
   Sparkles,
   Star,
@@ -155,6 +156,8 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
   const [orders, setOrders] = useState<OrderData[]>([])
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
+  // P5 (F5-2) — demande de vérification
+  const [verifyBusy, setVerifyBusy] = useState(false)
 
   // Dialogues
   const [addOpen, setAddOpen] = useState(false)
@@ -1205,6 +1208,12 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <p className="font-bold truncate leading-tight">{store.name}</p>
+                {store.verificationStatus === "verified" && (
+                  <Badge className="shrink-0 bg-emerald-100 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 h-5 px-1.5 text-[10px] gap-0.5">
+                    <ShieldCheck className="w-3 h-3" />
+                    Vérifiée
+                  </Badge>
+                )}
                 {store.isPremium && (
                   <Badge className="shrink-0 bg-amber-400 hover:bg-amber-400 text-amber-950 border-0 h-5 px-1.5 text-[10px] gap-0.5">
                     <Crown className="w-3 h-3" />
@@ -1258,6 +1267,90 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
             </motion.div>
           ))}
         </div>
+
+        {/* P5 (F5-2) — Bandeau vérification de la boutique */}
+        {store.verificationStatus !== "verified" && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.12 }}
+            className="mb-6"
+          >
+            <div
+              className={`rounded-2xl border p-4 md:p-5 flex flex-col sm:flex-row sm:items-center gap-4 ${
+                store.verificationStatus === "pending"
+                  ? "border-amber-300 bg-amber-50"
+                  : store.verificationStatus === "rejected"
+                    ? "border-rose-300 bg-rose-50"
+                    : "border-emerald-300 bg-emerald-50"
+              }`}
+            >
+              <div
+                className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                  store.verificationStatus === "pending"
+                    ? "bg-amber-200 text-amber-800"
+                    : store.verificationStatus === "rejected"
+                      ? "bg-rose-200 text-rose-800"
+                      : "bg-emerald-200 text-emerald-800"
+                }`}
+              >
+                <ShieldCheck className="w-5 h-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-extrabold">
+                  {store.verificationStatus === "pending"
+                    ? "Vérification en cours d'examen"
+                    : store.verificationStatus === "rejected"
+                      ? "Demande de vérification refusée"
+                      : "Fais vérifier ta boutique par KinShop"}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  {store.verificationStatus === "pending"
+                    ? "L'équipe KinShop examine ta demande — tu recevras le badge « Vérifiée » après validation."
+                    : store.verificationStatus === "rejected"
+                      ? "Ta dernière demande n'a pas été acceptée. Contacte le support KinShop ou représente une demande plus tard."
+                      : "Le badge « Vérifiée » rassure tes clients : identité contrôlée par l'administration KinShop."}
+                </p>
+              </div>
+              {store.verificationStatus !== "pending" && (
+                <Button
+                  size="sm"
+                  variant={store.verificationStatus === "rejected" ? "outline" : "default"}
+                  disabled={verifyBusy}
+                  onClick={async () => {
+                    setVerifyBusy(true)
+                    try {
+                      const res = await fetch("/api/stores/verify-request", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ slug: store.slug }),
+                      })
+                      const data = await res.json()
+                      if (!res.ok) throw new Error(data.error)
+                      toast.success("Demande envoyée — l'équipe KinShop va l'examiner ✅")
+                      setStore((s) =>
+                        s
+                          ? {
+                              ...s,
+                              verificationStatus: "pending",
+                              verificationRequestedAt: data.verificationRequestedAt ?? new Date().toISOString(),
+                            }
+                          : s,
+                      )
+                    } catch (e) {
+                      toast.error(e instanceof Error ? e.message : "Erreur")
+                    } finally {
+                      setVerifyBusy(false)
+                    }
+                  }}
+                >
+                  {verifyBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+                  {store.verificationStatus === "rejected" ? "Représenter une demande" : "Demander la vérification"}
+                </Button>
+              )}
+            </div>
+          </motion.div>
+        )}
 
         {/* Bandeau Premium Chariow */}
         {!store.isPremium ? (

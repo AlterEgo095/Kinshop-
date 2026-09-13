@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { guardAdmin } from "@/lib/admin"
+import { verifyAuditChain } from "@/lib/audit"
 
 // GET /api/admin/logs?type=pulse|audit — Journal d'audit GLOBAL (V10)
 // Filtres : q (texte), actorType (admin|user|owner|customer|system), action (préfixe),
 // entityType (store|product|order|invoice|report|refund|boost|config|auth), limit.
+// P5 (F5-4) : ?verify=1 → vérification de la CHAÎNE D'INTÉGRITÉ du journal
+// (recalcul de chaque empreinte + contrôle d'enchaînement) — verdict signé.
 export async function GET(req: NextRequest) {
   const denied = guardAdmin(req)
   if (denied) return denied
@@ -20,6 +23,11 @@ export async function GET(req: NextRequest) {
         take: limit,
       })
       return NextResponse.json({ logs: pulses })
+    }
+
+    if (sp.get("verify") === "1") {
+      const verdict = await verifyAuditChain()
+      return NextResponse.json({ verdict })
     }
 
     const where: Record<string, unknown> = {}

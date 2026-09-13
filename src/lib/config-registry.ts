@@ -374,6 +374,19 @@ export const CONFIG_SPECS: ConfigSpec[] = [
     description: "Anti-abus : limite de demandes de remboursement simultanées (statut demandé/approuvé).",
   },
 
+  /* ─────────── Gouvernance (P5) ─────────── */
+  {
+    key: "governance.verificationCooldownDays",
+    section: "governance",
+    type: "number",
+    default: 7,
+    public: false,
+    min: 0,
+    max: 90,
+    label: "Délai entre demandes de vérification (jours)",
+    description: "Anti-spam : nombre de jours minimum entre deux demandes de vérification d'un même propriétaire (0 = sans délai).",
+  },
+
   /* ─────────── Promotion (Boost) ─────────── */
   {
     key: "boost.price7USD",

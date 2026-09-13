@@ -50,8 +50,21 @@ export async function POST(req: NextRequest) {
       if (!p) return NextResponse.json({ error: "Produit introuvable." }, { status: 404 })
       targetLabel = `${p.name} (${p.store.name})`
     } else if (targetType === "order") {
-      const o = await db.order.findUnique({ where: { id: targetId } })
+      // P5 (F5-6) — la commande d'AUTRUI n'est pas signalable par un tiers :
+      // seuls le client de la commande et le vendeur concerné peuvent la
+      // signaler (anti-IDOR logique : pas de sonde d'existence sur les
+      // commandes privées). Les litiges tiers passent par le support.
+      const o = await db.order.findUnique({
+        where: { id: targetId },
+        include: { store: { select: { ownerId: true } } },
+      })
       if (!o) return NextResponse.json({ error: "Commande introuvable." }, { status: 404 })
+      if (o.userId !== user.id && o.store.ownerId !== user.id) {
+        return NextResponse.json(
+          { error: "Seul le client de cette commande ou son vendeur peut la signaler." },
+          { status: 403 },
+        )
+      }
       targetLabel = o.ref
     } else if (targetType === "user") {
       const u = await db.user.findUnique({ where: { id: targetId } })
