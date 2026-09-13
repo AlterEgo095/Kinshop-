@@ -65,7 +65,14 @@ export async function GET(req: NextRequest) {
     // P6 F6-6 — la boutique sponsorisée doit avoir ≥ 1 produit (jamais de
     // publicité payante vers une boutique vide).
     const activeBoosts = await db.boostCampaign.findMany({
-      where: { status: "active", startAt: { lte: now }, endAt: { gte: now } },
+      where: {
+        status: "active",
+        startAt: { lte: now },
+        endAt: { gte: now },
+        // Résilience : un filtre sur la relation exclut toute campagne orpheline
+        // (storeId sans store — ex. surgery DB manuelle) au lieu de faire 500.
+        store: { status: "active" },
+      },
       orderBy: { startAt: "asc" },
       take: 24,
       include: {
@@ -119,8 +126,13 @@ export async function GET(req: NextRequest) {
     // 4) Produits récents (nouveautés catalogue) — prix réels, pas de classement inventé
     const latestProducts = await db.product.findMany({
       orderBy: { createdAt: "desc" },
-      // P2 — sous filtre catégorie : produits rattachés à un rayon de la catégorie
-      ...(selectedCategory ? { where: { storeCategoryId: { in: catStoreCategoryIds } } } : {}),
+      // Résilience : filtre relationnel dans le where (sémantique inner-join) —
+      // les produits orphelins/de boutique inactive sont exclus dès le SQL.
+      where: {
+        store: { status: "active" },
+        // P2 — sous filtre catégorie : produits rattachés à un rayon de la catégorie
+        ...(selectedCategory ? { storeCategoryId: { in: catStoreCategoryIds } } : {}),
+      },
       take: 8,
       include: { store: { select: { name: true, slug: true, status: true } } },
     })
