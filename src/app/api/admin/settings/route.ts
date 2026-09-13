@@ -10,7 +10,7 @@ import { db } from "@/lib/db"
 
 // GET /api/admin/settings — Paramètres globaux de la plateforme
 export async function GET(req: NextRequest) {
-  const denied = guardAdmin(req)
+  const denied = await guardAdmin(req)
   if (denied) return denied
 
   try {
@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
 
 // PATCH /api/admin/settings — Modifier les paramètres globaux
 export async function PATCH(req: NextRequest) {
-  const denied = guardAdmin(req)
+  const denied = await guardAdmin(req)
   if (denied) return denied
 
   try {

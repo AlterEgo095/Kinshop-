@@ -19,10 +19,9 @@ import {
   REFUND_STATUS_LABELS,
 } from "@/lib/order-workflow"
 
-const PIN_HEADERS = (): Record<string, string> => {
-  // Le PIN est saisi une fois par session admin (voir AdminConsole, clé localStorage)
-  const pin = typeof window !== "undefined" ? localStorage.getItem("kinshop_admin_pin") || "" : ""
-  return { "x-admin-pin": pin, "Content-Type": "application/json" }
+const JSON_HEADERS: Record<string, string> = {
+  // Auth par cookie de session admin (HttpOnly) — plus aucun secret côté JavaScript
+  "Content-Type": "application/json",
 }
 
 /* ═══════════ UTILISATEURS ═══════════ */
@@ -50,7 +49,7 @@ export function AdminUsersTab() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/admin/users", { headers: { "x-admin-pin": localStorage.getItem("kinshop_admin_pin") || "" }, cache: "no-store" })
+      const res = await fetch("/api/admin/users", { cache: "no-store" })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
       setUsers(data.users)
@@ -87,7 +86,7 @@ export function AdminUsersTab() {
     try {
       const res = await fetch("/api/admin/users", {
         method: "PATCH",
-        headers: PIN_HEADERS(),
+        headers: JSON_HEADERS,
         body: JSON.stringify({ id, action, reason }),
       })
       const data = await res.json()
@@ -203,7 +202,7 @@ export function AdminReportsTab() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/admin/reports", { headers: { "x-admin-pin": localStorage.getItem("kinshop_admin_pin") || "" }, cache: "no-store" })
+      const res = await fetch("/api/admin/reports", { cache: "no-store" })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
       setReports(data.reports)
@@ -230,7 +229,7 @@ export function AdminReportsTab() {
     try {
       const res = await fetch("/api/admin/reports", {
         method: "PATCH",
-        headers: PIN_HEADERS(),
+        headers: JSON_HEADERS,
         body: JSON.stringify({ id, status, resolutionNote }),
       })
       const data = await res.json()
@@ -261,7 +260,7 @@ export function AdminReportsTab() {
     try {
       const res = await fetch("/api/admin/reports", {
         method: "PATCH",
-        headers: PIN_HEADERS(),
+        headers: JSON_HEADERS,
         body: JSON.stringify({ id, action: "suspend_store", resolutionNote: note }),
       })
       const data = await res.json()
@@ -374,7 +373,7 @@ export function AdminBoostTab() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/admin/boost", { headers: { "x-admin-pin": localStorage.getItem("kinshop_admin_pin") || "" }, cache: "no-store" })
+      const res = await fetch("/api/admin/boost", { cache: "no-store" })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
       setCampaigns(data.campaigns)
@@ -400,7 +399,7 @@ export function AdminBoostTab() {
     try {
       const res = await fetch("/api/admin/boost", {
         method: "PATCH",
-        headers: PIN_HEADERS(),
+        headers: JSON_HEADERS,
         body: JSON.stringify({ id, action }),
       })
       const data = await res.json()
@@ -518,7 +517,7 @@ export function AdminAuditTab() {
     if (actorType !== "all") params.set("actorType", actorType)
     if (entityType !== "all") params.set("entityType", entityType)
     try {
-      const res = await fetch(`/api/admin/logs?${params}`, { headers: { "x-admin-pin": localStorage.getItem("kinshop_admin_pin") || "" }, cache: "no-store" })
+      const res = await fetch(`/api/admin/logs?${params}`, { cache: "no-store" })
       const data = await res.json()
       if (res.ok) setLogs(data.logs)
     } catch {
@@ -540,7 +539,7 @@ export function AdminAuditTab() {
   const checkIntegrity = async () => {
     setVerifying(true)
     try {
-      const res = await fetch("/api/admin/logs?verify=1", { headers: { "x-admin-pin": localStorage.getItem("kinshop_admin_pin") || "" }, cache: "no-store" })
+      const res = await fetch("/api/admin/logs?verify=1", { cache: "no-store" })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
       setVerdict(data.verdict)
@@ -668,7 +667,7 @@ export function AdminRefundsSection() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/admin/refunds", { headers: { "x-admin-pin": localStorage.getItem("kinshop_admin_pin") || "" }, cache: "no-store" })
+      const res = await fetch("/api/admin/refunds", { cache: "no-store" })
       const data = await res.json()
       if (res.ok) setRefunds(data.refunds)
     } catch {
@@ -698,7 +697,7 @@ export function AdminRefundsSection() {
       }
       const res = await fetch("/api/admin/refunds", {
         method: "PATCH",
-        headers: PIN_HEADERS(),
+        headers: JSON_HEADERS,
         body: JSON.stringify(body),
       })
       const data = await res.json()

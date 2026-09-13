@@ -1,65 +1,86 @@
-// KinShop Admin — Authentification PIN & helpers serveur (console d'administration)
+// KinShop Admin — Authentification EMAIL + MOT DE PASSE (console d'administration)
 // ⚠️ Server-only : à importer uniquement dans les routes API.
+//
+// Fini le code PIN : l'administrateur se connecte avec une adresse email et un
+// mot de passe fort. Le compte vit dans la table User (role = "admin") et
+// réutilise EXACTEMENT le système d'authentification éprouvé de src/lib/auth.ts :
+//   - mot de passe hashé scrypt (format s1$salt$hash, jamais en clair)
+//   - session opaque : cookie HttpOnly contenant un jeton aléatoire,
+//     la base ne stockant que son SHA-256
+//   - compte SUSPENDU → traité comme non authentifié (fail-closed, F5-3)
+//
+// Migration des anciennes défenses (audit Task 19 conservées) :
+//   - F-05 : anti brute-force — 5 échecs / 15 min / IP → 429 (login + routes admin)
 
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getConfig, invalidateConfigCache } from "@/lib/config-registry"
+import { getUserFromRequest, type AuthUser } from "@/lib/auth"
 import { rateLimit, clientIp } from "@/lib/ratelimit"
 
-export const DEFAULT_ADMIN_PIN = "243243"
+/* ─────────── Identité administrateur ─────────── */
 
-export function getAdminPin(): string {
-  const pin = process.env.ADMIN_PIN?.trim()
-  return pin && pin.length >= 4 ? pin : DEFAULT_ADMIN_PIN
+/**
+ * Renvoie l'utilisateur authentifié UNIQUEMENT s'il possède le rôle admin.
+ * La vérification du statut (suspension, expiration de session) est déjà
+ * assurée par getUserFromRequest (fail-closed).
+ */
+export async function getAdminUser(req: NextRequest): Promise<AuthUser | null> {
+  const user = await getUserFromRequest(req)
+  if (user && user.role === "admin") return user
+  return null
 }
 
-export function isUsingDefaultPin(): boolean {
-  return getAdminPin() === DEFAULT_ADMIN_PIN
+/**
+ * Test informatif « requête émise par un admin ? » — SANS effet de bord ni
+ * comptage (utilisé dans les routes mixtes admin/utilisateur : factures,
+ * événements de commande, remboursements, simulation de paiement). Ne JAMAIS
+ * y compter un échec : des utilisateurs légitimes déclencheraient le rate-limit.
+ */
+export async function isAdminRequest(req: NextRequest): Promise<boolean> {
+  return (await getAdminUser(req)) !== null
 }
 
-/** Vérifie l'en-tête x-admin-pin de la requête. */
-export function isAdminRequest(req: NextRequest): boolean {
-  const pin = (req.headers.get("x-admin-pin") || "").trim()
-  return pin.length > 0 && pin === getAdminPin()
-}
+/* ─────────── Garde-fou des routes /api/admin/* ─────────── */
 
 /** Réponse 401 standardisée. */
 export function adminUnauthorized(): NextResponse {
   return NextResponse.json(
-    { error: "Accès refusé : PIN administrateur invalide ou expiré." },
+    { error: "Accès refusé : connexion administrateur requise." },
     { status: 401 },
   )
 }
 
-/** Garde-fou : renvoie la réponse 401 si le PIN ne correspond pas, sinon null. */
-export function guardAdmin(req: NextRequest): NextResponse | null {
-  if (isAdminRequest(req)) return null
-  // F-05 (audit Task 19) : chaque tentative de PIN échouée est comptabilisée
-  // par IP — 5 échecs en 15 minutes → 429. Couvre TOUTES les routes admin
-  // (brute-force possible partout où le PIN est lu, pas seulement /api/admin/auth).
-  if (!notePinFailure(req)) return pinRateLimitedResponse()
-  return adminUnauthorized()
-}
-
-/* ─────────── Anti brute-force du PIN admin (audit F-05) ─────────── */
-
-const PIN_MAX_ATTEMPTS = 5
-const PIN_WINDOW_MS = 15 * 60 * 1000
-
-/**
- * Enregistre une tentative de PIN ÉCHOUÉE. Renvoie false si la limite est
- * atteinte (→ répondre 429). Les requêtes avec PIN correct ne comptent jamais.
- */
-export function notePinFailure(req: NextRequest): boolean {
-  return rateLimit(`admin-pin:${clientIp(req)}`, PIN_MAX_ATTEMPTS, PIN_WINDOW_MS)
-}
-
-/** Réponse 429 standardisée (limite de tentatives PIN atteinte). */
-export function pinRateLimitedResponse(): NextResponse {
+/** Réponse 429 standardisée (limite de tentatives atteinte). */
+export function adminRateLimitedResponse(): NextResponse {
   return NextResponse.json(
     { error: "Trop de tentatives. Réessaie dans 15 minutes." },
     { status: 429 },
   )
+}
+
+/**
+ * Enregistre une tentative d'accès admin ÉCHOUÉE. Renvoie false si la limite
+ * est atteinte (→ répondre 429). À n'utiliser QUE sur les routes réservées
+ * /api/admin/* — chaque requête non-admin y est suspecte par définition.
+ */
+export function noteAdminFailure(req: NextRequest): boolean {
+  return rateLimit(`admin-access:${clientIp(req)}`, ADMIN_MAX_ATTEMPTS, ADMIN_WINDOW_MS)
+}
+
+const ADMIN_MAX_ATTEMPTS = 5
+const ADMIN_WINDOW_MS = 15 * 60 * 1000
+
+/**
+ * Garde-fou : renvoie la réponse 401 si la session n'est pas admin, sinon null.
+ * F-05 (audit Task 19, conservé) : chaque accès refusé est comptabilisé par IP
+ * — 5 échecs en 15 minutes → 429. Couvre TOUTES les routes /api/admin/*.
+ */
+export async function guardAdmin(req: NextRequest): Promise<NextResponse | null> {
+  if (await isAdminRequest(req)) return null
+  // F-05 : anti brute-force des routes admin (échec = IP suspecte)
+  if (!noteAdminFailure(req)) return adminRateLimitedResponse()
+  return adminUnauthorized()
 }
 
 /**

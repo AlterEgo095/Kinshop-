@@ -40,9 +40,6 @@ import {
   type ConfigValue,
 } from "@/lib/config-defaults"
 
-/** Même clé que admin-console.tsx (constante locale pour éviter un import circulaire). */
-const PIN_KEY = "kinshop_admin_pin"
-
 /* ─────────── Types (miroir de la réponse API) ─────────── */
 
 interface ConfigSpecRow {
@@ -98,10 +95,7 @@ export function AdminConfigTab() {
 
   const load = useCallback(async (): Promise<boolean> => {
     try {
-      const res = await fetch("/api/admin/config", {
-        headers: { "x-admin-pin": localStorage.getItem(PIN_KEY) || "" },
-        cache: "no-store",
-      })
+      const res = await fetch("/api/admin/config", { cache: "no-store" })
       if (res.status === 401) {
         toast.error("Session admin expirée — reconnecte-toi.")
         return false
@@ -175,10 +169,7 @@ export function AdminConfigTab() {
       try {
         const res = await fetch("/api/admin/config", {
           method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-            "x-admin-pin": localStorage.getItem(PIN_KEY) || "",
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ values }),
         })
         const data = (await res.json()) as { error?: string; applied?: number; values?: Record<string, ConfigValue> }

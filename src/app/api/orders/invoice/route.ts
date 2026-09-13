@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getUserFromRequest, requireStoreOwner, unauthorized } from "@/lib/auth"
-import { guardAdmin } from "@/lib/admin"
+import { isAdminRequest } from "@/lib/admin"
 import { isFeatureOn } from "@/lib/config-registry"
 import { makeSequentialInvoiceNumber, invoiceHashV2 } from "@/lib/invoice-integrity"
 import { withStoreQuotaWrite } from "@/lib/quota-guard"
@@ -29,10 +29,10 @@ export async function POST(req: NextRequest) {
     const order = await db.order.findUnique({ where: { id: orderId }, include: { store: true } })
     if (!order) return NextResponse.json({ error: "Commande introuvable." }, { status: 404 })
 
-    // Autorisation : owner de la boutique OU admin PIN
+    // Autorisation : owner de la boutique OU administrateur (session email + mot de passe)
     const user = await getUserFromRequest(req)
     if (!user) return unauthorized()
-    const isAdmin = guardAdmin(req) === null
+    const isAdmin = await isAdminRequest(req)
     if (!isAdmin) {
       const guard = await requireStoreOwner(req, { id: order.storeId })
       if (!guard.ok) return guard.response
@@ -160,7 +160,7 @@ export async function GET(req: NextRequest) {
     if (!order) return NextResponse.json({ error: "Commande introuvable." }, { status: 404 })
 
     const user = await getUserFromRequest(req)
-    const isAdmin = user ? guardAdmin(req) === null : false
+    const isAdmin = user ? await isAdminRequest(req) : false
     const isCustomer = user && order.userId === user.id
     if (!isAdmin && !isCustomer) {
       if (!user) return unauthorized()

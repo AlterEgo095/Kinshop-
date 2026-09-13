@@ -6,7 +6,7 @@ import { guardAdmin, logAdminAction } from "@/lib/admin"
 // JAMAIS de hash de mot de passe ni de données de session dans la réponse.
 // P5 (F5-7) : recherche serveur q (email/nom/WhatsApp) + statut du compte.
 export async function GET(req: NextRequest) {
-  const denied = guardAdmin(req)
+  const denied = await guardAdmin(req)
   if (denied) return denied
   try {
     const sp = req.nextUrl.searchParams
@@ -71,7 +71,7 @@ export async function GET(req: NextRequest) {
 //  - gardes : jamais suspendre/rétrograder un admin, jamais s'auto-cible ;
 //  - le DERNIER compte admin ne peut pas être rétrogradé (anti-lockout console).
 export async function PATCH(req: NextRequest) {
-  const denied = guardAdmin(req)
+  const denied = await guardAdmin(req)
   if (denied) return denied
   try {
     const body = await req.json()

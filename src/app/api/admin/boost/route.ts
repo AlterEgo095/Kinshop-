@@ -5,7 +5,7 @@ import { expireDueCampaigns } from "@/lib/boost"
 
 // GET /api/admin/boost — Toutes les campagnes de promotion (Super Admin)
 export async function GET(req: NextRequest) {
-  const denied = guardAdmin(req)
+  const denied = await guardAdmin(req)
   if (denied) return denied
   try {
     // P6 F6-1 — purge paresseuse globale : l'admin voit des statuts réels
@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
 //   reject   : pending_payment uniquement (jamais une campagne payée/active)
 //   end      : pending_payment | active uniquement
 export async function PATCH(req: NextRequest) {
-  const denied = guardAdmin(req)
+  const denied = await guardAdmin(req)
   if (denied) return denied
   try {
     const body = await req.json()

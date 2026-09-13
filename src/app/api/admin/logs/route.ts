@@ -9,7 +9,7 @@ import { verifyAuditChain } from "@/lib/audit"
 // P5 (F5-4) : ?verify=1 → vérification de la CHAÎNE D'INTÉGRITÉ du journal
 // (recalcul de chaque empreinte + contrôle d'enchaînement) — verdict signé.
 export async function GET(req: NextRequest) {
-  const denied = guardAdmin(req)
+  const denied = await guardAdmin(req)
   if (denied) return denied
 
   try {

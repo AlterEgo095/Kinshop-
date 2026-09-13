@@ -3,7 +3,7 @@ import { db } from "@/lib/db"
 import { getUserFromRequest, requireStoreOwner, unauthorized } from "@/lib/auth"
 
 // GET /api/orders/events?orderId=xxx — Historique immuable d'une commande (V10)
-// Accès : propriétaire de la boutique concernée (dérivé serveur) OU admin (PIN).
+// Accès : administrateur (session) OU propriétaire de la boutique concernée (dérivé serveur).
 export async function GET(req: NextRequest) {
   try {
     const orderId = req.nextUrl.searchParams.get("orderId")
@@ -12,10 +12,9 @@ export async function GET(req: NextRequest) {
     const order = await db.order.findUnique({ where: { id: orderId } })
     if (!order) return NextResponse.json({ error: "Commande introuvable." }, { status: 404 })
 
-    // 1) Admin PIN → accès total
-    const { guardAdmin } = await import("@/lib/admin")
-    const denied = guardAdmin(req)
-    if (!denied) {
+    // 1) Administrateur connecté (session email + mot de passe) → accès total
+    const { isAdminRequest } = await import("@/lib/admin")
+    if (await isAdminRequest(req)) {
       const events = await db.orderEvent.findMany({
         where: { orderId },
         orderBy: { createdAt: "asc" },

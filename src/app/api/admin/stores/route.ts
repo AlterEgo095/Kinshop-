@@ -5,7 +5,7 @@ import { getConfigValue } from "@/lib/config-registry"
 
 // GET /api/admin/stores — Liste complète des boutiques (avec compteurs & CA)
 export async function GET(req: NextRequest) {
-  const denied = guardAdmin(req)
+  const denied = await guardAdmin(req)
   if (denied) return denied
 
   try {
@@ -65,7 +65,7 @@ export async function GET(req: NextRequest) {
 
 // PATCH /api/admin/stores — Actions de modération & gestion premium
 export async function PATCH(req: NextRequest) {
-  const denied = guardAdmin(req)
+  const denied = await guardAdmin(req)
   if (denied) return denied
 
   try {
@@ -181,7 +181,7 @@ export async function PATCH(req: NextRequest) {
 
 // DELETE /api/admin/stores?id=xxx — Supprimer définitivement une boutique (cascade)
 export async function DELETE(req: NextRequest) {
-  const denied = guardAdmin(req)
+  const denied = await guardAdmin(req)
   if (denied) return denied
 
   try {

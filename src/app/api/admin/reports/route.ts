@@ -18,7 +18,7 @@ const REPORT_TRANSITIONS: Record<string, string[]> = {
 
 // GET /api/admin/reports — Tous les signalements (Super Admin)
 export async function GET(req: NextRequest) {
-  const denied = guardAdmin(req)
+  const denied = await guardAdmin(req)
   if (denied) return denied
   try {
     const sp = req.nextUrl.searchParams
@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
 // clôturer (resolved/dismissed), et passerelle de modération action=suspend_store
 // (suspend la boutique ciblée puis passe le signalement en action_required).
 export async function PATCH(req: NextRequest) {
-  const denied = guardAdmin(req)
+  const denied = await guardAdmin(req)
   if (denied) return denied
   try {
     const body = await req.json()

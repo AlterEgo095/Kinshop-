@@ -1,7 +1,8 @@
 "use client"
 
 // Console Admin KinShop — gestion globale de la plateforme
-// Accès : #/admin (lien discret en pied de page) · auth par PIN (ADMIN_PIN côté serveur)
+// Accès : #/admin (lien discret en pied de page) · auth par EMAIL + MOT DE PASSE
+// (compte role=admin, session cookie HttpOnly — même moteur que les comptes vendeurs)
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { motion } from "framer-motion"
@@ -119,8 +120,6 @@ import {
 } from "@/lib/kinshop"
 
 /* ─────────── Types ─────────── */
-
-const PIN_KEY = "kinshop_admin_pin"
 
 type AdminTab =
   | "overview"
@@ -443,7 +442,9 @@ export function AdminConsole({
   /* ── Auth ── */
   const [authed, setAuthed] = useState(false)
   const [checking, setChecking] = useState(true)
-  const [pin, setPin] = useState("")
+  const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
+  const [showPassword, setShowPassword] = useState(false)
   const [loginError, setLoginError] = useState("")
   const [loggingIn, setLoggingIn] = useState(false)
 
@@ -517,14 +518,13 @@ export function AdminConsole({
   /* ── Helpers réseau ── */
 
   const adminFetch = useCallback(async (url: string, init?: RequestInit): Promise<Response> => {
-    const savedPin = localStorage.getItem(PIN_KEY) || ""
+    // Auth par cookie de session (HttpOnly, posé par /api/admin/auth) —
+    // plus aucun secret côté JavaScript.
     const headers: Record<string, string> = {
-      "x-admin-pin": savedPin,
       ...(init?.body ? { "Content-Type": "application/json" } : {}),
     }
     const res = await fetch(url, { ...init, headers })
     if (res.status === 401) {
-      localStorage.removeItem(PIN_KEY)
       setAuthed(false)
       throw new Error("Session admin expirée — reconnecte-toi.")
     }
@@ -690,20 +690,17 @@ export function AdminConsole({
     ;(async () => {
       await Promise.resolve()
       if (cancelled) return
-      const saved = localStorage.getItem(PIN_KEY)
-      if (!saved) {
-        setChecking(false)
-        return
+      // Migration : purge de l'ancien secret PIN stocké côté client
+      try {
+        localStorage.removeItem("kinshop_admin_pin")
+      } catch {
+        /* stockage indisponible */
       }
       try {
-        const res = await fetch("/api/admin/auth", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ pin: saved }),
-        })
+        const res = await fetch("/api/admin/auth", { cache: "no-store" })
         if (cancelled) return
-        if (res.ok) setAuthed(true)
-        else localStorage.removeItem(PIN_KEY)
+        const data = await res.json().catch(() => null)
+        if (res.ok && data?.authenticated) setAuthed(true)
       } catch {
         /* hors ligne : on reste déconnecté */
       } finally {
@@ -774,17 +771,16 @@ export function AdminConsole({
       const res = await fetch("/api/admin/auth", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pin: pin.trim() }),
+        body: JSON.stringify({ email: email.trim(), password }),
       })
       const data = await res.json()
       if (!res.ok) {
-        setLoginError(data.error || "PIN incorrect.")
+        setLoginError(data.error || "Identifiants administrateur invalides.")
         return
       }
-      localStorage.setItem(PIN_KEY, pin.trim())
       setAuthed(true)
-      setPin("")
-      toast.success("Bienvenue dans la console KinShop 👋")
+      setPassword("")
+      toast.success(`Bienvenue dans la console KinShop 👋`)
     } catch {
       setLoginError("Erreur réseau. Réessaie.")
     } finally {
@@ -792,9 +788,15 @@ export function AdminConsole({
     }
   }
 
-  const handleLogout = () => {
-    localStorage.removeItem(PIN_KEY)
+  const handleLogout = async () => {
+    try {
+      await fetch("/api/admin/auth", { method: "DELETE" })
+    } catch {
+      /* réseau : la session locale est réinitialisée quand même */
+    }
     setAuthed(false)
+    setEmail("")
+    setPassword("")
     settingsLoaded.current = false
     setOv(null)
     toast.success("Déconnecté de la console admin.")
@@ -1174,32 +1176,58 @@ export function AdminConsole({
                 </div>
                 <form onSubmit={handleLogin} className="space-y-3">
                   <div className="space-y-1.5">
-                    <Label htmlFor="admin-pin">Code PIN administrateur</Label>
+                    <Label htmlFor="admin-email">Adresse email</Label>
                     <Input
-                      id="admin-pin"
-                      type="password"
-                      inputMode="numeric"
-                      autoComplete="current-password"
+                      id="admin-email"
+                      type="email"
+                      autoComplete="username"
                       autoFocus
-                      placeholder="••••••"
-                      value={pin}
-                      onChange={(e) => setPin(e.target.value)}
-                      className="h-11 text-center tracking-[0.4em] text-lg"
+                      placeholder="admin@exemple.com"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="h-11"
                     />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="admin-password">Mot de passe</Label>
+                    <div className="relative">
+                      <Input
+                        id="admin-password"
+                        type={showPassword ? "text" : "password"}
+                        autoComplete="current-password"
+                        placeholder="••••••••••"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        className="h-11 pr-10"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword((v) => !v)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        aria-label={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+                        tabIndex={-1}
+                      >
+                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
                   </div>
                   {loginError && (
                     <p className="text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2" role="alert">
                       {loginError}
                     </p>
                   )}
-                  <Button type="submit" className="w-full h-11" disabled={loggingIn || !pin.trim()}>
+                  <Button
+                    type="submit"
+                    className="w-full h-11"
+                    disabled={loggingIn || !email.trim() || !password}
+                  >
                     {loggingIn ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Lock className="w-4 h-4 mr-2" />}
                     Déverrouiller la console
                   </Button>
                 </form>
                 <p className="text-[11px] text-muted-foreground text-center">
-                  Démo : PIN par défaut <code className="font-mono">243243</code> — modifiable via
-                  <code className="font-mono"> ADMIN_PIN</code> dans <code className="font-mono">.env</code>
+                  Connexion sécurisée par email et mot de passe. Session chiffrée,
+                  5 tentatives maximum par 15 minutes.
                 </p>
               </CardContent>
             </Card>

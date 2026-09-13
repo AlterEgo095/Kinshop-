@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
     // Authentification OBLIGATOIRE même en mode démo (audit F-02) :
     // l'acheteur de la commande (session) ou l'administrateur — jamais un
     // anonyme, jamais un tiers.
-    if (!isAdminRequest(req)) {
+    if (!(await isAdminRequest(req))) {
       const user = await getUserFromRequest(req)
       if (!user) return unauthorized()
       if (!order.userId || order.userId !== user.id) {

@@ -11,7 +11,7 @@ function cleanName(raw: string): string {
 }
 
 export async function POST(req: NextRequest) {
-  const denied = guardAdmin(req)
+  const denied = await guardAdmin(req)
   if (denied) return denied
   try {
     const body = await req.json()
@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const denied = guardAdmin(req)
+  const denied = await guardAdmin(req)
   if (denied) return denied
   try {
     const body = await req.json()
@@ -68,7 +68,7 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const denied = guardAdmin(req)
+  const denied = await guardAdmin(req)
   if (denied) return denied
   try {
     const id = req.nextUrl.searchParams.get("id")
@@ -99,7 +99,7 @@ export async function DELETE(req: NextRequest) {
 
 // GET : liste complète (actives + inactives) pour la console
 export async function GET(req: NextRequest) {
-  const denied = guardAdmin(req)
+  const denied = await guardAdmin(req)
   if (denied) return denied
   try {
     const cats = await db.globalCategory.findMany({

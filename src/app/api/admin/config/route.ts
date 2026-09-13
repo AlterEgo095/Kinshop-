@@ -13,7 +13,7 @@ import {
 // actuelles. La console ADMIN génère son UI à partir de cette réponse :
 // ajouter un paramètre administrable = ajouter une spec côté serveur.
 export async function GET(req: NextRequest) {
-  const denied = guardAdmin(req)
+  const denied = await guardAdmin(req)
   if (denied) return denied
 
   try {
@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
 // Chaque valeur est VALIDÉE contre sa spec (type, bornes, longueur) puis
 // JOURNALISÉE (ancien → nouveau) dans le journal d'audit AdminAction.
 export async function PATCH(req: NextRequest) {
-  const denied = guardAdmin(req)
+  const denied = await guardAdmin(req)
   if (denied) return denied
 
   try {

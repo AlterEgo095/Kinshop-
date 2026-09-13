@@ -4,7 +4,7 @@ import { guardAdmin, logAdminAction } from "@/lib/admin"
 
 // GET /api/admin/products — Tous les produits de la plateforme
 export async function GET(req: NextRequest) {
-  const denied = guardAdmin(req)
+  const denied = await guardAdmin(req)
   if (denied) return denied
 
   try {
@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
 
 // PATCH /api/admin/products — Ajuster stock / prix
 export async function PATCH(req: NextRequest) {
-  const denied = guardAdmin(req)
+  const denied = await guardAdmin(req)
   if (denied) return denied
 
   try {
@@ -78,7 +78,7 @@ export async function PATCH(req: NextRequest) {
 
 // DELETE /api/admin/products?id=xxx — Supprimer un produit
 export async function DELETE(req: NextRequest) {
-  const denied = guardAdmin(req)
+  const denied = await guardAdmin(req)
   if (denied) return denied
 
   try {

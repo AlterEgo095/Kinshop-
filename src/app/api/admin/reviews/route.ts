@@ -4,7 +4,7 @@ import { guardAdmin, logAdminAction } from "@/lib/admin"
 
 // GET /api/admin/reviews — Tous les avis de la plateforme (modération globale)
 export async function GET(req: NextRequest) {
-  const denied = guardAdmin(req)
+  const denied = await guardAdmin(req)
   if (denied) return denied
 
   try {
@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
 
 // PATCH /api/admin/reviews — Modération admin : masquer / restaurer
 export async function PATCH(req: NextRequest) {
-  const denied = guardAdmin(req)
+  const denied = await guardAdmin(req)
   if (denied) return denied
 
   try {
@@ -74,7 +74,7 @@ export async function PATCH(req: NextRequest) {
 
 // DELETE /api/admin/reviews?id=xxx — Supprimer définitivement un avis
 export async function DELETE(req: NextRequest) {
-  const denied = guardAdmin(req)
+  const denied = await guardAdmin(req)
   if (denied) return denied
 
   try {

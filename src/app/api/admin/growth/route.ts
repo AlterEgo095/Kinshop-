@@ -4,7 +4,7 @@ import { guardAdmin, logAdminAction } from "@/lib/admin"
 
 // GET /api/admin/growth — Vue globale « Croissance » : codes promo + zones de livraison
 export async function GET(req: NextRequest) {
-  const denied = guardAdmin(req)
+  const denied = await guardAdmin(req)
   if (denied) return denied
 
   try {
@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
 
 // PATCH /api/admin/growth — Activer / désactiver un code promo (usage abusif)
 export async function PATCH(req: NextRequest) {
-  const denied = guardAdmin(req)
+  const denied = await guardAdmin(req)
   if (denied) return denied
 
   try {
@@ -72,7 +72,7 @@ export async function PATCH(req: NextRequest) {
 
 // DELETE /api/admin/growth?id=xxx — Supprimer un code promo
 export async function DELETE(req: NextRequest) {
-  const denied = guardAdmin(req)
+  const denied = await guardAdmin(req)
   if (denied) return denied
 
   try {

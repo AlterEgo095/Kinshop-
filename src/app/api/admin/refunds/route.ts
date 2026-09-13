@@ -6,7 +6,7 @@ const REFUND_STATUSES = ["requested", "approved", "rejected", "executed"]
 
 // GET /api/admin/refunds — Toutes les demandes de remboursement (Super Admin)
 export async function GET(req: NextRequest) {
-  const denied = guardAdmin(req)
+  const denied = await guardAdmin(req)
   if (denied) return denied
   try {
     const refunds = await db.refund.findMany({
@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
 // PATCH /api/admin/refunds — Décision admin : approuver / refuser / exécuter
 // Body : { id, action: "approve" | "reject" | "execute", amountUSD?, reference?, proofNote? }
 export async function PATCH(req: NextRequest) {
-  const denied = guardAdmin(req)
+  const denied = await guardAdmin(req)
   if (denied) return denied
   try {
     const body = await req.json()

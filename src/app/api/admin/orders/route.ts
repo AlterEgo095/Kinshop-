@@ -7,7 +7,7 @@ const PAYMENT_STATUSES = ["unpaid", "pending", "paid", "failed"]
 
 // GET /api/admin/orders — Toutes les commandes de la plateforme
 export async function GET(req: NextRequest) {
-  const denied = guardAdmin(req)
+  const denied = await guardAdmin(req)
   if (denied) return denied
 
   try {
@@ -51,7 +51,7 @@ export async function GET(req: NextRequest) {
 
 // PATCH /api/admin/orders — Changer le statut d'une commande / confirmer un paiement (V2)
 export async function PATCH(req: NextRequest) {
-  const denied = guardAdmin(req)
+  const denied = await guardAdmin(req)
   if (denied) return denied
 
   try {
@@ -108,7 +108,7 @@ export async function PATCH(req: NextRequest) {
 // INTERDIT sur une commande réglée (paid/refunded) : l'historique financier et
 // la traçabilité ne sont jamais détruits. Motif exigé pour les autres cas.
 export async function DELETE(req: NextRequest) {
-  const denied = guardAdmin(req)
+  const denied = await guardAdmin(req)
   if (denied) return denied
 
   try {

@@ -8,7 +8,7 @@ function dayKey(d: Date): string {
 
 // GET /api/admin/overview — KPIs globaux de la plateforme
 export async function GET(req: NextRequest) {
-  const denied = guardAdmin(req)
+  const denied = await guardAdmin(req)
   if (denied) return denied
 
   try {

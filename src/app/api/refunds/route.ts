@@ -126,7 +126,9 @@ export async function GET(req: NextRequest) {
     if (!user) return unauthorized()
 
     const isOrderCustomer = order.userId === user.id
-    const isAdmin = (await import("@/lib/admin")).guardAdmin(req) === null
+    // Administrateur (session email + mot de passe) — test informatif, sans comptage
+    const { isAdminRequest } = await import("@/lib/admin")
+    const isAdmin = await isAdminRequest(req)
     if (!isOrderCustomer && !isAdmin) {
       const guard = await requireStoreOwner(req, { id: order.storeId })
       if (!guard.ok) return guard.response
