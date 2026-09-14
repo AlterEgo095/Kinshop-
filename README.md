@@ -138,7 +138,7 @@ prisma/schema.prisma          # Models : Store, Product, Order, PulseDelivery, S
 
 Accessible via le lien discret « Espace admin » en pied de page ou directement sur `#/admin` :
 
-- **Authentification par PIN** (`ADMIN_PIN` dans `.env`, par défaut `243243` en démo)
+- **Authentification administrateur par session** (email + mot de passe — le code PIN a été retiré)
 - **Vue d'ensemble** : KPIs temps réel (boutiques, premium, GMV), graphique des commandes sur 14 jours, répartition des moyens de paiement, top boutiques, alertes premium expirants
 - **Boutiques** : recherche/filtres, suspendre · réactiver, accorder/révoquer le Premium (+30 j/+90 j/+1 an), contact WhatsApp propriétaire, suppression cascade
 - **Commandes** : filtres (statut **+ statut de paiement V2**), changement de statut, confirmation manuelle de paiement, détail complet, contact client, suppression

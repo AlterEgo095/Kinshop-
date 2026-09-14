@@ -7,7 +7,13 @@ const globalForPrisma = globalThis as unknown as {
 export const db =
   globalForPrisma.prisma ??
   new PrismaClient({
-    log: ['query'],
+    // E1 vague 1 : en production, seule la journalisation utile est conservée.
+    // 'query' inondait le journal PM2 de chaque requête SQL (I/O + CPU permanents,
+    // dilution des messages utiles, données personnelles dans les logs).
+    log:
+      process.env.NODE_ENV === 'production'
+        ? ['warn', 'error']
+        : ['query', 'warn', 'error'],
   })
 
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db

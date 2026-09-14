@@ -32,11 +32,23 @@ export function rateLimit(key: string, max: number, windowMs: number): boolean {
   return true
 }
 
-/** IP cliente (derrière nginx : premier élément de x-forwarded-for). */
+/** IP cliente — ordre de confiance décroissant (C2 vague 1) :
+ *  1. cf-connecting-ip : posé par Cloudflare, non falsifiable derrière CF ;
+ *  2. x-real-ip : écrasé par nginx avec $remote_addr (real_ip plages CF) ;
+ *  3. DERNIER élément de x-forwarded-for : ajouté par nginx (XFF écrasé côté nginx).
+ *  Le premier élément de XFF n'est plus utilisé : il était falsifiable par l'appelant. */
 export function clientIp(req: NextRequest): string {
-  return (
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    req.headers.get("x-real-ip")?.trim() ||
-    "local"
-  )
+  const cf = req.headers.get("cf-connecting-ip")?.trim()
+  if (cf) return cf
+  const real = req.headers.get("x-real-ip")?.trim()
+  if (real) return real
+  const xff = req.headers.get("x-forwarded-for")?.trim()
+  if (xff) {
+    const parts = xff
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+    if (parts.length > 0) return parts[parts.length - 1]
+  }
+  return "local"
 }

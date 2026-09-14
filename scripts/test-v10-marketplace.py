@@ -4,7 +4,7 @@
 import json, subprocess, sys, time, re, random, string, os
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:3000"
-PIN = os.environ.get("KINSHOP_PIN", "243243")  # PIN dev local
+PIN = os.environ.get("KINSHOP_PIN", "")  # auth PIN retirée en prod
 JAR = {}  # cookie jars par "utilisateur"
 
 results = {"pass": 0, "fail": 0, "details": []}

@@ -8,7 +8,7 @@ ok()   { PASS=$((PASS+1)); echo "  ✅ $1"; }
 ko()   { FAIL=$((FAIL+1)); echo "  ❌ $1"; }
 check(){ if [ "$1" = "$2" ]; then ok "$3 ($1)"; else ko "$3 — attendu $2, obtenu $1"; fi; }
 
-ADMIN_PIN="${ADMIN_PIN:-243243}"
+ADMIN_PIN="${ADMIN_PIN:?Auth PIN retirée en prod — variable requise}"
 AH=(-H "x-admin-pin: $ADMIN_PIN" -H "Content-Type: application/json")
 
 echo "── 1. SÉCURITÉ : /api/admin/config sans/avec PIN ──"

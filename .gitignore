@@ -64,3 +64,6 @@ server.log
 /download
 /tool-results
 tmp-p4/
+worklog.md
+backups/
+logs/

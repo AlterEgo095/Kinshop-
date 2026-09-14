@@ -14,7 +14,7 @@
 | TLS | Let's Encrypt (certbot webroot, renouvellement auto, expire 2026-12-11) |
 | Base | SQLite `/opt/KINSHOP/db/kinshop.db` (vide en prod) |
 | Logs | `/opt/KINSHOP/logs/kinshop-{out,error}.log` (+ pm2-logrotate) |
-| `.env` | `/opt/KINSHOP/.env` (chmod 600) : DATABASE_URL, ADMIN_PIN fort, NEXT_PUBLIC_PLATFORM_DOMAIN, PLATFORM_IPV4 |
+| `.env` | `/opt/KINSHOP/.env` (chmod 600) : DATABASE_URL, CHARIOW_API_KEY, APP_URL, NEXT_PUBLIC_PLATFORM_DOMAIN |
 
 **Modèle du serveur** (identique aux autres apps : IAHUB, wedding-platform…) :
 `/opt/<APP>` + build Next.js **standalone** + **PM2** + **nginx vhost** + **certbot**.
@@ -44,7 +44,7 @@ Un compte = **une** boutique. Les boutiques créées avant la V8 (ownerId null,
 # 1. Le vendeur crée son compte sur la plateforme (ex. vendeur@exemple.cd)
 # 2. L'admin rattache sa boutique :
 curl -X PATCH https://kinshop.aenews.digital/api/admin/stores \
-  -H "x-admin-pin: $ADMIN_PIN" -H "Content-Type: application/json" \
+  -H "Content-Type: application/json" -H "Cookie: kinshop_session=<session admin>" \
   -d '{"id":"<STORE_ID>","action":"assign-owner","email":"vendeur@exemple.cd"}'
 ```
 
@@ -94,7 +94,7 @@ sqlite3 /opt/KINSHOP/db/kinshop.db ".backup /opt/KINSHOP/backups/kinshop-$(date 
 
 1. **Bascule auth SSH par clé** + désactiver PasswordAuthentication
 2. Changer le mot de passe `aenews` (partagé en clair pendant le déploiement)
-3. **ADMIN_PIN** : généré fort (8 chiffres) et stocké dans `/opt/KINSHOP/.env` — le communiquer à l'équipe puis le changer si besoin : `sed -i "s/ADMIN_PIN=.*/ADMIN_PIN=NOUVEAU/" /opt/KINSHOP/.env && pm2 restart kinshop`
+3. **Auth admin** : par email + mot de passe (session opaque) — le code PIN a été retiré. Sauvegardes SQLite quotidiennes actives (cron 03:45, `scripts/backup.sh`, test de restauration hebdomadaire le dimanche 04:20).
 4. Révoquer le PAT GitHub exposé (GitHub → Settings → Developer settings)
 5. ufw : autoriser 22/80/443 uniquement si ce n'est pas déjà fait
 
