@@ -83,8 +83,13 @@ export async function initiateMomoPayment(params: {
 
 /** Vérifie le token de callback du webhook (si configuré). */
 export function isWebhookAuthorized(tokenInBody: string | null, tokenInQuery: string | null): boolean {
+  // Vague 1 premium : dès que MOMO_CALLBACK_TOKEN est configuré, il est exigé —
+  // y compris en mode simulation. Un webhook de paiement ne doit jamais rester
+  // ouvert silencieusement quand un secret a été posé côté serveur.
+  const envToken = process.env.MOMO_CALLBACK_TOKEN?.trim()
+  if (envToken) return tokenInBody === envToken || tokenInQuery === envToken
   const cfg = getMomoConfig()
-  if (!cfg) return true // mode simulation : webhook ouvert (aucune donnée réelle en jeu)
+  if (!cfg) return true // simulation sans token configuré : webhook ouvert par conception (démo)
   const expected = cfg.callbackToken
   if (!expected) return true // live sans token de callback configuré : on accepte (comportement FlexPay par défaut)
   return tokenInBody === expected || tokenInQuery === expected
