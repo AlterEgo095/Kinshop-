@@ -3,6 +3,11 @@
 // V8 — Inscription / Connexion : la porte d'entrée obligatoire vers la gestion
 // d'une boutique. La sécurité réelle reste côté serveur (session HttpOnly) ;
 // cette vue ne fait qu'orchestrer le parcours utilisateur.
+//
+// Vague 3 — i18n premium : vue entièrement bilingue FR/EN. Cette vue est rendue
+// par kinshop-app.tsx, HORS du LangProvider de la landing : elle embarque donc
+// son propre LangProvider (cookie kinshop_lang lu après hydratation — rendu
+// serveur initial en fr, zéro mismatch, même contrat que la landing).
 
 import { useState } from "react"
 import { motion } from "framer-motion"
@@ -12,6 +17,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { LangProvider, useLang } from "@/components/kinshop/lang-context"
 
 export type AuthMode = "login" | "register"
 
@@ -24,12 +30,8 @@ interface AuthViewProps {
   onSwitchMode: (mode: AuthMode) => void
 }
 
-const NEXT_LABEL: Record<NonNullable<AuthViewProps["next"]>, string> = {
-  create: "créer ta boutique",
-  dashboard: "gérer ta boutique",
-}
-
-export function AuthView({ initialMode, next, onAuthed, onCancel, onSwitchMode }: AuthViewProps) {
+function AuthViewInner({ initialMode, next, onAuthed, onCancel, onSwitchMode }: AuthViewProps) {
+  const { tr } = useLang()
   const [mode, setMode] = useState<AuthMode>(initialMode)
 
   // Inscription
@@ -45,17 +47,21 @@ export function AuthView({ initialMode, next, onAuthed, onCancel, onSwitchMode }
 
   const [loading, setLoading] = useState(false)
 
+  /** "create" | "dashboard" → libellé traduit (auth.next.*). */
+  const nextLabel = (n: NonNullable<AuthViewProps["next"]>) =>
+    tr(n === "create" ? "auth.next.create" : "auth.next.dashboard")
+
   const submitRegister = async () => {
     if (name.trim().length < 2) {
-      toast.error("Ton nom est requis (2 caractères minimum).")
+      toast.error(tr("auth.tNameReq"))
       return
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
-      toast.error("Adresse email invalide.")
+      toast.error(tr("auth.tEmailBad"))
       return
     }
     if (password.length < 8) {
-      toast.error("Le mot de passe doit contenir au moins 8 caractères.")
+      toast.error(tr("auth.tPwMin"))
       return
     }
     setLoading(true)
@@ -66,11 +72,11 @@ export function AuthView({ initialMode, next, onAuthed, onCancel, onSwitchMode }
         body: JSON.stringify({ name, email, password, whatsapp }),
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || "Erreur lors de la création du compte.")
-      toast.success(`Bienvenue ${data.user.name} ! 🎉`)
+      if (!res.ok) throw new Error(data.error || tr("auth.tRegFail"))
+      toast.success(tr("auth.welcome").replace("{name}", data.user.name))
       onAuthed()
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Erreur inconnue")
+      toast.error(e instanceof Error ? e.message : tr("auth.tUnknown"))
     } finally {
       setLoading(false)
     }
@@ -78,7 +84,7 @@ export function AuthView({ initialMode, next, onAuthed, onCancel, onSwitchMode }
 
   const submitLogin = async () => {
     if (!loginEmail.trim() || !loginPassword) {
-      toast.error("Email et mot de passe requis.")
+      toast.error(tr("auth.tLoginReq"))
       return
     }
     setLoading(true)
@@ -89,11 +95,11 @@ export function AuthView({ initialMode, next, onAuthed, onCancel, onSwitchMode }
         body: JSON.stringify({ email: loginEmail, password: loginPassword }),
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || "Erreur lors de la connexion.")
-      toast.success(`Content de te revoir, ${data.user.name} ! 👋`)
+      if (!res.ok) throw new Error(data.error || tr("auth.tLoginFail"))
+      toast.success(tr("auth.welcomeBack").replace("{name}", data.user.name))
       onAuthed()
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Erreur inconnue")
+      toast.error(e instanceof Error ? e.message : tr("auth.tUnknown"))
     } finally {
       setLoading(false)
     }
@@ -116,12 +122,12 @@ export function AuthView({ initialMode, next, onAuthed, onCancel, onSwitchMode }
           {mode === "login" ? (
             <Button variant="outline" size="sm" onClick={() => switchTo("register")}>
               <UserPlus className="w-4 h-4 mr-1.5" />
-              Créer un compte
+              {tr("auth.createAccount")}
             </Button>
           ) : (
             <Button variant="outline" size="sm" onClick={() => switchTo("login")}>
               <LogIn className="w-4 h-4 mr-1.5" />
-              Se connecter
+              {tr("auth.login")}
             </Button>
           )}
         </div>
@@ -136,14 +142,14 @@ export function AuthView({ initialMode, next, onAuthed, onCancel, onSwitchMode }
         >
           <div className="text-center mb-8">
             <h1 className="text-3xl font-bold tracking-tight">
-              {mode === "register" ? "Crée ton compte 🎉" : "Content de te revoir 👋"}
+              {mode === "register" ? tr("auth.regTitle") : tr("auth.loginTitle")}
             </h1>
             <p className="text-muted-foreground mt-2">
               {mode === "register"
-                ? "Gratuit, en français — ta boutique sera prête en 5 minutes."
+                ? tr("auth.regSub")
                 : next
-                  ? `Connecte-toi pour ${NEXT_LABEL[next]}.`
-                  : "Connecte-toi pour gérer ta boutique."}
+                  ? tr("auth.loginFor").replace("{next}", nextLabel(next))
+                  : tr("auth.loginSub")}
             </p>
           </div>
 
@@ -152,13 +158,13 @@ export function AuthView({ initialMode, next, onAuthed, onCancel, onSwitchMode }
               {mode === "register" ? (
                 <>
                   <div className="space-y-2">
-                    <Label htmlFor="authName">Ton nom *</Label>
+                    <Label htmlFor="authName">{tr("auth.name")}</Label>
                     <div className="relative">
                       <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                       <Input
                         id="authName"
                         className="pl-9"
-                        placeholder="Ex : Ngo Mputu"
+                        placeholder={tr("auth.namePh")}
                         value={name}
                         onChange={(e) => setName(e.target.value)}
                         maxLength={60}
@@ -168,14 +174,14 @@ export function AuthView({ initialMode, next, onAuthed, onCancel, onSwitchMode }
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="authEmail">Adresse email *</Label>
+                    <Label htmlFor="authEmail">{tr("auth.email")}</Label>
                     <div className="relative">
                       <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                       <Input
                         id="authEmail"
                         type="email"
                         className="pl-9"
-                        placeholder="toi@exemple.cd"
+                        placeholder={tr("auth.emailPh")}
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
                         maxLength={120}
@@ -185,7 +191,7 @@ export function AuthView({ initialMode, next, onAuthed, onCancel, onSwitchMode }
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="authWhatsapp">Numéro WhatsApp (optionnel)</Label>
+                    <Label htmlFor="authWhatsapp">{tr("auth.whatsapp")}</Label>
                     <div className="relative">
                       <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                       <Input
@@ -202,7 +208,7 @@ export function AuthView({ initialMode, next, onAuthed, onCancel, onSwitchMode }
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="authPassword">Mot de passe * (8 caractères minimum)</Label>
+                    <Label htmlFor="authPassword">{tr("auth.passwordReg")}</Label>
                     <div className="relative">
                       <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                       <Input
@@ -219,7 +225,7 @@ export function AuthView({ initialMode, next, onAuthed, onCancel, onSwitchMode }
                         type="button"
                         onClick={() => setShowPassword((s) => !s)}
                         className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                        aria-label={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+                        aria-label={showPassword ? tr("auth.hidePw") : tr("auth.showPw")}
                       >
                         {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
@@ -230,34 +236,34 @@ export function AuthView({ initialMode, next, onAuthed, onCancel, onSwitchMode }
                     {loading ? (
                       <>
                         <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        Création du compte…
+                        {tr("auth.creating")}
                       </>
                     ) : (
                       <>
                         <UserPlus className="w-4 h-4 mr-2" />
-                        Créer mon compte
+                        {tr("auth.createBtn")}
                       </>
                     )}
                   </Button>
 
                   <p className="text-center text-sm text-muted-foreground">
-                    Tu as déjà un compte ?{" "}
+                    {tr("auth.hasAccount")}{" "}
                     <button onClick={() => switchTo("login")} className="text-primary font-medium hover:underline">
-                      Se connecter
+                      {tr("auth.login")}
                     </button>
                   </p>
                 </>
               ) : (
                 <>
                   <div className="space-y-2">
-                    <Label htmlFor="loginEmail">Adresse email</Label>
+                    <Label htmlFor="loginEmail">{tr("auth.email")}</Label>
                     <div className="relative">
                       <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                       <Input
                         id="loginEmail"
                         type="email"
                         className="pl-9"
-                        placeholder="toi@exemple.cd"
+                        placeholder={tr("auth.emailPh")}
                         value={loginEmail}
                         onChange={(e) => setLoginEmail(e.target.value)}
                         maxLength={120}
@@ -267,7 +273,7 @@ export function AuthView({ initialMode, next, onAuthed, onCancel, onSwitchMode }
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="loginPassword">Mot de passe</Label>
+                    <Label htmlFor="loginPassword">{tr("auth.password")}</Label>
                     <div className="relative">
                       <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                       <Input
@@ -284,7 +290,7 @@ export function AuthView({ initialMode, next, onAuthed, onCancel, onSwitchMode }
                         type="button"
                         onClick={() => setShowPassword((s) => !s)}
                         className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                        aria-label={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+                        aria-label={showPassword ? tr("auth.hidePw") : tr("auth.showPw")}
                       >
                         {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
@@ -295,20 +301,20 @@ export function AuthView({ initialMode, next, onAuthed, onCancel, onSwitchMode }
                     {loading ? (
                       <>
                         <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        Connexion…
+                        {tr("auth.logging")}
                       </>
                     ) : (
                       <>
                         <LogIn className="w-4 h-4 mr-2" />
-                        Se connecter
+                        {tr("auth.login")}
                       </>
                     )}
                   </Button>
 
                   <p className="text-center text-sm text-muted-foreground">
-                    Pas encore de compte ?{" "}
+                    {tr("auth.noAccount")}{" "}
                     <button onClick={() => switchTo("register")} className="text-primary font-medium hover:underline">
-                      Créer un compte gratuitement
+                      {tr("auth.registerFree")}
                     </button>
                   </p>
                 </>
@@ -316,8 +322,7 @@ export function AuthView({ initialMode, next, onAuthed, onCancel, onSwitchMode }
 
               <div className="rounded-xl bg-muted p-3 text-xs text-muted-foreground flex items-start gap-2">
                 <Lock className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                Ton mot de passe est chiffré (scrypt) et la connexion s&apos;appuie sur une session
-                sécurisée HttpOnly. Personne ne peut gérer ta boutique sans ton compte.
+                {tr("auth.secureNote")}
               </div>
             </CardContent>
           </Card>
@@ -325,11 +330,19 @@ export function AuthView({ initialMode, next, onAuthed, onCancel, onSwitchMode }
           <div className="mt-6 text-center">
             <Button variant="ghost" onClick={onCancel}>
               <ArrowLeft className="w-4 h-4 mr-2" />
-              Retour à l&apos;accueil
+              {tr("auth.backHome")}
             </Button>
           </div>
         </motion.div>
       </main>
     </div>
+  )
+}
+
+export function AuthView(props: AuthViewProps) {
+  return (
+    <LangProvider>
+      <AuthViewInner {...props} />
+    </LangProvider>
   )
 }

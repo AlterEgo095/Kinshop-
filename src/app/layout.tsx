@@ -37,6 +37,7 @@ const COPY = {
       "e-commerce Kinshasa",
     ],
     locale: "fr_CD",
+    ogAlt: "KinShop — Ta boutique en ligne en 5 minutes",
   },
   en: {
     title: "KinShop — Your online shop in 5 minutes",
@@ -54,6 +55,7 @@ const COPY = {
       "e-commerce Kinshasa",
     ],
     locale: "en_US",
+    ogAlt: "KinShop — Your online shop in 5 minutes",
   },
 } as const;
 
@@ -116,11 +118,22 @@ export async function generateMetadata(): Promise<Metadata> {
       url: "/",
       type: "website",
       locale: copy.locale,
+      // Vague 3 — partage social premium : visuel de marque 1200x630 (JPEG réel,
+      // dérivé du hero) pour WhatsApp, Facebook, X et LinkedIn.
+      images: [
+        {
+          url: "/og/og-cover.jpg",
+          width: 1200,
+          height: 630,
+          alt: copy.ogAlt,
+        },
+      ],
     },
     twitter: {
-      card: "summary",
+      card: "summary_large_image",
       title: copy.title,
       description: copy.pitch,
+      images: ["/og/og-cover.jpg"],
     },
     robots: {
       index: true,

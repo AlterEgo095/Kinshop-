@@ -55,5 +55,20 @@
       <button onclick="location.reload()">Réessayer</button>
       <p class="brand">Propulsé par KinShop 🇨🇩</p>
     </div>
+    <script>
+      // Vague 3 — offline bilingue : si le navigateur est en anglais, on
+      // traduit les textes à la volée (fichier statique, pas d'infra i18n).
+      (function () {
+        var nav = (navigator.language || "").toLowerCase();
+        if (nav.indexOf("en") !== 0) return;
+        document.documentElement.lang = "en";
+        document.title = "KinShop — Offline";
+        document.querySelector("h1").textContent = "You're offline";
+        document.querySelector("p").textContent =
+          "This page couldn't be loaded right now. Check your 3G/4G or Wi-Fi connection and try again \u2014 pages you already visited stay available.";
+        document.querySelector("button").textContent = "Try again";
+        document.querySelector(".brand").textContent = "Powered by KinShop \uD83C\uDDE8\uD83C\uDDE9";
+      })();
+    </script>
   </body>
 </html>

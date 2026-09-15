@@ -5,8 +5,9 @@
 // choisie vit dans le cookie kinshop_lang (365 j) ; le serveur le lit dans
 // layout.tsx (generateMetadata + <html lang>) et le client via LangProvider
 // (src/components/kinshop/lang-context.tsx). Défaut : fr (marché historique).
-// Roadmap vague 3 : store-view + auth-view + dashboard, puis routage /en pour
-// hreflang (les URL distinctes sont un prérequis SEO hreflang).
+// Vague 3 : auth-view traduite, pages d'erreur bilingues, OG social premium.
+// Reste sur la roadmap : store-view + dashboard, puis routage /en pour hreflang
+// (les URL distinctes sont un prérequis SEO hreflang).
 
 export type Lang = "fr" | "en"
 
@@ -213,6 +214,64 @@ export const DICT = {
     fr: "© 2025 KinShop · M-Pesa, Airtel Money et Orange Money sont des marques de leurs propriétaires",
     en: "© 2025 KinShop · M-Pesa, Airtel Money and Orange Money are trademarks of their respective owners",
   },
+
+  /* ─── Pages d'erreur (vague 3) ─── */
+  "err.404.title": { fr: "Page introuvable", en: "Page not found" },
+  "err.404.body": {
+    fr: "Cette page n'existe pas ou a été déplacée. Reviens à l'accueil, tout est encore là.",
+    en: "This page doesn't exist or has moved. Head back home — everything is still there.",
+  },
+  "err.404.cta": { fr: "Retour à la boutique", en: "Back to the shop" },
+  "err.500.title": { fr: "Oups, une erreur est survenue", en: "Oops, something went wrong" },
+  "err.500.body": {
+    fr: "Une erreur inattendue est survenue. Réessaie — si le problème persiste, recharge la page.",
+    en: "An unexpected error occurred. Try again — if it persists, reload the page.",
+  },
+  "err.500.cta": { fr: "Réessayer", en: "Try again" },
+  "err.500.home": { fr: "Aller à l'accueil", en: "Go home" },
+
+  /* ─── Auth : inscription / connexion (vague 3) ─── */
+  "auth.createAccount": { fr: "Créer un compte", en: "Create an account" },
+  "auth.login": { fr: "Se connecter", en: "Log in" },
+  "auth.regTitle": { fr: "Crée ton compte 🎉", en: "Create your account 🎉" },
+  "auth.loginTitle": { fr: "Content de te revoir 👋", en: "Welcome back 👋" },
+  "auth.regSub": {
+    fr: "Gratuit, en français — ta boutique sera prête en 5 minutes.",
+    en: "Free and simple — your shop will be ready in 5 minutes.",
+  },
+  "auth.loginFor": { fr: "Connecte-toi pour {next}.", en: "Log in to {next}." },
+  "auth.next.create": { fr: "créer ta boutique", en: "create your shop" },
+  "auth.next.dashboard": { fr: "gérer ta boutique", en: "manage your shop" },
+  "auth.loginSub": { fr: "Connecte-toi pour gérer ta boutique.", en: "Log in to manage your shop." },
+  "auth.name": { fr: "Ton nom *", en: "Your name *" },
+  "auth.namePh": { fr: "Ex : Ngo Mputu", en: "E.g.: Ngo Mputu" },
+  "auth.email": { fr: "Adresse email *", en: "Email address *" },
+  "auth.emailPh": { fr: "toi@exemple.cd", en: "you@example.com" },
+  "auth.whatsapp": { fr: "Numéro WhatsApp (optionnel)", en: "WhatsApp number (optional)" },
+  "auth.passwordReg": { fr: "Mot de passe * (8 caractères minimum)", en: "Password * (8 characters minimum)" },
+  "auth.password": { fr: "Mot de passe", en: "Password" },
+  "auth.showPw": { fr: "Afficher le mot de passe", en: "Show password" },
+  "auth.hidePw": { fr: "Masquer le mot de passe", en: "Hide password" },
+  "auth.creating": { fr: "Création du compte…", en: "Creating account…" },
+  "auth.createBtn": { fr: "Créer mon compte", en: "Create my account" },
+  "auth.logging": { fr: "Connexion…", en: "Logging in…" },
+  "auth.hasAccount": { fr: "Tu as déjà un compte ?", en: "Already have an account?" },
+  "auth.noAccount": { fr: "Pas encore de compte ?", en: "No account yet?" },
+  "auth.registerFree": { fr: "Créer un compte gratuitement", en: "Create a free account" },
+  "auth.secureNote": {
+    fr: "Ton mot de passe est chiffré (scrypt) et la connexion s'appuie sur une session sécurisée HttpOnly. Personne ne peut gérer ta boutique sans ton compte.",
+    en: "Your password is hashed (scrypt) and login relies on a secure HttpOnly session. Nobody can manage your shop without your account.",
+  },
+  "auth.backHome": { fr: "Retour à l'accueil", en: "Back to home" },
+  "auth.tNameReq": { fr: "Ton nom est requis (2 caractères minimum).", en: "Your name is required (2 characters minimum)." },
+  "auth.tEmailBad": { fr: "Adresse email invalide.", en: "Invalid email address." },
+  "auth.tPwMin": { fr: "Le mot de passe doit contenir au moins 8 caractères.", en: "Password must be at least 8 characters." },
+  "auth.tLoginReq": { fr: "Email et mot de passe requis.", en: "Email and password are required." },
+  "auth.tRegFail": { fr: "Erreur lors de la création du compte.", en: "Error creating your account." },
+  "auth.tLoginFail": { fr: "Erreur lors de la connexion.", en: "Error logging in." },
+  "auth.tUnknown": { fr: "Erreur inconnue", en: "Unknown error" },
+  "auth.welcome": { fr: "Bienvenue {name} ! 🎉", en: "Welcome {name}! 🎉" },
+  "auth.welcomeBack": { fr: "Content de te revoir, {name} ! 👋", en: "Welcome back, {name}! 👋" },
 } as const
 
 export type DictKey = keyof typeof DICT
