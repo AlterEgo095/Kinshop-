@@ -23,7 +23,7 @@ interface HomeData {
   sponsored: { campaignId: string; slug: string; name: string; logoEmoji: string; city: string; description: string; verified?: boolean }[]
   popular: { slug: string; name: string; logoEmoji: string; city: string; description: string; visitors30d: number; verified?: boolean }[]
   newest: { slug: string; name: string; logoEmoji: string; city: string; description: string }[]
-  products: { id: string; name: string; emoji: string; imageUrl: string; priceUSD: number; category: string; store: { name: string; slug: string } }[]
+  products: { id: string; name: string; emoji: string; imageUrl: string; priceUSD: number; category: string; description?: string; store: { name: string; slug: string } }[]
   // P2 — navigation par catégories globales (barre d'icônes + filtre actif)
   categories?: HomeCategory[]
   category?: HomeCategory | null
@@ -243,6 +243,10 @@ export function MarketplaceHome({ onOpenStore }: { onOpenStore: (slug: string) =
                     </div>
                     <p className="font-bold text-sm truncate">{p.name}</p>
                     <p className="text-xs text-muted-foreground truncate">{p.store.name}</p>
+                    {/* Mission Premium — extrait de description (accueil marketplace) */}
+                    {p.description && (
+                      <p className="text-[11px] text-muted-foreground leading-snug line-clamp-2 min-h-[2em]">{p.description}</p>
+                    )}
                     <p className="text-sm font-extrabold text-primary">{formatUSD(p.priceUSD)}</p>
                   </CardContent>
                 </Card>

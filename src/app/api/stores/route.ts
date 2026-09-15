@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
-import { normalizeImages, slugify } from "@/lib/kinshop"
+import { normalizeImages, normalizeSpecs, slugify } from "@/lib/kinshop"
 import { getPlatformSettings } from "@/lib/admin"
 import { getUserFromRequest, requireStoreOwner, unauthorized } from "@/lib/auth"
 import { getConfigValue } from "@/lib/config-registry"
@@ -149,7 +149,13 @@ export async function GET(req: NextRequest) {
             globalName: c.globalCategory?.name ?? null,
           })),
           // V4 — galerie multi-photos normalisée (retombe sur imageUrl si vide)
-          products: publicStore.products.map((p) => ({ ...p, images: normalizeImages(p.images, p.imageUrl) })),
+          // Mission Premium — specs produit normalisées + description servies tels quels
+          // (la description fait partie de la vitrine publique, champ Product.description)
+          products: publicStore.products.map((p) => ({
+            ...p,
+            images: normalizeImages(p.images, p.imageUrl),
+            specs: normalizeSpecs(p.specs),
+          })),
         },
       },
       // no-store : le taux FC/$ peut être modifié à tout moment par l'admin

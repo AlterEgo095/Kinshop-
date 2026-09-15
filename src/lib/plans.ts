@@ -21,6 +21,10 @@ export interface PlanQuota {
   maxProducts: number
   /** Nombre maximum de photos par produit */
   maxProductImages: number
+  /** Mission Premium — longueur max de la description produit (0 = fonctionnalité verrouillée) */
+  maxDescriptionChars: number
+  /** Mission Premium — nombre max de caractéristiques structurées (0 = fonctionnalité verrouillée) */
+  maxSpecs: number
   /** Nombre maximum de codes promo */
   maxCoupons: number
   /** Nombre maximum de zones de livraison */
@@ -45,6 +49,8 @@ export const PLANS: Record<PlanId, PlanQuota> = {
     priceUSD: 0,
     maxProducts: 20,
     maxProductImages: 1,
+    maxDescriptionChars: 0,
+    maxSpecs: 0,
     maxCoupons: 3,
     maxDeliveryZones: 5,
     maxInvoicesPerMonth: 15,
@@ -59,6 +65,8 @@ export const PLANS: Record<PlanId, PlanQuota> = {
     priceUSD: 3,
     maxProducts: 500,
     maxProductImages: 5,
+    maxDescriptionChars: 3000,
+    maxSpecs: 12,
     maxCoupons: 30,
     maxDeliveryZones: 25,
     maxInvoicesPerMonth: 500,

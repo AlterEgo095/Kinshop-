@@ -38,6 +38,7 @@ import {
   DEFAULT_RATE_FC,
   computeCouponDiscount,
   computeOrderTotals,
+  descriptionPlainText,
   formatFC,
   formatPhoneDisplay,
   formatUSD,
@@ -53,6 +54,7 @@ import {
 } from "@/lib/kinshop"
 import { type PublicConfig, configBool } from "@/lib/config-defaults"
 import { DELIVERY_KIND_LABELS, type DeliveryKind } from "@/lib/order-workflow"
+import { ProductDescription } from "@/components/kinshop/product-description"
 
 interface StoreViewProps {
   slug: string
@@ -860,6 +862,12 @@ export function StoreView({ slug, onBack, platformRate, config = {}, authUser = 
                     >
                       {p.name}
                     </button>
+                    {/* Mission Premium — extrait de description (carte vitrine) */}
+                    {descriptionPlainText(p.description) && (
+                      <p className="text-xs text-muted-foreground leading-snug mb-1 line-clamp-2">
+                        {descriptionPlainText(p.description)}
+                      </p>
+                    )}
                     <div className="mt-auto">
                       <p className="font-extrabold text-primary text-lg leading-tight">
                         {formatFC(p.priceUSD * rate)}
@@ -1065,6 +1073,16 @@ export function StoreView({ slug, onBack, platformRate, config = {}, authUser = 
                     <p className="text-xs text-muted-foreground">{formatUSD(detail.priceUSD)}</p>
                   </div>
                 </div>
+                {/* Mission Premium — description mise en forme + caractéristiques
+                    (zone déroulante : les fiches riches restent compactes) */}
+                {(detail.description?.trim() || (detail.specs?.length ?? 0) > 0) && (
+                  <div
+                    className="max-h-56 overflow-y-auto scrollbar-thin rounded-xl bg-muted/40 p-3"
+                    aria-label="Description du produit"
+                  >
+                    <ProductDescription description={detail.description} specs={detail.specs} />
+                  </div>
+                )}
                 <Button
                   size="lg"
                   className="w-full text-base"

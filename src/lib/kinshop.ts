@@ -7,11 +7,140 @@ export interface ProductData {
   emoji: string
   imageUrl: string
   images: string[] // V4 — galerie multi-photos (1re = image principale)
+  // Mission Premium — présentation commerciale riche (fonctionnalités abonnés)
+  description: string // texte mis en forme (paragraphes, « - » puces, **gras**)
+  specs: ProductSpec[] // caractéristiques structurées (dimensions, avantages, variantes…)
   priceUSD: number
   category: string
   // P2 — catégorie structurée de boutique (rattache le produit à la navigation vitrine)
   storeCategoryId?: string | null
   stock: number
+}
+
+/* ─────────── Mission Premium — fiche produit enrichie ─────────── */
+
+/** Caractéristique structurée d'un produit (label court + valeur). */
+export interface ProductSpec {
+  label: string
+  value: string
+}
+
+/** Limites de référence (client) — la source de vérité serveur reste les quotas dynamiques admin. */
+export const MAX_DESCRIPTION_CHARS = 3000
+export const MAX_SPEC_LABEL_CHARS = 40
+export const MAX_SPEC_VALUE_CHARS = 200
+export const MAX_SPECS = 12
+
+/**
+ * Normalise la liste de caractéristiques structurées d'un produit.
+ * Accepte : un tableau JS [{label,value}], une chaîne JSON (stockage SQLite)
+ * ou rien. Chaque entrée est nettoyée (chaînes, longueurs plafonnées,
+ * maximum MAX_SPECS entrées) — jamais d'exception sur une donnée corrompue.
+ */
+export function normalizeSpecs(raw: unknown): ProductSpec[] {
+  let arr: unknown[] = []
+  if (typeof raw === "string" && raw.trim()) {
+    try {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) arr = parsed
+    } catch {
+      // JSON invalide : on ignore silencieusement (résilience données legacy)
+    }
+  } else if (Array.isArray(raw)) {
+    arr = raw
+  }
+  const out: ProductSpec[] = []
+  for (const item of arr.slice(0, MAX_SPECS)) {
+    if (!item || typeof item !== "object") continue
+    const label = String((item as Record<string, unknown>).label ?? "").trim().slice(0, MAX_SPEC_LABEL_CHARS)
+    const value = String((item as Record<string, unknown>).value ?? "").trim().slice(0, MAX_SPEC_VALUE_CHARS)
+    if (!label || !value) continue
+    out.push({ label, value })
+  }
+  return out
+}
+
+/** Serialise les caractéristiques pour le stockage SQLite (JSON compact). */
+export function serializeSpecs(specs: ProductSpec[]): string {
+  return JSON.stringify(normalizeSpecs(specs))
+}
+
+export interface DescriptionSegment {
+  text: string
+  bold: boolean
+}
+
+export interface DescriptionBlock {
+  kind: "p" | "ul"
+  /** kind="p" → segments ; kind="ul" → liste de lignes (chaque ligne = segments) */
+  segments?: DescriptionSegment[]
+  items?: DescriptionSegment[][]
+}
+
+/**
+ * Découpe une description produit en blocs affichables — SANS HTML :
+ * - lignes vides = séparation de paragraphes ;
+ * - lignes commençant par « - », « • » ou « * » = puces (regroupées) ;
+ * - **texte** = gras (rendu React, jamais innerHTML → zéro XSS).
+ * Parseur partagé vitrine + aperçu dashboard, résilient à toute entrée.
+ */
+export function parseDescription(raw: string): DescriptionBlock[] {
+  const text = String(raw || "").replace(/\r\n/g, "\n").trim()
+  if (!text) return []
+
+  const boldRe = /\*\*([^*\n]+)\*\*/g
+
+  /** Découpe une ligne en segments {text, bold}. */
+  function segmentsOf(line: string): DescriptionSegment[] {
+    const segs: DescriptionSegment[] = []
+    let last = 0
+    for (const m of line.matchAll(boldRe)) {
+      const idx = m.index ?? 0
+      if (idx > last) segs.push({ text: line.slice(last, idx), bold: false })
+      segs.push({ text: m[1], bold: true })
+      last = idx + m[0].length
+    }
+    if (last < line.length) segs.push({ text: line.slice(last), bold: false })
+    return segs.filter((s) => s.text.length > 0)
+  }
+
+  const blocks: DescriptionBlock[] = []
+  let bullets: DescriptionSegment[][] = []
+
+  const flushBullets = () => {
+    if (bullets.length) {
+      blocks.push({ kind: "ul", items: bullets })
+      bullets = []
+    }
+  }
+
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim()
+    if (!trimmed) {
+      flushBullets()
+      continue
+    }
+    const bullet = trimmed.match(/^[-•*]\s+(.*)$/)
+    if (bullet) {
+      bullets.push(segmentsOf(bullet[1]))
+      continue
+    }
+    flushBullets()
+    blocks.push({ kind: "p", segments: segmentsOf(trimmed) })
+  }
+  flushBullets()
+  return blocks
+}
+
+/** Version texte brut d'une description (extraits de carte, fallback). */
+export function descriptionPlainText(raw: string): string {
+  return String(raw || "")
+    .replace(/\*\*([^*\n]+)\*\*/g, "$1")
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .join(" · ")
 }
 
 /* ─────────── V4 — Multi-images produits ─────────── */

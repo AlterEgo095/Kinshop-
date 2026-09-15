@@ -2,9 +2,9 @@
 // Les photos sont compressées en data URL JPEG (quota SQLite + réseau 3G RDC).
 
 export interface CompressOptions {
-  /** Côté max (largeur ou hauteur) en px. Défaut : 900 */
+  /** Côté max (largeur ou hauteur) en px. Défaut : 1200 (Mission Premium — rendu net en fiche) */
   maxSize?: number
-  /** Qualité JPEG 0–1. Défaut : 0.72 */
+  /** Qualité JPEG 0–1. Défaut : 0.8 (Mission Premium — ré-encodage serveur ensuite) */
   quality?: number
 }
 
@@ -30,8 +30,8 @@ function loadBitmap(file: File): Promise<HTMLImageElement> {
  * Lève une erreur si le fichier n'est pas une image.
  */
 export async function compressImageFile(file: File, opts?: CompressOptions): Promise<string> {
-  const maxSize = opts?.maxSize ?? 900
-  const quality = opts?.quality ?? 0.72
+  const maxSize = opts?.maxSize ?? 1200
+  const quality = opts?.quality ?? 0.8
 
   if (!file.type.startsWith("image/")) {
     throw new Error("Le fichier choisi n'est pas une image.")

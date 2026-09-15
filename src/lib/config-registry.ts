@@ -218,6 +218,8 @@ export const CONFIG_SPECS: ConfigSpec[] = [
   ...planSpecs("free", "Plan Free", {
     maxProducts: [20, 1, 100_000],
     maxProductImages: [1, 1, 10],
+    maxDescriptionChars: [0, 0, 8000],
+    maxSpecs: [0, 0, 24],
     maxCoupons: [3, 0, 1_000],
     maxDeliveryZones: [5, 0, 1_000],
     maxInvoicesPerMonth: [15, 0, 100_000],
@@ -227,6 +229,8 @@ export const CONFIG_SPECS: ConfigSpec[] = [
   ...planSpecs("premium", "Plan Premium", {
     maxProducts: [500, 1, 100_000],
     maxProductImages: [5, 1, 10],
+    maxDescriptionChars: [3000, 0, 8000],
+    maxSpecs: [12, 0, 24],
     maxCoupons: [30, 0, 1_000],
     maxDeliveryZones: [25, 0, 1_000],
     maxInvoicesPerMonth: [500, 0, 100_000],
@@ -471,6 +475,8 @@ function planSpecs(
   const labels: Record<string, string> = {
     maxProducts: "Produits max",
     maxProductImages: "Photos max par produit",
+    maxDescriptionChars: "Description produit — caractères max (0 = verrouillée)",
+    maxSpecs: "Caractéristiques produit max (0 = verrouillées)",
     maxCoupons: "Codes promo max",
     maxDeliveryZones: "Zones de livraison max",
     maxInvoicesPerMonth: "Factures max par mois",
@@ -570,6 +576,8 @@ export async function isFeatureOn(name: string): Promise<boolean> {
 export interface PlanQuotaValues {
   maxProducts: number
   maxProductImages: number
+  maxDescriptionChars: number
+  maxSpecs: number
   maxCoupons: number
   maxDeliveryZones: number
   maxInvoicesPerMonth: number
@@ -587,6 +595,8 @@ export async function getPlanQuotas(planId: "free" | "premium"): Promise<PlanQuo
   return {
     maxProducts: Math.max(1, num(`plan.${planId}.maxProducts`, 20)),
     maxProductImages: Math.max(1, num(`plan.${planId}.maxProductImages`, 1)),
+    maxDescriptionChars: Math.max(0, num(`plan.${planId}.maxDescriptionChars`, planId === "premium" ? 3000 : 0)),
+    maxSpecs: Math.max(0, num(`plan.${planId}.maxSpecs`, planId === "premium" ? 12 : 0)),
     maxCoupons: Math.max(0, num(`plan.${planId}.maxCoupons`, 3)),
     maxDeliveryZones: Math.max(0, num(`plan.${planId}.maxDeliveryZones`, 5)),
     maxInvoicesPerMonth: Math.max(0, num(`plan.${planId}.maxInvoicesPerMonth`, 15)),

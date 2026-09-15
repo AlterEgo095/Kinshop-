@@ -1,10 +1,53 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
-import { normalizeImages } from "@/lib/kinshop"
+import { normalizeImages, normalizeSpecs, serializeSpecs } from "@/lib/kinshop"
 import { requireStoreOwner, quotaExceeded } from "@/lib/auth"
 import { planOf } from "@/lib/plans"
 import { getPlanQuotas } from "@/lib/config-registry"
 import { withStoreQuotaWrite } from "@/lib/quota-guard"
+
+// Mission Premium — messages de verrouillage (affichés tels quels à l'utilisateur)
+const DESC_LOCKED =
+  "La description produit détaillée est une fonctionnalité Premium — active ton abonnement pour présenter tes produits comme un pro."
+const SPECS_LOCKED =
+  "Les caractéristiques structurées (dimensions, avantages, variantes…) sont une fonctionnalité Premium — active ton abonnement pour les débloquer."
+const descOverLimit = (n: number) =>
+  `Description trop longue (${n} caractères max au plan Premium). Raccourcis-la ou réorganise-la.`
+const specsOverLimit = (n: number) => `Maximum ${n} caractéristiques par produit.`
+
+// Mission Premium — règle de MAINTENANCE : le contenu existant n'est jamais cassé par
+// l'expiration d'un abonnement. On compare avec l'état stocké :
+//   - identique → no-op autorisé (idempotence des formulaires) ;
+//   - vidage → toujours autorisé (suppression, pas une feature Premium) ;
+//   - ajout/modification → vérifiée contre le quota du plan effectif (402 si verrouillé).
+function gateDescription(
+  provided: unknown,
+  stored: string,
+  maxChars: number,
+): { value?: string; error?: NextResponse } {
+  if (provided === undefined) return {}
+  const next = String(provided ?? "").trim()
+  if (next === stored.trim()) return { value: stored }
+  if (!next) return { value: "" } // vider est toujours permis
+  if (maxChars <= 0) return { error: quotaExceeded(DESC_LOCKED) }
+  if (next.length > maxChars) return { error: quotaExceeded(descOverLimit(maxChars)) }
+  return { value: next }
+}
+
+function gateSpecs(
+  provided: unknown,
+  storedJson: string,
+  maxSpecs: number,
+): { value?: string; error?: NextResponse } {
+  if (provided === undefined) return {}
+  const next = normalizeSpecs(provided)
+  const current = normalizeSpecs(storedJson)
+  if (JSON.stringify(next) === JSON.stringify(current)) return { value: serializeSpecs(current) }
+  if (next.length === 0) return { value: "[]" } // vider est toujours permis
+  if (maxSpecs <= 0) return { error: quotaExceeded(SPECS_LOCKED) }
+  if (next.length > maxSpecs) return { error: quotaExceeded(specsOverLimit(maxSpecs)) }
+  return { value: serializeSpecs(next) }
+}
 
 // POST /api/products — Ajouter un produit (V8 : propriétaire + quota du plan)
 export async function POST(req: NextRequest) {
@@ -48,6 +91,20 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // Mission Premium — description & caractéristiques (à la création : tout contenu est nouveau)
+    const description = String(body.description ?? "").trim()
+    if (description) {
+      if (quotas.maxDescriptionChars <= 0) return quotaExceeded(DESC_LOCKED)
+      if (description.length > quotas.maxDescriptionChars) {
+        return quotaExceeded(descOverLimit(quotas.maxDescriptionChars))
+      }
+    }
+    const specs = normalizeSpecs(body.specs)
+    if (specs.length > 0) {
+      if (quotas.maxSpecs <= 0) return quotaExceeded(SPECS_LOCKED)
+      if (specs.length > quotas.maxSpecs) return quotaExceeded(specsOverLimit(quotas.maxSpecs))
+    }
+
     // V10 — catégorie de boutique optionnelle : l'ID doit appartenir à CETTE boutique
     let storeCategoryId: string | undefined
     if (body.storeCategoryId) {
@@ -73,6 +130,9 @@ export async function POST(req: NextRequest) {
           emoji: String(body.emoji || "📦").slice(0, 8),
           imageUrl: images[0] || "",
           images: JSON.stringify(images),
+          // Mission Premium — présentation commerciale (validée contre le plan)
+          description: description.slice(0, quotas.maxDescriptionChars > 0 ? quotas.maxDescriptionChars : 0),
+          specs: serializeSpecs(specs),
           priceUSD,
           category: String(body.category || "Divers").slice(0, 40),
           stock: Number.isInteger(Number(body.stock)) && Number(body.stock) > 0 ? Number(body.stock) : 99,
@@ -92,7 +152,13 @@ export async function POST(req: NextRequest) {
     const product = result.product
 
     return NextResponse.json(
-      { product: { ...product, images: normalizeImages(product.images) } },
+      {
+        product: {
+          ...product,
+          images: normalizeImages(product.images),
+          specs: normalizeSpecs(product.specs),
+        },
+      },
       { status: 201 },
     )
   } catch (e) {
@@ -141,10 +207,15 @@ export async function PATCH(req: NextRequest) {
     if (Number(body.priceUSD) > 0) data.priceUSD = Number(body.priceUSD)
     if (Number.isInteger(Number(body.stock)) && Number(body.stock) >= 0) data.stock = Number(body.stock)
 
-    // V4 — galerie : remplacée intégralement si le champ images est fourni (quota plan)
+    // V4 — galerie : remplacée intégralement si le champ images est fourni.
+    // Mission Premium — règle de MAINTENANCE : réorganiser / remplacer / supprimer
+    // reste toujours possible (jamais plus d'images qu'avant) ; seule la CROISSANCE
+    // au-delà du quota du plan effectif est bloquée — l'expiration d'un abonnement
+    // n'empêche jamais de gérer les photos déjà en place.
     if (Array.isArray(body.images) || typeof body.images === "string") {
       const images = normalizeImages(body.images)
-      if (images.length > quotas.maxProductImages) {
+      const existing = normalizeImages(product.images, product.imageUrl)
+      if (images.length > existing.length && images.length > quotas.maxProductImages) {
         return quotaExceeded(
           plan.id === "free"
             ? `Le plan Free autorise ${quotas.maxProductImages} seule photo par produit — passe Premium pour les galeries.`
@@ -155,8 +226,23 @@ export async function PATCH(req: NextRequest) {
       data.imageUrl = images[0] || ""
     }
 
+    // Mission Premium — description & caractéristiques (règle de maintenance : idem)
+    const gatedDesc = gateDescription(body.description, product.description, quotas.maxDescriptionChars)
+    if (gatedDesc.error) return gatedDesc.error
+    if (gatedDesc.value !== undefined) data.description = gatedDesc.value
+
+    const gatedSpecs = gateSpecs(body.specs, product.specs, quotas.maxSpecs)
+    if (gatedSpecs.error) return gatedSpecs.error
+    if (gatedSpecs.value !== undefined) data.specs = gatedSpecs.value
+
     const updated = await db.product.update({ where: { id }, data })
-    return NextResponse.json({ product: { ...updated, images: normalizeImages(updated.images) } })
+    return NextResponse.json({
+      product: {
+        ...updated,
+        images: normalizeImages(updated.images),
+        specs: normalizeSpecs(updated.specs),
+      },
+    })
   } catch (e) {
     console.error("PATCH /api/products", e)
     return NextResponse.json({ error: "Erreur serveur." }, { status: 500 })

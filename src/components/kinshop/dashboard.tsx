@@ -14,6 +14,7 @@ import {
   ExternalLink,
   Eye,
   EyeOff,
+  FileText,
   Globe,
   Images,
   Loader2,
@@ -86,6 +87,7 @@ import {
   formatFC,
   formatPhoneDisplay,
   formatUSD,
+  normalizeSpecs,
   timeAgo,
   usdToFC,
   type CouponData,
@@ -97,13 +99,21 @@ import {
   type OrderStatus,
   type PaymentMethod,
   type ProductData,
+  type ProductSpec,
   type ReviewData,
   type StoreCategoryData,
   type StoreData,
   type VendorStats,
 } from "@/lib/kinshop"
+import { isPremiumActive, planOf, PLANS } from "@/lib/plans"
 import { StatusStudio } from "@/components/kinshop/status-studio"
 import { ProductImagesEditor } from "@/components/kinshop/product-images-editor"
+import { ProductDescriptionEditor } from "@/components/kinshop/product-description-editor"
+import {
+  StorefrontCardPreview,
+  StorefrontDetailPreview,
+  type StorefrontPreviewData,
+} from "@/components/kinshop/product-storefront-preview"
 import {
   buildInvoiceMessage,
   INVOICE_STATUS_LABELS,
@@ -174,6 +184,10 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
   const [storeCats, setStoreCats] = useState<StoreCategoryData[]>([])
   const [pStoreCatId, setPStoreCatId] = useState("")
   const [pImages, setPImages] = useState<string[]>([])
+  // Mission Premium — présentation commerciale (description + caractéristiques)
+  const [pDesc, setPDesc] = useState("")
+  const [pSpecs, setPSpecs] = useState<ProductSpec[]>([])
+  const [previewAdd, setPreviewAdd] = useState(false)
   const [adding, setAdding] = useState(false)
 
   // V4 — Édition produit (galerie multi-photos)
@@ -186,6 +200,10 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
   const [editStoreCatId, setEditStoreCatId] = useState("")
   const [editStock, setEditStock] = useState("99")
   const [editImages, setEditImages] = useState<string[]>([])
+  // Mission Premium — présentation commerciale (édition)
+  const [editDesc, setEditDesc] = useState("")
+  const [editSpecs, setEditSpecs] = useState<ProductSpec[]>([])
+  const [previewEdit, setPreviewEdit] = useState(false)
   const [savingEdit, setSavingEdit] = useState(false)
 
   // Réglages
@@ -213,6 +231,46 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
   const [notifications, setNotifications] = useState<NotificationData[]>([])
   const [notifUnread, setNotifUnread] = useState(0)
   const [activeTab, setActiveTab] = useState("produits")
+
+  // ── Mission Premium — plan effectif de la boutique (calcul client pour l'UX ;
+  // le serveur reste l'autorité finale sur TOUTE écriture via /api/products).
+  // Les quotas affichés suivent la configuration dynamique admin (clés publiques
+  // plan.*) avec repli sur les défauts de référence (src/lib/plans.ts).
+  const premiumUnlocked = store ? isPremiumActive(store) : false
+  const planId: "free" | "premium" = premiumUnlocked ? "premium" : "free"
+  const planQuotas = useMemo(() => {
+    const ref = PLANS[planId]
+    const num = (key: string, fallback: number) => {
+      const v = config[key]
+      const n = typeof v === "number" ? v : Number(v)
+      return Number.isFinite(n) && n >= 0 ? n : fallback
+    }
+    return {
+      maxImages: num(`plan.${planId}.maxProductImages`, ref.maxProductImages),
+      maxDescriptionChars: num(`plan.${planId}.maxDescriptionChars`, ref.maxDescriptionChars),
+      maxSpecs: num(`plan.${planId}.maxSpecs`, ref.maxSpecs),
+    }
+  }, [planId, config])
+
+  // Mission Premium — données des aperçus « avant publication » (rendu vitrine)
+  const previewAddData: StorefrontPreviewData = {
+    name: pName.trim() || "Nom du produit",
+    emoji: pEmoji || "📦",
+    images: pImages,
+    priceUSD: Number(pPrice.replace(",", ".")) || 0,
+    category: pCategory,
+    description: pDesc,
+    specs: pSpecs.filter((s) => s.label.trim() && s.value.trim()),
+  }
+  const previewEditData: StorefrontPreviewData = {
+    name: editName.trim() || editTarget?.name || "Nom du produit",
+    emoji: editEmoji || "📦",
+    images: editImages,
+    priceUSD: Number(editPrice.replace(",", ".")) || editTarget?.priceUSD || 0,
+    category: editCategory,
+    description: editDesc,
+    specs: editSpecs.filter((s) => s.label.trim() && s.value.trim()),
+  }
 
   // V3 — KinFacture
   const [invoices, setInvoices] = useState<InvoiceData[]>([])
@@ -667,6 +725,11 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
     if (!pName.trim()) return toast.error("Le nom du produit est requis.")
     const price = Number(pPrice.replace(",", "."))
     if (!price || price <= 0) return toast.error("Indique un prix en dollars.")
+    // Mission Premium — garde-fou client (le serveur revérifie et fait foi)
+    const desc = pDesc.trim()
+    if (desc && !premiumUnlocked) {
+      return toast.error("La description détaillée nécessite l'abonnement Premium — débloque-la pour l'utiliser.")
+    }
     setAdding(true)
     try {
       const res = await fetch("/api/products", {
@@ -681,6 +744,9 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
           // P2 — rattachement structuré optionnel (le serveur valide l'appartenance)
           ...(pStoreCatId ? { storeCategoryId: pStoreCatId } : {}),
           images: pImages,
+          // Mission Premium — présentation commerciale (caractéristiques complètes uniquement)
+          description: desc,
+          specs: pSpecs.filter((s) => s.label.trim() && s.value.trim()),
         }),
       })
       const data = await res.json()
@@ -691,6 +757,9 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
       setPEmoji("📦")
       setPStoreCatId("")
       setPImages([])
+      setPDesc("")
+      setPSpecs([])
+      setPreviewAdd(false)
       setAddOpen(false)
       toast.success("Produit ajouté ✅")
     } catch (e) {
@@ -710,6 +779,10 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
     setEditStoreCatId(p.storeCategoryId ?? "")
     setEditStock(String(p.stock ?? 99))
     setEditImages(Array.isArray(p.images) ? [...p.images] : [])
+    // Mission Premium — présentation commerciale (état existant, y compris legacy)
+    setEditDesc(p.description || "")
+    setEditSpecs(normalizeSpecs(p.specs))
+    setPreviewEdit(false)
     setEditOpen(true)
   }
 
@@ -718,6 +791,12 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
     const price = Number(editPrice.replace(",", "."))
     if (!editName.trim()) return toast.error("Le nom du produit est requis.")
     if (!price || price <= 0) return toast.error("Indique un prix en dollars.")
+    // Mission Premium — garde-fou client : toute MODIFICATION de description
+    // (hors no-op) exige l'abonnement actif. Le serveur revérifie le plan réel.
+    const desc = editDesc.trim()
+    if (!premiumUnlocked && desc !== (editTarget.description || "").trim()) {
+      return toast.error("Modifier la description nécessite l'abonnement Premium — réactive-le pour l'éditer.")
+    }
     setSavingEdit(true)
     try {
       const res = await fetch("/api/products", {
@@ -734,6 +813,9 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
           storeCategoryId: editStoreCatId || null,
           stock: Number(editStock) >= 0 ? Number(editStock) : 99,
           images: editImages,
+          // Mission Premium — présentation commerciale (caractéristiques complètes uniquement)
+          description: desc,
+          specs: editSpecs.filter((s) => s.label.trim() && s.value.trim()),
         }),
       })
       const data = await res.json()
@@ -741,6 +823,7 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
       setProducts((ps) => ps.map((x) => (x.id === editTarget.id ? data.product : x)))
       setEditOpen(false)
       setEditTarget(null)
+      setPreviewEdit(false)
       toast.success("Produit mis à jour ✅")
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Erreur")
@@ -1502,6 +1585,13 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
                           ? storeCats.find((c) => c.id === p.storeCategoryId)?.name ?? p.category
                           : p.category}
                       </p>
+                      {/* Mission Premium — indicateur de fiche enrichie */}
+                      {(p.description?.trim() || (p.specs?.length ?? 0) > 0) && (
+                        <span className="inline-flex items-center gap-1 text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-1.5 py-0.5 mb-1">
+                          <FileText className="w-2.5 h-2.5" />
+                          Fiche complétée
+                        </span>
+                      )}
                       <p className="font-bold text-primary">{formatFC(p.priceUSD * store.rateFC)}</p>
                       <p className="text-xs text-muted-foreground">{formatUSD(p.priceUSD)}</p>
                       <button
@@ -2571,8 +2661,51 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
               </div>
             )}
 
-            {/* V4 — Galerie multi-photos */}
-            <ProductImagesEditor images={pImages} onChange={setPImages} />
+            {/* V4 → Mission Premium — galerie (quota plan + optimisation serveur) */}
+            <ProductImagesEditor
+              images={pImages}
+              onChange={setPImages}
+              maxImages={planQuotas.maxImages}
+              premiumUnlocked={premiumUnlocked}
+              optimizeStoreId={store.id}
+              onUpgrade={() => openPremiumDialog(true)}
+            />
+
+            {/* Mission Premium — présentation commerciale (description + caractéristiques) */}
+            <ProductDescriptionEditor
+              description={pDesc}
+              onDescriptionChange={setPDesc}
+              specs={pSpecs}
+              onSpecsChange={setPSpecs}
+              maxDescriptionChars={planQuotas.maxDescriptionChars}
+              maxSpecs={planQuotas.maxSpecs}
+              premiumUnlocked={premiumUnlocked}
+              onUpgrade={() => openPremiumDialog(true)}
+            />
+
+            {/* Mission Premium — aperçu avant publication (rendu vitrine réel) */}
+            <div className="rounded-xl border border-dashed border-primary/40 p-3 space-y-2 bg-emerald-50/30">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="w-full text-primary"
+                onClick={() => setPreviewAdd((v) => !v)}
+                aria-expanded={previewAdd}
+              >
+                <Eye className="w-4 h-4 mr-1.5" />
+                {previewAdd ? "Masquer l'aperçu boutique" : "Voir l'aperçu boutique"}
+              </Button>
+              {previewAdd && (
+                <div className="flex flex-col sm:flex-row gap-4 justify-center items-start pt-1">
+                  <StorefrontCardPreview p={previewAddData} rate={store.rateFC} />
+                  <StorefrontDetailPreview p={previewAddData} rate={store.rateFC} />
+                </div>
+              )}
+              <p className="text-[11px] text-center text-muted-foreground">
+                Aperçu identique au rendu mobile et desktop de ta vitrine publique.
+              </p>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setAddOpen(false)}>Annuler</Button>
@@ -2652,7 +2785,51 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
               </div>
             )}
 
-            <ProductImagesEditor images={editImages} onChange={setEditImages} />
+            {/* Mission Premium — galerie (quota plan + optimisation serveur) */}
+            <ProductImagesEditor
+              images={editImages}
+              onChange={setEditImages}
+              maxImages={planQuotas.maxImages}
+              premiumUnlocked={premiumUnlocked}
+              optimizeStoreId={store.id}
+              onUpgrade={() => openPremiumDialog(true)}
+            />
+
+            {/* Mission Premium — présentation commerciale (description + caractéristiques) */}
+            <ProductDescriptionEditor
+              description={editDesc}
+              onDescriptionChange={setEditDesc}
+              specs={editSpecs}
+              onSpecsChange={setEditSpecs}
+              maxDescriptionChars={planQuotas.maxDescriptionChars}
+              maxSpecs={planQuotas.maxSpecs}
+              premiumUnlocked={premiumUnlocked}
+              onUpgrade={() => openPremiumDialog(true)}
+            />
+
+            {/* Mission Premium — aperçu avant publication (rendu vitrine réel) */}
+            <div className="rounded-xl border border-dashed border-primary/40 p-3 space-y-2 bg-emerald-50/30">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="w-full text-primary"
+                onClick={() => setPreviewEdit((v) => !v)}
+                aria-expanded={previewEdit}
+              >
+                <Eye className="w-4 h-4 mr-1.5" />
+                {previewEdit ? "Masquer l'aperçu boutique" : "Voir l'aperçu boutique"}
+              </Button>
+              {previewEdit && (
+                <div className="flex flex-col sm:flex-row gap-4 justify-center items-start pt-1">
+                  <StorefrontCardPreview p={previewEditData} rate={store.rateFC} />
+                  <StorefrontDetailPreview p={previewEditData} rate={store.rateFC} />
+                </div>
+              )}
+              <p className="text-[11px] text-center text-muted-foreground">
+                Aperçu identique au rendu mobile et desktop de ta vitrine publique.
+              </p>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditOpen(false)}>Annuler</Button>

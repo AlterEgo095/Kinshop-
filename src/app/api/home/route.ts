@@ -145,6 +145,11 @@ export async function GET(req: NextRequest) {
         imageUrl: p.imageUrl,
         priceUSD: p.priceUSD,
         category: p.category,
+        // Mission Premium — extrait de description pour l'accueil marketplace
+        // (raccourci texte brut, la mise en forme complète vitrine sur la boutique)
+        description: p.description
+          ? p.description.replace(/\*\*([^*\n]+)\*\*/g, "$1").replace(/\s+/g, " ").trim().slice(0, 140)
+          : "",
         store: { name: p.store.name, slug: p.store.slug },
       }))
 
