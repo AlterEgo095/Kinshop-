@@ -18,6 +18,7 @@ import {
   Globe,
   Images,
   Loader2,
+  Lock,
   Megaphone,
   MessageCircle,
   Package,
@@ -1594,20 +1595,31 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
                       )}
                       <p className="font-bold text-primary">{formatFC(p.priceUSD * store.rateFC)}</p>
                       <p className="text-xs text-muted-foreground">{formatUSD(p.priceUSD)}</p>
-                      <button
-                        onClick={() => openEditProduct(p)}
-                        className="absolute top-2 right-10 w-8 h-8 rounded-lg bg-white/90 border shadow-sm flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-emerald-50"
-                        aria-label={`Modifier ${p.name}`}
-                      >
-                        <Pencil className="w-4 h-4 text-primary" />
-                      </button>
-                      <button
-                        onClick={() => setDeleteTarget(p)}
-                        className="absolute top-2 right-2 w-8 h-8 rounded-lg bg-white/90 border shadow-sm flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-50"
-                        aria-label={`Supprimer ${p.name}`}
-                      >
-                        <Trash2 className="w-4 h-4 text-destructive" />
-                      </button>
+                      {/* Gestion de l'article — actions TOUJOURS visibles (mobile d'abord :
+                          l'ancien survol group-hover était inutilisable au tactile).
+                          Mission abonnement : modifier / supprimer exige un abonnement
+                          Premium actif — un plan Free voit un cadenas et est orienté
+                          vers le dialogue d'abonnement (le serveur revérifie : 402). */}
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => (premiumUnlocked ? openEditProduct(p) : openPremiumDialog(true))}
+                          className="h-9 inline-flex items-center justify-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 text-xs font-semibold text-emerald-700 transition-colors hover:bg-emerald-100 active:bg-emerald-200"
+                          aria-label={premiumUnlocked ? `Modifier ${p.name}` : `Modifier ${p.name} — Premium requis`}
+                        >
+                          {premiumUnlocked ? <Pencil className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
+                          Modifier
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => (premiumUnlocked ? setDeleteTarget(p) : openPremiumDialog(true))}
+                          className="h-9 inline-flex items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-red-50 text-xs font-semibold text-red-600 transition-colors hover:bg-red-100 active:bg-red-200"
+                          aria-label={premiumUnlocked ? `Supprimer ${p.name}` : `Supprimer ${p.name} — Premium requis`}
+                        >
+                          {premiumUnlocked ? <Trash2 className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
+                          Supprimer
+                        </button>
+                      </div>
                     </CardContent>
                   </Card>
                 ))}

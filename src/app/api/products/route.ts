@@ -11,6 +11,16 @@ const DESC_LOCKED =
   "La description produit détaillée est une fonctionnalité Premium — active ton abonnement pour présenter tes produits comme un pro."
 const SPECS_LOCKED =
   "Les caractéristiques structurées (dimensions, avantages, variantes…) sont une fonctionnalité Premium — active ton abonnement pour les débloquer."
+
+// Mission abonnement — la GESTION du catalogue (édition, suppression) fait partie
+// de la proposition de valeur Premium : un plan Free peut créer et vendre, mais
+// ajuster ou retirer une fiche exige un abonnement actif (402 + message clair).
+// L'administration conserve son override métier via /api/admin/products
+// (journalisée dans l'audit), indépendante des plans.
+const EDIT_LOCKED =
+  "Modifier un produit est une fonctionnalité Premium — active ton abonnement pour gérer ton catalogue comme un pro."
+const DELETE_LOCKED =
+  "Supprimer un produit est une fonctionnalité Premium — active ton abonnement pour gérer ton catalogue comme un pro."
 const descOverLimit = (n: number) =>
   `Description trop longue (${n} caractères max au plan Premium). Raccourcis-la ou réorganise-la.`
 const specsOverLimit = (n: number) => `Maximum ${n} caractéristiques par produit.`
@@ -183,6 +193,10 @@ export async function PATCH(req: NextRequest) {
     const guard = await requireStoreOwner(req, { id: product.storeId })
     if (!guard.ok) return guard.response
     const plan = planOf(guard.store)
+
+    // Mission abonnement — plan Free : gestion verrouillée (402 = invitation à s'abonner)
+    if (plan.id !== "premium") return quotaExceeded(EDIT_LOCKED)
+
     const quotas = await getPlanQuotas(plan.id)
 
     const data: Record<string, string | number | null> = {}
@@ -216,11 +230,8 @@ export async function PATCH(req: NextRequest) {
       const images = normalizeImages(body.images)
       const existing = normalizeImages(product.images, product.imageUrl)
       if (images.length > existing.length && images.length > quotas.maxProductImages) {
-        return quotaExceeded(
-          plan.id === "free"
-            ? `Le plan Free autorise ${quotas.maxProductImages} seule photo par produit — passe Premium pour les galeries.`
-            : `Maximum ${quotas.maxProductImages} photos par produit.`,
-        )
+        // Plan Premium garanti ici (gate EDIT_LOCKED plus haut) — message direct.
+        return quotaExceeded(`Maximum ${quotas.maxProductImages} photos par produit.`)
       }
       data.images = JSON.stringify(images)
       data.imageUrl = images[0] || ""
@@ -260,6 +271,9 @@ export async function DELETE(req: NextRequest) {
 
     const guard = await requireStoreOwner(req, { id: product.storeId })
     if (!guard.ok) return guard.response
+
+    // Mission abonnement — suppression réservée au plan Premium actif
+    if (planOf(guard.store).id !== "premium") return quotaExceeded(DELETE_LOCKED)
 
     await db.product.delete({ where: { id } })
     return NextResponse.json({ ok: true })
