@@ -5,7 +5,7 @@ import type { MetadataRoute } from "next"
 
 const SITE_URL = process.env.NEXT_PUBLIC_PLATFORM_DOMAIN
   ? `https://${process.env.NEXT_PUBLIC_PLATFORM_DOMAIN}`
-  : "https://kinshop.aenews.digital"
+  : "https://kinshop.store"
 
 export default function sitemap(): MetadataRoute.Sitemap {
   return [

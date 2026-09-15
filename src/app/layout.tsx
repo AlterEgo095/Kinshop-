@@ -17,7 +17,7 @@ const geistMono = Geist_Mono({
 
 const SITE_URL = process.env.NEXT_PUBLIC_PLATFORM_DOMAIN
   ? `https://${process.env.NEXT_PUBLIC_PLATFORM_DOMAIN}`
-  : process.env.APP_URL || "https://kinshop.aenews.digital";
+  : process.env.APP_URL || "https://kinshop.store";
 
 // Vague 2 i18n : contenus SEO bilingues (fr par défaut, en via cookie kinshop_lang).
 const COPY = {

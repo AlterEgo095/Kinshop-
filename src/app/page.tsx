@@ -4,7 +4,7 @@ import { normalizeDomain } from "@/lib/domain"
 import { KinShopApp } from "@/components/kinshop/kinshop-app"
 
 // Résolution dynamique obligatoire : la page dépend de l'en-tête Host
-// (kinshop.aenews.digital = plateforme, maboutique.cd = boutique du vendeur)
+// (kinshop.store = plateforme, maboutique.cd = boutique du vendeur)
 export const dynamic = "force-dynamic"
 
 export default async function Home() {

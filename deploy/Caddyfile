@@ -1,12 +1,12 @@
 # KinShop — Configuration Caddy de production
-# Serveur : kinshop.aenews.digital (95.111.226.63)
+# Serveur : kinshop.store (95.111.226.63)
 #
 # Installation :
 #   sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
 #   sudo systemctl reload caddy
 #
 # HTTPS est émis automatiquement par Let's Encrypt :
-#  - pour kinshop.aenews.digital (déjà en DNS, « DNS uniquement » → parfait)
+#  - pour kinshop.store (déjà en DNS, « DNS uniquement » → parfait)
 #  - pour chaque domaine vendeur vérifié, à la demande (on_demand_tls),
 #    autorisé uniquement si /api/domain-check répond 200 (domaine relié
 #    à une boutique KinShop vérifiée) → impossible d'épuiser Let's Encrypt.
@@ -19,7 +19,7 @@
 }
 
 # ── Plateforme principale ─────────────────────────────────────────
-kinshop.aenews.digital {
+kinshop.store {
 	reverse_proxy 127.0.0.1:3000
 }
 

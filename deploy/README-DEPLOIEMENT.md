@@ -2,7 +2,7 @@
 
 ## ✅ État actuel (mis en production le 2026-09-12)
 
-**KinShop tourne en production** sur `https://kinshop.aenews.digital`
+**KinShop tourne en production** sur `https://kinshop.store`
 
 | Élément | Valeur |
 |---------|--------|
@@ -10,7 +10,7 @@
 | Répertoire | `/opt/KINSHOP` (propriétaire `aenews`) |
 | Process | PM2 `kinshop` (id 22, fork, via service système `pm2-aenews`) |
 | Port local | `127.0.0.1:3310` (nginx seul point d'entrée) |
-| Reverse proxy | nginx — `/etc/nginx/sites-available/kinshop.aenews.digital` |
+| Reverse proxy | nginx — `/etc/nginx/sites-available/kinshop.store` |
 | TLS | Let's Encrypt (certbot webroot, renouvellement auto, expire 2026-12-11) |
 | Base | SQLite `/opt/KINSHOP/db/kinshop.db` (vide en prod) |
 | Logs | `/opt/KINSHOP/logs/kinshop-{out,error}.log` (+ pm2-logrotate) |
@@ -43,7 +43,7 @@ Un compte = **une** boutique. Les boutiques créées avant la V8 (ownerId null,
 ```bash
 # 1. Le vendeur crée son compte sur la plateforme (ex. vendeur@exemple.cd)
 # 2. L'admin rattache sa boutique :
-curl -X PATCH https://kinshop.aenews.digital/api/admin/stores \
+curl -X PATCH https://kinshop.store/api/admin/stores \
   -H "Content-Type: application/json" -H "Cookie: kinshop_session=<session admin>" \
   -d '{"id":"<STORE_ID>","action":"assign-owner","email":"vendeur@exemple.cd"}'
 ```
@@ -108,7 +108,7 @@ sqlite3 /opt/KINSHOP/db/kinshop.db ".backup /opt/KINSHOP/backups/kinshop-$(date 
 4. `bun run build` (script package.json copie static+public dans standalone)
 5. `ecosystem.config.js` PM2 → `pm2 start && pm2 save`
 6. vhost nginx HTTP → `certbot certonly --webroot` → vhost HTTPS
-7. Vérification : `curl https://kinshop.aenews.digital/api/platform`
+7. Vérification : `curl https://kinshop.store/api/platform`
 
 Les fichiers `Caddyfile`, `deploy.sh`, `kinshop.service` (modèle
 systemd/Caddy) sont conservés pour un déploiement alternatif.

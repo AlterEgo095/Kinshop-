@@ -14,4 +14,4 @@ User-agent: *
 Allow: /
 
 # SEO premium
-Sitemap: https://kinshop.aenews.digital/sitemap.xml
+Sitemap: https://kinshop.store/sitemap.xml

@@ -2,7 +2,7 @@
 // La plateforme KinShop est servie sur PLATFORM_DOMAIN ; chaque boutique Premium
 // peut revendiquer son propre domaine (ex. maboutique.cd) vérifié par enregistrement TXT.
 
-export const PLATFORM_DOMAIN = process.env.NEXT_PUBLIC_PLATFORM_DOMAIN || "kinshop.aenews.digital"
+export const PLATFORM_DOMAIN = process.env.NEXT_PUBLIC_PLATFORM_DOMAIN || "kinshop.store"
 // IPv4 du serveur de production où pointent les enregistrements A des domaines vendeurs
 export const PLATFORM_IPV4 = process.env.PLATFORM_IPV4 || "95.111.226.63"
 
