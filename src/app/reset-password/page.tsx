@@ -13,6 +13,13 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 }
 
+// Rendu STATIQUE forcé : le HTML prérendu ne contient AUCUNE donnée de la
+// requête (ni URL, ni query). Next.js embarque sinon les searchParams dans le
+// payload RSC des pages dynamiques — ce qui exposerait le token dans la source
+// HTML. Le token est donc lu exclusivement côté client (window.location.search
+// dans reset-password-view) et ne transite QUE via l'URL de la requête HTTPS.
+export const dynamic = "force-static"
+
 export default function ResetPasswordPage() {
   return (
     <Suspense

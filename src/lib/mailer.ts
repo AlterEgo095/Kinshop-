@@ -89,31 +89,31 @@ async function sendWithRetry(mail: { to: string; subject: string; html: string; 
  */
 export async function sendPasswordResetEmail(to: string, name: string, rawToken: string, ttlMinutes: number): Promise<void> {
   const link = `${APP_URL}/reset-password?token=${encodeURIComponent(rawToken)}`
-  const title = "Réinitialisation de ton mot de passe"
+  const title = "Réinitialisation de votre mot de passe"
   const prenom = (name || "").split(" ")[0] || "bonjour"
   const html = baseLayout(
     title,
     `<p style="margin:0 0 14px;font-size:14px;color:#374151;line-height:1.7;">Bonjour <strong>${prenom}</strong>,</p>
-     <p style="margin:0 0 14px;font-size:14px;color:#374151;line-height:1.7;">Tu as demandé la réinitialisation du mot de passe de ton compte ${PLATFORM}. Clique sur le bouton ci-dessous pour en choisir un nouveau :</p>
+     <p style="margin:0 0 14px;font-size:14px;color:#374151;line-height:1.7;">Vous avez demandé la réinitialisation du mot de passe de votre compte ${PLATFORM}. Cliquez sur le bouton ci-dessous pour en choisir un nouveau :</p>
      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 18px;"><tr><td align="center">
        <a href="${link}" style="display:inline-block;background:#059669;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;padding:13px 30px;border-radius:10px;">Réinitialiser mon mot de passe</a>
      </td></tr></table>
-     <p style="margin:0 0 10px;font-size:13px;color:#6b7280;line-height:1.7;">Ce lien est <strong>valable ${ttlMinutes} minutes</strong> et ne peut être utilisé qu'une seule fois. Si le bouton ne fonctionne pas, copie-colle ce lien dans ton navigateur :</p>
+     <p style="margin:0 0 10px;font-size:13px;color:#6b7280;line-height:1.7;">Ce lien est <strong>valable ${ttlMinutes} minutes</strong> et ne peut être utilisé qu'une seule fois. Si le bouton ne fonctionne pas, copiez-collez ce lien dans votre navigateur :</p>
      <p style="margin:0 0 16px;font-size:12px;color:#059669;word-break:break-all;">${link}</p>
      <p style="margin:0;font-size:13px;color:#b91c1c;line-height:1.6;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:10px 12px;">
-       ⚠️ Si tu n'es pas à l'origine de cette demande, <strong>ignore cet email</strong> : ton mot de passe actuel reste inchangé.
+       ⚠️ Si vous n'êtes pas à l'origine de cette demande, <strong>ignorez cet email</strong> : votre mot de passe actuel reste inchangé.
      </p>`,
   )
   const text = [
     `Bonjour ${prenom},`,
     "",
-    `Tu as demandé la réinitialisation du mot de passe de ton compte ${PLATFORM}.`,
+    `Vous avez demandé la réinitialisation du mot de passe de votre compte ${PLATFORM}.`,
     `Lien (valable ${ttlMinutes} minutes, usage unique) :`,
     link,
     "",
-    "Si tu n'es pas à l'origine de cette demande, ignore cet email : ton mot de passe actuel reste inchangé.",
+    "Si vous n'êtes pas à l'origine de cette demande, ignorez cet email : votre mot de passe actuel reste inchangé.",
   ].join("\n")
-  await sendWithRetry({ to, subject: `Réinitialisation de ton mot de passe — ${PLATFORM}`, html, text })
+  await sendWithRetry({ to, subject: `Réinitialisation de votre mot de passe — ${PLATFORM}`, html, text })
 }
 
 /**
@@ -121,24 +121,24 @@ export async function sendPasswordResetEmail(to: string, name: string, rawToken:
  * Ne contient JAMAIS le nouveau mot de passe.
  */
 export async function sendPasswordChangedEmail(to: string, name: string): Promise<void> {
-  const title = "Ton mot de passe a été modifié"
+  const title = "Votre mot de passe a été modifié"
   const prenom = (name || "").split(" ")[0] || "bonjour"
   const when = new Date().toLocaleString("fr-FR", { timeZone: "Africa/Kinshasa", dateStyle: "full", timeStyle: "short" })
   const html = baseLayout(
     title,
     `<p style="margin:0 0 14px;font-size:14px;color:#374151;line-height:1.7;">Bonjour <strong>${prenom}</strong>,</p>
-     <p style="margin:0 0 14px;font-size:14px;color:#374151;line-height:1.7;">Le mot de passe de ton compte ${PLATFORM} vient d'être modifié le <strong>${when}</strong> (heure de Kinshasa).</p>
-     <p style="margin:0 0 14px;font-size:14px;color:#374151;line-height:1.7;">Toutes les sessions actives ont été déconnectées. Tu peux te connecter avec ton nouveau mot de passe.</p>
+     <p style="margin:0 0 14px;font-size:14px;color:#374151;line-height:1.7;">Le mot de passe de votre compte ${PLATFORM} vient d'être modifié le <strong>${when}</strong> (heure de Kinshasa).</p>
+     <p style="margin:0 0 14px;font-size:14px;color:#374151;line-height:1.7;">Toutes les sessions actives ont été déconnectées. Vous pouvez vous connecter avec votre nouveau mot de passe.</p>
      <p style="margin:0;font-size:13px;color:#b91c1c;line-height:1.6;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:10px 12px;">
-       ⚠️ Tu n'es pas à l'origine de cette modification ? Contacte immédiatement le support ${PLATFORM}.
+       ⚠️ Vous n'êtes pas à l'origine de cette modification ? Contactez immédiatement le support ${PLATFORM}.
      </p>`,
   )
   const text = [
     `Bonjour ${prenom},`,
     "",
-    `Le mot de passe de ton compte ${PLATFORM} vient d'être modifié le ${when} (heure de Kinshasa).`,
+    `Le mot de passe de votre compte ${PLATFORM} vient d'être modifié le ${when} (heure de Kinshasa).`,
     "Toutes les sessions actives ont été déconnectées.",
-    "Tu n'es pas à l'origine de cette modification ? Contacte immédiatement le support KinShop.",
+    "Vous n'êtes pas à l'origine de cette modification ? Contactez immédiatement le support KinShop.",
   ].join("\n")
-  await sendWithRetry({ to, subject: `Ton mot de passe a été modifié — ${PLATFORM}`, html, text })
+  await sendWithRetry({ to, subject: `Votre mot de passe a été modifié — ${PLATFORM}`, html, text })
 }

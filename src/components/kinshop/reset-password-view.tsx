@@ -18,7 +18,6 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { useSearchParams } from "next/navigation"
 import { motion } from "framer-motion"
 import { ArrowLeft, CheckCircle2, Eye, EyeOff, KeyRound, Loader2, Lock, XCircle } from "lucide-react"
 import { toast } from "sonner"
@@ -33,12 +32,12 @@ type Step = "checking" | "invalid" | "form" | "submitting" | "done"
 function ResetPasswordViewInner() {
   const { tr } = useLang()
   const router = useRouter()
-  const searchParams = useSearchParams()
-  const token = searchParams.get("token") || ""
 
   const [step, setStep] = useState<Step>("checking")
-  // Le token brut vit UNIQUEMENT en mémoire — jamais réaffiché ni re-loggé
-  const [tokenRef] = useState<string>(token)
+  // Le token est lu UNIQUEMENT côté client (window.location.search) — il
+  // n'apparaît JAMAIS dans le rendu serveur (SSR/RSC) ni dans la source HTML.
+  // Il vit exclusivement en mémoire React, jamais réaffiché ni loggé.
+  const [token, setToken] = useState("")
   const [password, setPassword] = useState("")
   const [confirm, setConfirm] = useState("")
   const [showPw, setShowPw] = useState(false)
@@ -46,7 +45,8 @@ function ResetPasswordViewInner() {
   useEffect(() => {
     let cancelled = false
     const check = async () => {
-      if (!tokenRef) {
+      const t = new URLSearchParams(window.location.search).get("token") || ""
+      if (!t) {
         if (!cancelled) setStep("invalid")
         return
       }
@@ -54,7 +54,7 @@ function ResetPasswordViewInner() {
         const res = await fetch("/api/auth/reset-password/validate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token: tokenRef }),
+          body: JSON.stringify({ token: t }),
         })
         const data = await res.json()
         if (!cancelled && data.valid) {
@@ -66,9 +66,12 @@ function ResetPasswordViewInner() {
           } catch {
             /* environnement sans history — le token reste dans l'URL, sans risque accru */
           }
-          setStep("form")
+          if (!cancelled) {
+            setToken(t)
+            setStep("form")
+          }
         } else {
-          setStep("invalid")
+          if (!cancelled) setStep("invalid")
         }
       } catch {
         if (!cancelled) setStep("invalid")
@@ -78,7 +81,7 @@ function ResetPasswordViewInner() {
     return () => {
       cancelled = true
     }
-  }, [tokenRef])
+  }, [])
 
   const submitReset = async () => {
     if (password.length < 8) {
@@ -94,7 +97,7 @@ function ResetPasswordViewInner() {
       const res = await fetch("/api/auth/reset-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: tokenRef, password }),
+        body: JSON.stringify({ token, password }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || tr("auth.tResetFail"))
