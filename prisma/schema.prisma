@@ -76,6 +76,8 @@ model User {
   updatedAt    DateTime  @updatedAt
   stores       Store[]
   sessions     Session[]
+  // Mission sécurité 2026-09-15 — récupération de mot de passe
+  passwordResetTokens PasswordResetToken[]
   // V10 — Historique client : commandes passées avec ce compte + signalements
   orders       Order[]
   reports      Report[]
@@ -92,6 +94,25 @@ model Session {
   createdAt DateTime @default(now())
 
   @@index([userId])
+}
+
+// Mission sécurité 2026-09-15 — Récupération de mot de passe : tokens hashés,
+// usage unique, expiration 60 min, révocables. Le token brut (32 octets CSPRNG)
+// n'existe QUE dans l'email envoyé — la base ne stocke QUE son SHA-256
+// (même contrat que les sessions opaques V8).
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique // SHA-256 du token brut
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+  usedAt    DateTime? // consommation atomique (claim updateMany conditionnel)
+  revokedAt DateTime? // nouvelle demande ou utilisation d'un autre token
+  requestIp String    @default("") // IP de la demande (audit, jamais le token)
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 // V3 — KinFacture : factures professionnelles avec QR de paiement mobile money

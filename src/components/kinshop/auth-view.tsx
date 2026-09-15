@@ -8,10 +8,15 @@
 // par kinshop-app.tsx, HORS du LangProvider de la landing : elle embarque donc
 // son propre LangProvider (cookie kinshop_lang lu après hydratation — rendu
 // serveur initial en fr, zéro mismatch, même contrat que la landing).
+//
+// Mission sécurité 2026-09-15 — « Mot de passe oublié ? » : nouveau mode
+// "forgot" (additif) : demande d'email → envoi d'un lien réel de
+// réinitialisation. La réponse serveur est générique (anti-énumération) et
+// est affichée telle quelle.
 
 import { useState } from "react"
 import { motion } from "framer-motion"
-import { ArrowLeft, Eye, EyeOff, Loader2, Lock, LogIn, Mail, Phone, User, UserPlus } from "lucide-react"
+import { ArrowLeft, Eye, EyeOff, Loader2, Lock, LogIn, Mail, MailCheck, Phone, User, UserPlus } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -19,7 +24,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { LangProvider, useLang } from "@/components/kinshop/lang-context"
 
-export type AuthMode = "login" | "register"
+export type AuthMode = "login" | "register" | "forgot"
 
 interface AuthViewProps {
   initialMode: AuthMode
@@ -44,6 +49,10 @@ function AuthViewInner({ initialMode, next, onAuthed, onCancel, onSwitchMode }: 
   // Connexion
   const [loginEmail, setLoginEmail] = useState("")
   const [loginPassword, setLoginPassword] = useState("")
+
+  // Mot de passe oublié
+  const [forgotEmail, setForgotEmail] = useState("")
+  const [forgotSent, setForgotSent] = useState(false)
 
   const [loading, setLoading] = useState(false)
 
@@ -105,8 +114,37 @@ function AuthViewInner({ initialMode, next, onAuthed, onCancel, onSwitchMode }: 
     }
   }
 
+  const submitForgot = async () => {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(forgotEmail.trim())) {
+      toast.error(tr("auth.tEmailBad"))
+      return
+    }
+    setLoading(true)
+    try {
+      const res = await fetch("/api/auth/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: forgotEmail }),
+      })
+      const data = await res.json()
+      // Réponse générique par design (anti-énumération) : le succès affiche le
+      // message neutre, quelle que soit l'existence du compte.
+      if (!res.ok) throw new Error(data.message || tr("auth.forgotFail"))
+      setForgotSent(true)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : tr("auth.forgotFail"))
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const switchTo = (m: AuthMode) => {
     setMode(m)
+    if (m === "forgot") {
+      setForgotSent(false)
+      // Pré-remplir avec l'email de connexion si déjà saisi (confort)
+      setForgotEmail(loginEmail)
+    }
     onSwitchMode(m)
   }
 
@@ -142,14 +180,16 @@ function AuthViewInner({ initialMode, next, onAuthed, onCancel, onSwitchMode }: 
         >
           <div className="text-center mb-8">
             <h1 className="text-3xl font-bold tracking-tight">
-              {mode === "register" ? tr("auth.regTitle") : tr("auth.loginTitle")}
+              {mode === "register" ? tr("auth.regTitle") : mode === "forgot" ? tr("auth.forgotTitle") : tr("auth.loginTitle")}
             </h1>
             <p className="text-muted-foreground mt-2">
               {mode === "register"
                 ? tr("auth.regSub")
-                : next
-                  ? tr("auth.loginFor").replace("{next}", nextLabel(next))
-                  : tr("auth.loginSub")}
+                : mode === "forgot"
+                  ? tr("auth.forgotSub")
+                  : next
+                    ? tr("auth.loginFor").replace("{next}", nextLabel(next))
+                    : tr("auth.loginSub")}
             </p>
           </div>
 
@@ -253,6 +293,58 @@ function AuthViewInner({ initialMode, next, onAuthed, onCancel, onSwitchMode }: 
                     </button>
                   </p>
                 </>
+              ) : mode === "forgot" ? (
+                forgotSent ? (
+                  <>
+                    <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-4 flex items-start gap-3">
+                      <MailCheck className="w-5 h-5 text-emerald-600 mt-0.5 shrink-0" />
+                      <p className="text-sm text-emerald-900 leading-relaxed">{tr("auth.forgotDone")}</p>
+                    </div>
+                    <Button variant="outline" onClick={() => switchTo("login")} className="w-full h-11">
+                      <LogIn className="w-4 h-4 mr-2" />
+                      {tr("auth.forgotBack")}
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <div className="space-y-2">
+                      <Label htmlFor="forgotEmail">{tr("auth.email")}</Label>
+                      <div className="relative">
+                        <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                        <Input
+                          id="forgotEmail"
+                          type="email"
+                          className="pl-9"
+                          placeholder={tr("auth.emailPh")}
+                          value={forgotEmail}
+                          onChange={(e) => setForgotEmail(e.target.value)}
+                          maxLength={120}
+                          autoComplete="email"
+                        />
+                      </div>
+                    </div>
+
+                    <Button onClick={submitForgot} disabled={loading} className="w-full h-12 text-base">
+                      {loading ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          {tr("auth.forgotSending")}
+                        </>
+                      ) : (
+                        <>
+                          <Mail className="w-4 h-4 mr-2" />
+                          {tr("auth.forgotBtn")}
+                        </>
+                      )}
+                    </Button>
+
+                    <p className="text-center text-sm text-muted-foreground">
+                      <button onClick={() => switchTo("login")} className="text-primary font-medium hover:underline">
+                        {tr("auth.forgotBack")}
+                      </button>
+                    </p>
+                  </>
+                )
               ) : (
                 <>
                   <div className="space-y-2">
@@ -273,7 +365,16 @@ function AuthViewInner({ initialMode, next, onAuthed, onCancel, onSwitchMode }: 
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="loginPassword">{tr("auth.password")}</Label>
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="loginPassword">{tr("auth.password")}</Label>
+                      <button
+                        type="button"
+                        onClick={() => switchTo("forgot")}
+                        className="text-xs text-primary font-medium hover:underline"
+                      >
+                        {tr("auth.forgot")}
+                      </button>
+                    </div>
                     <div className="relative">
                       <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                       <Input

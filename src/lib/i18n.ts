@@ -272,6 +272,58 @@ export const DICT = {
   "auth.tUnknown": { fr: "Erreur inconnue", en: "Unknown error" },
   "auth.welcome": { fr: "Bienvenue {name} ! 🎉", en: "Welcome {name}! 🎉" },
   "auth.welcomeBack": { fr: "Content de te revoir, {name} ! 👋", en: "Welcome back, {name}! 👋" },
+
+  /* ─── Mission sécurité 2026-09-15 — Mot de passe oublié / réinitialisation ─── */
+  "auth.forgot": { fr: "Mot de passe oublié ?", en: "Forgot your password?" },
+  "auth.forgotTitle": { fr: "Récupérer ton accès 🔑", en: "Recover your access 🔑" },
+  "auth.forgotSub": {
+    fr: "Entre ton adresse email : si un compte lui est associé, tu recevras un lien de réinitialisation.",
+    en: "Enter your email: if an account is linked to it, you will receive a reset link.",
+  },
+  "auth.forgotBtn": { fr: "Envoyer le lien de réinitialisation", en: "Send reset link" },
+  "auth.forgotSending": { fr: "Envoi en cours…", en: "Sending…" },
+  "auth.forgotDone": {
+    fr: "Si un compte est associé à cette adresse email, un lien de réinitialisation t'a été envoyé. Vérifie ta boîte de réception (et tes spams). Le lien est valable 60 minutes.",
+    en: "If an account is linked to this email address, a reset link has been sent to you. Check your inbox (and spam folder). The link is valid for 60 minutes.",
+  },
+  "auth.forgotBack": { fr: "Retour à la connexion", en: "Back to login" },
+  "auth.forgotFail": {
+    fr: "Erreur lors de l'envoi. Réessaie dans quelques instants.",
+    en: "Error while sending. Please try again in a few moments.",
+  },
+  "auth.resetTitle": { fr: "Nouveau mot de passe 🔐", en: "New password 🔐" },
+  "auth.resetSub": {
+    fr: "Choisis un mot de passe solide (8 caractères minimum) que tu n'utilises pas ailleurs.",
+    en: "Choose a strong password (8 characters minimum) you don't use elsewhere.",
+  },
+  "auth.resetNewPw": { fr: "Nouveau mot de passe *", en: "New password *" },
+  "auth.resetConfirmPw": { fr: "Confirmer le nouveau mot de passe *", en: "Confirm new password *" },
+  "auth.resetBtn": { fr: "Réinitialiser mon mot de passe", en: "Reset my password" },
+  "auth.resetting": { fr: "Réinitialisation…", en: "Resetting…" },
+  "auth.resetDone": { fr: "Mot de passe réinitialisé ✅", en: "Password reset ✅" },
+  "auth.resetDoneSub": {
+    fr: "Ton mot de passe a été modifié et toutes tes sessions ont été déconnectées. Tu peux maintenant te connecter avec ton nouveau mot de passe.",
+    en: "Your password has been changed and all your sessions have been logged out. You can now log in with your new password.",
+  },
+  "auth.resetGoLogin": { fr: "Me connecter", en: "Log in" },
+  "auth.resetInvalidTitle": { fr: "Lien invalide ou expiré", en: "Invalid or expired link" },
+  "auth.resetInvalidSub": {
+    fr: "Ce lien de réinitialisation est invalide, expiré ou a déjà été utilisé. Depuis l'écran de connexion, demande un nouveau lien pour retrouver ton accès.",
+    en: "This reset link is invalid, expired or has already been used. From the login screen, request a new link to recover your access.",
+  },
+  "auth.resetNewLink": { fr: "Retour à l'accueil", en: "Back to home" },
+  "auth.tResetMin": {
+    fr: "Le mot de passe doit contenir au moins 8 caractères.",
+    en: "Password must be at least 8 characters.",
+  },
+  "auth.tResetMismatch": {
+    fr: "Les deux mots de passe ne correspondent pas.",
+    en: "The two passwords do not match.",
+  },
+  "auth.tResetFail": {
+    fr: "Erreur lors de la réinitialisation. Réessaie.",
+    en: "Error while resetting. Please try again.",
+  },
 } as const
 
 export type DictKey = keyof typeof DICT
