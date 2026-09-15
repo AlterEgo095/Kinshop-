@@ -1,0 +1,28 @@
+# Dependabot — KinShop (vague 2, E2)
+# Double lockfile assumé : bun.lock = verrou d'exécution (déploiement),
+# package-lock.json = manifeste d'audit. Dependabot lit le manifeste npm et
+# ouvre des PR qui mettent à jour LES DEUX (les PR sont à reconstruire avec
+# `bun install` avant fusion pour réaligner bun.lock).
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      mineur-et-correctif:
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      # Prisma 7 = migration majeure (moteur client) — fenêtre de maintenance dédiée
+      - dependency-name: "prisma"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@prisma/client"
+        update-types: ["version-update:semver-major"]
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
