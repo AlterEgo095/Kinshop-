@@ -2,12 +2,27 @@ import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import type { OrderItem, TrackOrderData } from "@/lib/kinshop"
 import { PUBLIC_EVENT_TYPES } from "@/lib/order-workflow"
+import { rateLimit, clientIp } from "@/lib/ratelimit"
+
+// P7 — anti-énumération : la référence est séquentielle, donc l'espace est
+// énumérable par un robot. Limite par IP : 30 requêtes / 5 minutes (l'usage
+// normal d'un acheteur rafraîchissant son suivi est très en dessous).
+const TRACK_RATE_MAX = 30
+const TRACK_RATE_WINDOW_MS = 5 * 60 * 1000
 
 // GET /api/orders/track?ref=CMD-2026-000001 — Suivi public d'une commande par sa référence
 // Renvoie uniquement les données nécessaires au client (jamais le numéro du client)
 // + la frise publique d'événements (types sûrs uniquement — pas de détails internes).
 export async function GET(req: NextRequest) {
   try {
+    // P7 — garde anti-énumération (avant tout accès DB)
+    if (!rateLimit(`track:${clientIp(req)}`, TRACK_RATE_MAX, TRACK_RATE_WINDOW_MS)) {
+      return NextResponse.json(
+        { error: "Trop de requêtes. Réessaie dans quelques minutes." },
+        { status: 429, headers: { "Retry-After": "300" } },
+      )
+    }
+
     const ref = (req.nextUrl.searchParams.get("ref") || "").trim().toUpperCase()
     if (!ref) return NextResponse.json({ error: "Paramètre ref requis." }, { status: 400 })
 

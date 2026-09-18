@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
-import { guardAdmin, logAdminAction } from "@/lib/admin"
-
-const ORDER_STATUSES = ["new", "paid", "confirmed", "delivered", "cancelled"]
-const PAYMENT_STATUSES = ["unpaid", "pending", "paid", "failed"]
+import { guardAdmin, getAdminUser, logAdminAction } from "@/lib/admin"
+// P4 — le vocabulaire et le graphe de transitions font foi depuis lib/order-workflow
+// (source unique partagée vendeur/serveur) : plus aucune liste locale V2.
+import {
+  ORDER_STATUSES,
+  PAYMENT_STATUSES,
+  canTransitionOrder,
+  type OrderStatus,
+  type PaymentStatus,
+} from "@/lib/order-workflow"
 
 // GET /api/admin/orders — Toutes les commandes de la plateforme
 export async function GET(req: NextRequest) {
@@ -24,11 +30,11 @@ export async function GET(req: NextRequest) {
     })
 
     let list = orders
-    if (status && ORDER_STATUSES.includes(status)) {
+    if (status && ORDER_STATUSES.includes(status as OrderStatus)) {
       list = list.filter((o) => o.status === status)
     }
-    // V2 — filtre par statut de paiement
-    if (pay && PAYMENT_STATUSES.includes(pay)) {
+    // V10 — filtre par statut de paiement (vocabulaire workflow complet)
+    if (pay && PAYMENT_STATUSES.includes(pay as PaymentStatus)) {
       list = list.filter((o) => o.paymentStatus === pay)
     }
     if (storeId) list = list.filter((o) => o.storeId === storeId)
@@ -49,7 +55,10 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// PATCH /api/admin/orders — Changer le statut d'une commande / confirmer un paiement (V2)
+// PATCH /api/admin/orders — Changer le statut d'une commande / confirmer un paiement (V10)
+// P4 — aligné sur le workflow serveur : mêmes constantes que les routes vendeur,
+// transitions validées par le graphe, et chaque correction écrit un OrderEvent
+// (actorType admin) dans l'historique immuable de la commande.
 export async function PATCH(req: NextRequest) {
   const denied = await guardAdmin(req)
   if (denied) return denied
@@ -66,18 +75,26 @@ export async function PATCH(req: NextRequest) {
 
     const data: { status?: string; paymentStatus?: string; paidAt?: Date } = {}
     if (status) {
-      if (!ORDER_STATUSES.includes(status)) {
+      if (!ORDER_STATUSES.includes(status as OrderStatus)) {
         return NextResponse.json({ error: "Statut invalide." }, { status: 400 })
+      }
+      if (status !== order.status && !canTransitionOrder(order.status, status)) {
+        return NextResponse.json(
+          { error: `Transition interdite : ${order.status} → ${status}. Utilise la séquence du workflow (ex : new → confirmed).` },
+          { status: 400 },
+        )
       }
       data.status = status
     }
     if (paymentStatus) {
-      if (!PAYMENT_STATUSES.includes(paymentStatus)) {
+      if (!PAYMENT_STATUSES.includes(paymentStatus as PaymentStatus)) {
         return NextResponse.json({ error: "Statut de paiement invalide." }, { status: 400 })
       }
       data.paymentStatus = paymentStatus
       if (paymentStatus === "paid") {
         data.paidAt = new Date()
+        // Sémantique paiement (miroir du webhook agrégateur) : la commande
+        // « new » passe à « paid » — hors graphe, comme pour l'encaissement en ligne.
         if (order.status === "new") data.status = "paid"
       }
     }
@@ -86,6 +103,59 @@ export async function PATCH(req: NextRequest) {
     }
 
     const updated = await db.order.update({ where: { id }, data })
+
+    // P4 — traçabilité : la correction entre dans l'historique immuable de la
+    // commande (le privilège admin reste total — seule la trace change).
+    const admin = await getAdminUser(req)
+    const adminLabel = admin ? `${admin.name || admin.email} (admin)` : "Administration"
+    const events: {
+      orderId: string
+      type: string
+      actorType: "admin"
+      actorId: string
+      actorLabel: string
+      oldValue?: string
+      newValue: string
+      reason: string
+    }[] = []
+    if (status && status !== order.status) {
+      events.push({
+        orderId: order.id,
+        type: "status_changed",
+        actorType: "admin",
+        actorId: admin?.id ?? "",
+        actorLabel: adminLabel,
+        oldValue: order.status,
+        newValue: data.status ?? status,
+        reason: "Correction manuelle (console admin)",
+      })
+    }
+    if (paymentStatus && paymentStatus !== order.paymentStatus) {
+      events.push({
+        orderId: order.id,
+        type:
+          paymentStatus === "paid"
+            ? "payment_confirmed"
+            : paymentStatus === "failed"
+              ? "payment_failed"
+              : "note",
+        actorType: "admin",
+        actorId: admin?.id ?? "",
+        actorLabel: adminLabel,
+        oldValue: order.paymentStatus,
+        newValue: paymentStatus,
+        reason:
+          paymentStatus === "paid"
+            ? "Paiement confirmé manuellement par l'administration"
+            : `Statut de paiement → ${paymentStatus} (correction admin)`,
+      })
+    }
+    if (events.length > 0) {
+      await db.orderEvent
+        .createMany({ data: events })
+        .catch((err) => console.error("orderEvent correction admin (P4)", err))
+    }
+
     if (status) {
       await logAdminAction("order.status", `order:${order.ref}`, `Statut de ${order.ref} → ${status} (admin)`)
     }

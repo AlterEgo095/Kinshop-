@@ -3,9 +3,13 @@ import { db } from "@/lib/db"
 import { PAYMENT_LABELS, normalizePhone } from "@/lib/kinshop"
 import { initiateMomoPayment } from "@/lib/mobile-money"
 import { isPaymentSimulationEnabled } from "@/lib/simulation"
+import { getUserFromRequest } from "@/lib/auth"
+import { getAdminUser } from "@/lib/admin"
 
 // POST /api/payments/initiate — Lance le paiement mobile money d'une commande
 // body : { ref, payerPhone? }
+// P3 — encadrement : seul l'acheteur de la commande (session serveur) ou
+// l'administration peut lancer une initiation de paiement.
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => null)
@@ -14,6 +18,28 @@ export async function POST(req: NextRequest) {
 
     const order = await db.order.findUnique({ where: { ref }, include: { store: { select: { name: true } } } })
     if (!order) return NextResponse.json({ error: "Commande introuvable." }, { status: 404 })
+
+    // P3 — garde d'identité AVANT toute action : l'initiation est réservée à
+    // l'acheteur propriétaire de la commande (dérivation serveur par session,
+    // jamais un paramètre) ou à l'administration. Les commandes legacy sans
+    // compte (userId null) passent uniquement par l'administration.
+    const admin = await getAdminUser(req)
+    if (!admin) {
+      const user = await getUserFromRequest(req)
+      if (!user) {
+        return NextResponse.json({ error: "Connexion requise pour lancer le paiement." }, { status: 401 })
+      }
+      if (order.userId && order.userId !== user.id) {
+        return NextResponse.json({ error: "Cette commande ne t'appartient pas." }, { status: 403 })
+      }
+      if (!order.userId) {
+        return NextResponse.json(
+          { error: "Cette commande n'est pas liée à un compte : contacte le support pour le paiement." },
+          { status: 403 },
+        )
+      }
+    }
+
     if (order.paymentMethod === "cash") {
       return NextResponse.json({ error: "Cette commande est payée en espèces à la livraison." }, { status: 400 })
     }

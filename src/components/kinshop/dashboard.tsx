@@ -909,22 +909,9 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
     }
   }
 
-  // V2 — Le vendeur enregistre un paiement espèces reçu à la livraison
-  const markCashReceived = async (order: OrderData) => {
-    try {
-      const res = await fetch("/api/orders", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: order.id, paymentStatus: "paid" }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || "Erreur.")
-      setOrders((os) => os.map((o) => (o.id === order.id ? { ...o, paymentStatus: "paid" } : o)))
-      toast.success(`Paiement espèces enregistré — ${order.ref} 💵`)
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Erreur inconnue")
-    }
-  }
+  // P6 — markCashReceived supprimée : code mort au contrat obsolète (payload
+  // paymentStatus ignoré par la route serveur). L'encaissement cash passe
+  // exclusivement par OrderWorkflowControls (contrat confirmCash V10).
 
   const refreshStore = useCallback(async () => {
     try {

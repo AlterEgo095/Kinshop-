@@ -15,6 +15,7 @@ import { notifyNewOrder } from "@/lib/notifier"
 import { getUserFromRequest, requireStoreOwner, unauthorized } from "@/lib/auth"
 import { getEnabledPayments, getConfigValue, isFeatureOn } from "@/lib/config-registry"
 import { resolveProvider } from "@/lib/payments"
+import { isPaymentSimulationEnabled } from "@/lib/simulation"
 import { makeSequentialOrderRef } from "@/lib/invoice-integrity"
 import { logAudit, actorFromUser } from "@/lib/audit"
 import { canTransitionOrder, ORDER_STATUSES } from "@/lib/order-workflow"
@@ -168,16 +169,25 @@ export async function POST(req: NextRequest) {
       },
     })
 
-    // Initiation provider (référence agrégateur simulée / instructions espèces)
+    // Initiation provider (référence agrégateur / instructions espèces)
     const initiation = await provider.initiate({
       orderRef: ref,
       payerPhone: normalizePhone(customerPhone),
       totalFC,
     })
-    await db.order.update({
-      where: { id: order.id },
-      data: { paymentRef: initiation.providerRef },
-    })
+    // P6 — pas de référence SIM- trompeuse : tant que l'agrégateur réel n'est
+    // pas branché (clés MOMO absentes) et que la simulation n'est pas
+    // explicitement activée, la commande MM reste sans paymentRef — la vraie
+    // référence arrivera du webhook (live) ou de la déclaration de l'acheteur
+    // (parcours direct, Phase C). L'espèces garde son marqueur COD-<ref>.
+    const momoLive = Boolean(process.env.MOMO_TOKEN?.trim() && process.env.MOMO_MERCHANT?.trim())
+    const recordProviderRef = method === "cash" || momoLive || isPaymentSimulationEnabled()
+    if (recordProviderRef) {
+      await db.order.update({
+        where: { id: order.id },
+        data: { paymentRef: initiation.providerRef },
+      })
+    }
 
     // V10 — Historique immuable : création + sélection paiement
     await db.orderEvent.createMany({
@@ -253,7 +263,11 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json(
-      { order: { ...order, paymentRef: initiation.providerRef }, paymentInstructions: initiation.instructions, whatsappUrl: buildWhatsAppLink(store.whatsapp, message) },
+      {
+        order: { ...order, paymentRef: recordProviderRef ? initiation.providerRef : null },
+        paymentInstructions: recordProviderRef ? initiation.instructions : undefined,
+        whatsappUrl: buildWhatsAppLink(store.whatsapp, message),
+      },
       { status: 201 },
     )
   } catch (e) {

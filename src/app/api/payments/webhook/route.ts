@@ -47,6 +47,22 @@ export async function POST(req: NextRequest) {
           status: order.status === "new" ? "paid" : order.status,
         },
       })
+      // P3 — traçabilité : l'encaissement en ligne laisse une trace immuable dans
+      // l'historique de la commande (même principe que l'encaissement cash).
+      await db.orderEvent
+        .create({
+          data: {
+            orderId: order.id,
+            type: "payment_confirmed",
+            actorType: "system",
+            actorLabel: "Agrégateur (webhook)",
+            newValue: "paid",
+            reason: transactionRef
+              ? `Paiement mobile money confirmé — réf opérateur ${transactionRef}`
+              : "Paiement mobile money confirmé (callback agrégateur)",
+          },
+        })
+        .catch((err) => console.error("orderEvent payment_confirmed (webhook)", err))
       return NextResponse.json({ ok: true, ref: updated.ref, paymentStatus: updated.paymentStatus })
     }
 
@@ -55,6 +71,19 @@ export async function POST(req: NextRequest) {
       where: { id: order.id },
       data: { paymentStatus: "failed" },
     })
+    // P3 — traçabilité : l'échec annoncé par l'agrégateur est historisé aussi.
+    await db.orderEvent
+      .create({
+        data: {
+          orderId: order.id,
+          type: "payment_failed",
+          actorType: "system",
+          actorLabel: "Agrégateur (webhook)",
+          newValue: "failed",
+          reason: `Paiement mobile money échoué — code agrégateur ${code || "inconnu"}`,
+        },
+      })
+      .catch((err) => console.error("orderEvent payment_failed (webhook)", err))
     return NextResponse.json({ ok: true, ref: order.ref, paymentStatus: "failed" })
   } catch (e) {
     console.error("POST /api/payments/webhook", e)

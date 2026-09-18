@@ -345,6 +345,10 @@ model PulseDelivery {
   event      String
   saleId     String   @default("")
   createdAt  DateTime @default(now())
+
+  // P2 — anti-replay durable : Chariow régénère le deliveryId à chaque reprise
+  // de livraison ; le couple (event, saleId) est lui stable par vente.
+  @@unique([event, saleId])
 }
 
 // V2 — Statistiques : visites journalières par boutique (agrégat 1 ligne/jour)

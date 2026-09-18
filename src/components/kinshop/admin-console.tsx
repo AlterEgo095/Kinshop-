@@ -115,9 +115,10 @@ import {
   formatUSD,
   timeAgo,
   type CouponType,
-  type OrderStatus,
   type PaymentMethod,
 } from "@/lib/kinshop"
+// P4 — vocabulaire workflow V10 complet (source unique, mêmes constantes que le serveur)
+import type { OrderStatus } from "@/lib/order-workflow"
 
 /* ─────────── Types ─────────── */
 
@@ -323,12 +324,20 @@ interface PulseLog {
 
 /* ─────────── Constantes UI ─────────── */
 
+// P4 — méta complète du vocabulaire V10 (11 statuts commande) : le menu de
+// changement de statut et les filtres proposent désormais tout le workflow.
 const ORDER_STATUS_META: Record<OrderStatus, { label: string; badge: string }> = {
   new: { label: "Nouvelle", badge: "bg-amber-100 text-amber-800 border-amber-200" },
   paid: { label: "Payée en ligne", badge: "bg-emerald-100 text-emerald-800 border-emerald-200" },
   confirmed: { label: "Confirmée", badge: "bg-teal-100 text-teal-800 border-teal-200" },
+  processing: { label: "En préparation", badge: "bg-blue-100 text-blue-800 border-blue-200" },
+  ready: { label: "Prête pour livraison", badge: "bg-indigo-100 text-indigo-800 border-indigo-200" },
+  out_for_delivery: { label: "En livraison", badge: "bg-sky-100 text-sky-800 border-sky-200" },
   delivered: { label: "Livrée", badge: "bg-emerald-600 text-white border-emerald-600" },
   cancelled: { label: "Annulée", badge: "bg-rose-100 text-rose-700 border-rose-200" },
+  returned: { label: "Retournée", badge: "bg-orange-100 text-orange-800 border-orange-200" },
+  refunded: { label: "Remboursée", badge: "bg-violet-100 text-violet-800 border-violet-200" },
+  disputed: { label: "En litige", badge: "bg-red-100 text-red-800 border-red-200" },
 }
 
 const SHORT_PAYMENT: Record<PaymentMethod, string> = {
@@ -338,12 +347,14 @@ const SHORT_PAYMENT: Record<PaymentMethod, string> = {
   cash: "Espèces",
 }
 
-// V2 — Méta des statuts de paiement mobile money
+// P4 — méta statuts de paiement alignée sur PAYMENT_STATUSES V10 (6 états)
 const PAY_STATUS_META: Record<string, { label: string; badge: string }> = {
   unpaid: { label: "Non payée", badge: "bg-muted text-muted-foreground border-border" },
   pending: { label: "En cours", badge: "bg-amber-100 text-amber-800 border-amber-200" },
+  cash_pending: { label: "À payer à la livraison", badge: "bg-yellow-100 text-yellow-800 border-yellow-200" },
   paid: { label: "Payée ✅", badge: "bg-emerald-100 text-emerald-800 border-emerald-200" },
   failed: { label: "Échoué", badge: "bg-rose-100 text-rose-700 border-rose-200" },
+  refunded: { label: "Remboursée", badge: "bg-violet-100 text-violet-800 border-violet-200" },
 }
 
 function fmtDate(d: string | null): string {
@@ -1805,11 +1816,11 @@ export function AdminConsole({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Tous les statuts</SelectItem>
-                  <SelectItem value="new">Nouvelles</SelectItem>
-                  <SelectItem value="paid">Payées en ligne</SelectItem>
-                  <SelectItem value="confirmed">Confirmées</SelectItem>
-                  <SelectItem value="delivered">Livrées</SelectItem>
-                  <SelectItem value="cancelled">Annulées</SelectItem>
+                  {(Object.keys(ORDER_STATUS_META) as OrderStatus[]).map((k) => (
+                    <SelectItem key={k} value={k}>
+                      {ORDER_STATUS_META[k].label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
               {/* V2 — Filtre par statut de paiement */}
@@ -1819,10 +1830,12 @@ export function AdminConsole({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Tous les paiements</SelectItem>
-                  <SelectItem value="paid">Payées en ligne</SelectItem>
+                  <SelectItem value="paid">Payées</SelectItem>
                   <SelectItem value="pending">Paiement en cours</SelectItem>
+                  <SelectItem value="cash_pending">À payer à la livraison</SelectItem>
                   <SelectItem value="unpaid">Non payées</SelectItem>
                   <SelectItem value="failed">Paiement échoué</SelectItem>
+                  <SelectItem value="refunded">Remboursées</SelectItem>
                 </SelectContent>
               </Select>
               <Select value={ordersStore} onValueChange={setOrdersStore}>

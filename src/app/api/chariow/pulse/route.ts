@@ -2,12 +2,16 @@
 //
 // Reçoit les notifications temps réel de Chariow (ex: successful.sale).
 // Sécurité : signature HMAC-SHA256 du corps brut avec CHARIOW_PULSE_SECRET
-// (header x-chariow-signature). Idempotence via x-pulse-delivery-id.
+// (header x-chariow-signature). Idempotence à deux niveaux :
+//   1. x-pulse-delivery-id (reprises immédiates de livraison) ;
+//   2. couple (event, saleId) — index unique DB (P2) : Chariow régénère le
+//      deliveryId à chaque reprise, le couple reste lui stable par vente.
 // Docs : https://chariow.dev/en/guides/pulse-security
 //
 // Traitement de successful.sale selon custom_metadata :
 //   { store_slug } → active/prolonge le Premium de la boutique (+30 jours)
-//   { order_ref }  → marque la commande correspondante comme « payée »
+// (P2 — la branche order_ref est supprimée : les commandes ne passent JAMAIS
+// par Chariow ; leur paiement suit le parcours direct vendeur ou le COD.)
 
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
@@ -35,16 +39,32 @@ export async function POST(req: NextRequest) {
   const event = payload.event || req.headers.get("x-pulse-event") || "unknown"
   const saleId = payload.sale?.id ?? ""
 
-  // ─── Idempotence : Chariow peut retenter les livraisons ───
+  // ─── Idempotence (2 contrôles AVANT toute écriture) ───
+  // 1) deliveryId : reprises immédiates de la même livraison.
   if (deliveryId) {
     const existing = await db.pulseDelivery.findUnique({ where: { deliveryId } })
     if (existing) {
       return NextResponse.json({ received: true, duplicate: true })
     }
+  }
+  // ─── P2 — Anti-replay durable : couple (event, saleId) ───
+  // 2) Un replay Chariow arrive avec un deliveryId NEUF mais le même couple.
+  // L'index unique @@unique([event, saleId]) fait foi au niveau DB ; ce contrôle
+  // anticipé (AVANT le create — leçon de la matrice de tests : le create de la
+  // première livraison ne doit JAMAIS être suivi d'un duplicate) évite tout
+  // re-traitement métier (double +30 j Premium).
+  if (saleId) {
+    const replay = await db.pulseDelivery.findFirst({ where: { event, saleId } })
+    if (replay) {
+      return NextResponse.json({ received: true, duplicate: true })
+    }
+  }
+  // 3) Enregistrement de la livraison — après les deux contrôles. Le catch
+  // couvre la course concurrente (index unique violé par une instance jumelle).
+  if (deliveryId) {
     try {
       await db.pulseDelivery.create({ data: { deliveryId, event, saleId } })
     } catch {
-      // Course concurrente : une autre instance vient de créer l'entrée
       return NextResponse.json({ received: true, duplicate: true })
     }
   }
@@ -53,7 +73,6 @@ export async function POST(req: NextRequest) {
   if (event === "successful.sale") {
     const metadata = payload.sale?.custom_metadata ?? {}
     const storeSlug = (metadata.store_slug || "").trim()
-    const orderRef = (metadata.order_ref || "").trim()
 
     try {
       if (storeSlug) {
@@ -73,13 +92,6 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      if (orderRef) {
-        // Marque la commande comme payée (paiement en ligne via Chariow)
-        const order = await db.order.findUnique({ where: { ref: orderRef } })
-        if (order) {
-          await db.order.update({ where: { ref: orderRef }, data: { status: "paid" } })
-        }
-      }
     } catch (e) {
       console.error("Pulse processing error:", e)
       // 200 : Chariow ne doit pas retenter pour une erreur applicative interne
