@@ -23,6 +23,7 @@ export type ConfigSectionId =
   | "catalog"
   | "payments"
   | "business"
+  | "finance"
   | "boost"
   | "governance"
   | "content"
@@ -76,6 +77,14 @@ export const CONFIG_SECTIONS: ConfigSectionMeta[] = [
     title: "Règles métier",
     description: "Règles de gouvernance de la plateforme (boutiques par compte, commandes, litiges).",
     icon: "Scale",
+  },
+  {
+    id: "finance",
+    title: "Finances (préparatoire)",
+    description:
+      "Clés PRÉPARATOIRES sans aucun effet (P9) : aucune commission n'est calculée, prélevée ni affichée " +
+    "tant que la logique réelle n'est pas décidée (Phase E). Modifiables ici, inertes partout ailleurs.",
+    icon: "Coins",
   },
   {
     id: "boost",
@@ -174,6 +183,19 @@ export const CONFIG_DEFAULTS: PublicConfig = {
   "business.orderMaxQtyPerItem": 99, // quantité max par article d'une commande
   "business.premiumMinDays": 1, // durée min d'un cadeau premium (console admin)
   "business.maxOpenRefundsPerStore": 5, // V10 — demandes de remboursement ouvertes max par boutique
+  // P8 (Phase C) — délai d'expiration des déclarations de paiement direct :
+  // une déclaration jamais confirmée au-delà du délai repasse en failed
+  // (événement payment_failed explicite, re-déclaration possible). 0 = désactivé.
+  "business.paymentDeclarationTimeoutHours": 24,
+
+  /* ─────────── Finances (préparatoire — P9, SANS EFFET) ─────────── */
+  // P9 — clés inertes : aucune commission n'existe aujourd'hui (ni calcul, ni
+  // stockage, ni affichage). Ces clés n'ont AUCUN consommateur dans le code —
+  // elles préparent la décision business de la Phase E (ledger documenté) et
+  // n'apparaissent que dans la console admin. Aucun montant affiché au client
+  // ne les utilise, aucun prélèvement ne s'en déclenche.
+  "finance.commissionPercent": 0,
+  "finance.commissionLabel": "",
 
   /* ─────────── Gouvernance (P5) ─────────── */
   "governance.verificationCooldownDays": 7, // délai anti-spam entre deux demandes de vérification

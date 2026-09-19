@@ -3,6 +3,7 @@ import { db } from "@/lib/db"
 import type { OrderItem, TrackOrderData } from "@/lib/kinshop"
 import { PUBLIC_EVENT_TYPES } from "@/lib/order-workflow"
 import { rateLimit, clientIp } from "@/lib/ratelimit"
+import { expireOverdueDeclarations } from "@/lib/direct-payments"
 
 // P7 — anti-énumération : la référence est séquentielle, donc l'espace est
 // énumérable par un robot. Limite par IP : 30 requêtes / 5 minutes (l'usage
@@ -36,6 +37,9 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Commande introuvable. Vérifie ta référence (ex : KIN-XXXX)." }, { status: 404 })
     }
 
+    // P8 (Phase C) — expiration paresseuse (le suivi public reflète l'état réel)
+    await expireOverdueDeclarations([order])
+
     let items: OrderItem[] = []
     try {
       const parsed = JSON.parse(order.items)
@@ -55,9 +59,15 @@ export async function GET(req: NextRequest) {
       .filter((ev) => PUBLIC_EVENT_TYPES.includes(ev.type as never))
       .map((ev) => ({
         type: ev.type,
-        newValue: ev.newValue || undefined,
-        oldValue: ev.oldValue || undefined,
-        reason: ev.reason || undefined,
+        // P1 (Phase C) — l'événement payment_declared est visible publiquement
+        // comme BADGE d'état uniquement : sa charge (référence de transaction
+        // déclarée, note de l'acheteur) n'est exposée ni ici ni à un tiers.
+        newValue: ev.type === "payment_declared" ? undefined : ev.newValue || undefined,
+        oldValue: ev.type === "payment_declared" ? undefined : ev.oldValue || undefined,
+        reason:
+          ev.type === "payment_declared"
+            ? "Le client déclare avoir effectué le paiement — en attente de confirmation du vendeur."
+            : ev.reason || undefined,
         at: ev.createdAt.toISOString(),
       }))
 

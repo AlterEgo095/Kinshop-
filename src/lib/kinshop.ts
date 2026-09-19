@@ -185,7 +185,9 @@ export interface OrderItem {
 
 export type PaymentMethod = "mpesa" | "airtel" | "orange" | "cash"
 export type OrderStatus = "new" | "paid" | "confirmed" | "delivered" | "cancelled"
-export type PaymentStatus = "unpaid" | "pending" | "cash_pending" | "paid" | "failed" | "refunded"
+// P1 (Phase C) — declared = « J'ai effectué le paiement » (état intermédiaire
+// du parcours direct, aligné sur PaymentStatus de lib/order-workflow.ts)
+export type PaymentStatus = "unpaid" | "declared" | "pending" | "cash_pending" | "paid" | "failed" | "refunded"
 
 export interface OrderData {
   id: string
@@ -459,6 +461,7 @@ export const PAYMENT_LABELS: Record<PaymentMethod, string> = {
 
 export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
   unpaid: "Non payée",
+  declared: "Paiement déclaré — à confirmer",
   pending: "Paiement en cours",
   // V10 — espèces à la livraison : état distinct, JAMAIS « payée » tant que non encaissé
   cash_pending: "À payer à la livraison",

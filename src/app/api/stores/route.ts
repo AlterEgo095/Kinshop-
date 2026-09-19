@@ -5,6 +5,7 @@ import { getPlatformSettings } from "@/lib/admin"
 import { getUserFromRequest, requireStoreOwner, unauthorized } from "@/lib/auth"
 import { getConfigValue } from "@/lib/config-registry"
 import { rateLimit } from "@/lib/ratelimit"
+import { parseStorePaymentSettings, DIRECT_PROVIDERS, defaultNetwork } from "@/lib/direct-payments"
 
 // POST /api/stores — Créer une boutique (V8 : compte authentifié OBLIGATOIRE)
 // Un utilisateur = une boutique (MAX_STORES_PER_USER). Le propriétaire est lié
@@ -134,7 +135,10 @@ export async function GET(req: NextRequest) {
     }
 
     // Réponse publique : masque les champs internes (Chariow, jeton de domaine, owner)
-    const { chariowEmail, chariowPhone, chariowSaleId, domainToken, domainVerified, ownerId, ...publicStore } = store
+    // P1 (Phase C) : paymentSettings (coordonnées de collecte du vendeur) n'est
+    // JAMAIS exposé publiquement — lecture réservée au propriétaire via
+    // GET /api/stores/payment-settings, snapshot par commande via la commande.
+    const { chariowEmail, chariowPhone, chariowSaleId, domainToken, domainVerified, ownerId, paymentSettings, ...publicStore } = store
     return NextResponse.json(
       {
         store: {
@@ -169,6 +173,10 @@ export async function GET(req: NextRequest) {
 }
 
 // PATCH /api/stores — Mise à jour des réglages (V8 : propriétaire uniquement)
+// P1 (Phase C) — gagne l'écriture validée des coordonnées de paiement direct
+// (paymentSettings : liste JSON [{provider, accountName, accountNumber, network,
+// instructions, active}]). La validation serveur autorise au maximum 3 entrées
+// (une par moyen Mobile Money) et n'accepte que les champs connus.
 export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json()
@@ -189,6 +197,54 @@ export async function PATCH(req: NextRequest) {
       if (digits.length >= 9) data.whatsapp = digits
     }
     if (Number(body.rateFC) > 0) data.rateFC = Number(body.rateFC)
+
+    // P1 (Phase C) — coordonnées de paiement direct (validation stricte)
+    if (body.paymentSettings !== undefined) {
+      const raw: unknown = body.paymentSettings
+      let list: unknown[] = []
+      if (typeof raw === "string") {
+        try {
+          const parsed = JSON.parse(raw)
+          if (Array.isArray(parsed)) list = parsed
+        } catch {
+          return NextResponse.json({ error: "Format des coordonnées de paiement invalide." }, { status: 400 })
+        }
+      } else if (Array.isArray(raw)) {
+        list = raw
+      } else {
+        return NextResponse.json({ error: "Format des coordonnées de paiement invalide." }, { status: 400 })
+      }
+      if (list.length > DIRECT_PROVIDERS.length) {
+        return NextResponse.json({ error: `Au maximum ${DIRECT_PROVIDERS.length} coordonnées (une par moyen Mobile Money).` }, { status: 400 })
+      }
+      const cleaned: Record<string, unknown>[] = []
+      const seen = new Set<string>()
+      for (const entry of list) {
+        if (!entry || typeof entry !== "object") continue
+        const e = entry as Record<string, unknown>
+        const provider = String(e.provider || "")
+        if (!(DIRECT_PROVIDERS as readonly string[]).includes(provider)) {
+          return NextResponse.json({ error: `Moyen inconnu : ${provider}.` }, { status: 400 })
+        }
+        if (seen.has(provider)) {
+          return NextResponse.json({ error: "Une seule entrée par moyen Mobile Money." }, { status: 400 })
+        }
+        seen.add(provider)
+        const accountNumber = String(e.accountNumber || "").replace(/[^\d+]/g, "").slice(0, 20)
+        if (accountNumber && accountNumber.replace(/\D/g, "").length < 9) {
+          return NextResponse.json({ error: `Numéro ${provider} invalide (9 chiffres minimum).` }, { status: 400 })
+        }
+        cleaned.push({
+          provider,
+          accountName: String(e.accountName || "").slice(0, 60),
+          accountNumber,
+          network: String(e.network || "").slice(0, 20) || defaultNetwork(provider),
+          instructions: String(e.instructions || "").slice(0, 200),
+          active: e.active !== false,
+        })
+      }
+      data.paymentSettings = JSON.stringify(cleaned)
+    }
 
     const store = await db.store.update({ where: { slug }, data })
     return NextResponse.json({ store })

@@ -348,8 +348,10 @@ const SHORT_PAYMENT: Record<PaymentMethod, string> = {
 }
 
 // P4 — méta statuts de paiement alignée sur PAYMENT_STATUSES V10 (6 états)
+// P1 (Phase C) — + declared (« J'ai effectué le paiement », à confirmer)
 const PAY_STATUS_META: Record<string, { label: string; badge: string }> = {
   unpaid: { label: "Non payée", badge: "bg-muted text-muted-foreground border-border" },
+  declared: { label: "Déclaré — à confirmer", badge: "bg-amber-500 text-amber-950 border-amber-600 font-semibold" },
   pending: { label: "En cours", badge: "bg-amber-100 text-amber-800 border-amber-200" },
   cash_pending: { label: "À payer à la livraison", badge: "bg-yellow-100 text-yellow-800 border-yellow-200" },
   paid: { label: "Payée ✅", badge: "bg-emerald-100 text-emerald-800 border-emerald-200" },
@@ -1831,6 +1833,7 @@ export function AdminConsole({
                 <SelectContent>
                   <SelectItem value="all">Tous les paiements</SelectItem>
                   <SelectItem value="paid">Payées</SelectItem>
+                  <SelectItem value="declared">Déclarées — à confirmer</SelectItem>
                   <SelectItem value="pending">Paiement en cours</SelectItem>
                   <SelectItem value="cash_pending">À payer à la livraison</SelectItem>
                   <SelectItem value="unpaid">Non payées</SelectItem>

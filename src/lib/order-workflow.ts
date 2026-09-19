@@ -60,15 +60,21 @@ export const ORDER_STATUS_LABELS: Record<string, string> = {
 
 /* ─────────── Statuts paiement (dimension 2) ───────────
    cash_pending = espèces à la livraison déclarées (jamais « payée » tant que le
-   vendeur/admin n'a pas confirmé l'encaissement). refunded = remboursé. */
-export type PaymentStatus = "unpaid" | "pending" | "cash_pending" | "paid" | "failed" | "refunded"
+   vendeur/admin n'a pas confirmé l'encaissement). refunded = remboursé.
+   P1 (Phase C) — declared = l'acheteur a déclaré « J'ai effectué le paiement »
+   sur son transfert Mobile Money direct au vendeur. État INTERMÉDIAIRE de la
+   machine UNPAID → DECLARED → PAID : une déclaration ne devient JAMAIS un
+   paiement confirmé par elle-même — seul le vendeur (ou l'admin) confirme
+   l'encaissement vérifié dans son compte opérateur. */
+export type PaymentStatus = "unpaid" | "declared" | "pending" | "cash_pending" | "paid" | "failed" | "refunded"
 
 export const PAYMENT_STATUSES: PaymentStatus[] = [
-  "unpaid", "pending", "cash_pending", "paid", "failed", "refunded",
+  "unpaid", "declared", "pending", "cash_pending", "paid", "failed", "refunded",
 ]
 
 export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
   unpaid: "Non payée",
+  declared: "Paiement déclaré — à confirmer",
   pending: "Paiement en cours",
   cash_pending: "À payer à la livraison",
   paid: "Payée",
@@ -146,6 +152,7 @@ export type OrderEventType =
   | "created"
   | "status_changed"
   | "payment_selected"
+  | "payment_declared"
   | "payment_confirmed"
   | "payment_failed"
   | "delivery_updated"
@@ -161,10 +168,14 @@ export type OrderEventType =
   | "note"
 
 /* Types d'événements visibles publiquement par le client (suivi) :
-   on exclut les détails internes (montants remboursés, notes vendeur…). */
+   on exclut les détails internes (montants remboursés, notes vendeur…).
+   P1 (Phase C) — payment_declared est sûr publiquement : la route de suivi
+   public en masque la charge (référence déclarée, note) et n'expose que le
+   badge d'état « Paiement déclaré ». */
 export const PUBLIC_EVENT_TYPES: OrderEventType[] = [
   "created",
   "status_changed",
+  "payment_declared",
   "payment_confirmed",
   "delivery_updated",
   "delivery_failed",
@@ -177,6 +188,7 @@ export const EVENT_TYPE_LABELS: Record<string, string> = {
   created: "Commande créée",
   status_changed: "Statut mis à jour",
   payment_selected: "Moyen de paiement choisi",
+  payment_declared: "Paiement déclaré par le client",
   payment_confirmed: "Paiement confirmé",
   payment_failed: "Paiement échoué",
   delivery_updated: "Livraison mise à jour",

@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { motion } from "framer-motion"
-import { ArrowLeft, Package, Search, Loader2, Ban, ReceiptText } from "lucide-react"
+import { ArrowLeft, Package, Search, Loader2, Ban, ReceiptText, Smartphone } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -27,6 +27,7 @@ interface MyOrder {
   id: string
   ref: string
   status: string
+  paymentMethod?: string
   paymentStatus: PaymentStatus | string
   deliveryStatus: string
   totalUSD: number
@@ -60,6 +61,59 @@ export function MyOrdersView({ onHome }: { onHome: () => void }) {
   const [refundFor, setRefundFor] = useState<MyOrder | null>(null)
   const [refundReason, setRefundReason] = useState("")
   const [refundBusy, setRefundBusy] = useState(false)
+
+  // P1 (Phase C) — déclaration de paiement direct (achat Mobile Money au vendeur)
+  interface DirectInstruction {
+    provider: string
+    accountName: string
+    accountNumber: string
+    network: string
+    instructions: string
+  }
+  const [declareFor, setDeclareFor] = useState<MyOrder | null>(null)
+  const [declareInstruction, setDeclareInstruction] = useState<DirectInstruction | null>(null)
+  const [declareRef, setDeclareRef] = useState("")
+  const [declareNote, setDeclareNote] = useState("")
+  const [declareBusy, setDeclareBusy] = useState(false)
+
+  const openDeclare = async (o: MyOrder) => {
+    setDeclareFor(o)
+    setDeclareRef("")
+    setDeclareNote("")
+    setDeclareInstruction(null)
+    try {
+      const res = await fetch(`/api/orders/payment-instruction?ref=${encodeURIComponent(o.ref)}`, { cache: "no-store" })
+      const data = await res.json()
+      if (res.ok) setDeclareInstruction(data.instruction)
+      else throw new Error(data.error || "Coordonnées indisponibles.")
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur inconnue")
+    }
+  }
+
+  const submitDeclare = async () => {
+    if (!declareFor) return
+    if (declareRef.trim().length < 4) {
+      return toast.error("Entre la référence de la transaction (visible dans le SMS opérateur).")
+    }
+    setDeclareBusy(true)
+    try {
+      const res = await fetch("/api/orders/declare-payment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ref: declareFor.ref, reference: declareRef.trim(), note: declareNote.trim() }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Erreur lors de la déclaration.")
+      toast.success(data.duplicate ? (data.message || "Paiement déjà déclaré.") : "Paiement déclaré — le vendeur va confirmer 🙏")
+      setDeclareFor(null)
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur inconnue")
+    } finally {
+      setDeclareBusy(false)
+    }
+  }
 
   const load = useCallback(async () => {
     try {
@@ -184,7 +238,10 @@ export function MyOrdersView({ onHome }: { onHome: () => void }) {
 
                     <div className="flex flex-wrap gap-1.5">
                       <Badge className={STATUS_BADGE[o.status] || "bg-muted"}>{ORDER_STATUS_LABELS[o.status] || o.status}</Badge>
-                      <Badge variant="outline" className="text-[11px]">
+                      <Badge
+                        variant="outline"
+                        className={`text-[11px] ${o.paymentStatus === "declared" ? "border-amber-400 bg-amber-50 text-amber-800 font-semibold" : ""}`}
+                      >
                         💳 {PAYMENT_STATUS_LABELS[o.paymentStatus as PaymentStatus] || o.paymentStatus}
                       </Badge>
                       {o.deliveryStatus !== "not_assigned" && (
@@ -222,6 +279,13 @@ export function MyOrdersView({ onHome }: { onHome: () => void }) {
                       >
                         <Search className="w-3.5 h-3.5 mr-1" /> Suivre
                       </Button>
+                      {/* P1 (Phase C) — déclaration de paiement direct (Mobile Money) */}
+                      {["mpesa", "airtel", "orange"].includes(String(o.paymentMethod)) &&
+                        ["unpaid", "failed"].includes(String(o.paymentStatus)) && (
+                          <Button variant="outline" size="sm" className="h-8 text-emerald-700 border-emerald-300" onClick={() => openDeclare(o)}>
+                            <Smartphone className="w-3.5 h-3.5 mr-1" /> Déclarer le paiement
+                          </Button>
+                        )}
                       {["paid", "delivered", "returned", "disputed"].includes(o.status) &&
                         !o.refunds.some((r) => ["requested", "approved", "executed"].includes(r.status)) && (
                           <Button
@@ -241,6 +305,71 @@ export function MyOrdersView({ onHome }: { onHome: () => void }) {
           </div>
         )}
       </main>
+
+      {/* P1 (Phase C) — Déclaration de paiement direct */}
+      <Dialog open={!!declareFor} onOpenChange={(open) => !open && setDeclareFor(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Déclarer un paiement Mobile Money</DialogTitle>
+            <DialogDescription>
+              Commande <strong className="font-mono">{declareFor?.ref}</strong> —{" "}
+              {declareFor ? formatFC(declareFor.totalFC) : ""}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            {declareInstruction ? (
+              <div className="rounded-xl border border-emerald-300 bg-emerald-50 p-3 text-sm space-y-0.5">
+                <p className="font-semibold text-emerald-900">📲 Envoie le montant exact ici :</p>
+                <p className="text-emerald-800">
+                  Réseau : <strong>{declareInstruction.network || declareInstruction.provider}</strong>
+                </p>
+                <p className="text-emerald-800">
+                  Titulaire : <strong>{declareInstruction.accountName || "—"}</strong>
+                </p>
+                <p className="text-emerald-800">
+                  Numéro : <strong className="font-mono text-base select-all">{declareInstruction.accountNumber}</strong>
+                </p>
+                {declareInstruction.instructions && (
+                  <p className="text-xs text-emerald-700">{declareInstruction.instructions}</p>
+                )}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Le vendeur n&apos;a pas configuré de coordonnées pour ce moyen — contacte-le sur WhatsApp pour
+                convenir du paiement. Tu pourras quand même déclarer ta référence ci-dessous.
+              </p>
+            )}
+            <div className="space-y-1.5">
+              <Label htmlFor="myDeclareRef">Référence de la transaction *</Label>
+              <Input
+                id="myDeclareRef"
+                placeholder="Ex : PP24091... (visible dans le SMS opérateur)"
+                value={declareRef}
+                onChange={(e) => setDeclareRef(e.target.value)}
+                maxLength={80}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="myDeclareNote">Note (optionnel)</Label>
+              <Input
+                id="myDeclareNote"
+                placeholder="Ex : envoyé avec mon nom de compte"
+                value={declareNote}
+                onChange={(e) => setDeclareNote(e.target.value)}
+                maxLength={200}
+              />
+            </div>
+            <Button className="w-full" onClick={submitDeclare} disabled={declareBusy}>
+              {declareBusy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+              Déclarer mon paiement
+            </Button>
+            <p className="text-[11px] text-muted-foreground">
+              Ta déclaration ne confirme pas le paiement : le vendeur vérifiera dans son compte opérateur avant de
+              confirmer l&apos;encaissement.
+            </p>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Demande de remboursement */}
       <Dialog open={!!refundFor} onOpenChange={(open) => !open && setRefundFor(null)}>

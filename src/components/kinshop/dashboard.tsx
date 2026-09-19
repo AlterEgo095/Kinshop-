@@ -325,6 +325,77 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
   const [domBusy, setDomBusy] = useState<"" | "claim" | "verify" | "remove">("")
   const [domRemoveOpen, setDomRemoveOpen] = useState(false)
 
+  /* ─────────── P1 (Phase C) — Paiements directs (coordonnées Mobile Money) ─────────── */
+  interface DirectPayRow {
+    provider: "mpesa" | "airtel" | "orange"
+    accountName: string
+    accountNumber: string
+    instructions: string
+    active: boolean
+  }
+  const DIRECT_ROWS: DirectPayRow[] = [
+    { provider: "mpesa", accountName: "", accountNumber: "", instructions: "", active: false },
+    { provider: "airtel", accountName: "", accountNumber: "", instructions: "", active: false },
+    { provider: "orange", accountName: "", accountNumber: "", instructions: "", active: false },
+  ]
+  const DIRECT_LABELS: Record<string, string> = {
+    mpesa: "M-Pesa (Vodacom)",
+    airtel: "Airtel Money",
+    orange: "Orange Money",
+  }
+  const [directRows, setDirectRows] = useState<DirectPayRow[]>(DIRECT_ROWS)
+  const [directLoading, setDirectLoading] = useState(false)
+  const [directSaving, setDirectSaving] = useState(false)
+
+  const loadDirectPayments = useCallback(async () => {
+    setDirectLoading(true)
+    try {
+      const res = await fetch(`/api/stores/payment-settings?slug=${encodeURIComponent(slug)}`, { cache: "no-store" })
+      const data = await res.json()
+      if (res.ok && Array.isArray(data.settings)) {
+        setDirectRows(
+          DIRECT_ROWS.map((row) => {
+            const found = data.settings.find((s: { provider: string }) => s.provider === row.provider)
+            return found ? { ...row, ...found, active: found.active !== false } : row
+          }),
+        )
+      }
+    } catch {
+      // silencieux
+    } finally {
+      setDirectLoading(false)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug])
+
+  const saveDirectPayments = async () => {
+    setDirectSaving(true)
+    try {
+      const payload = directRows
+        .filter((r) => r.active && r.accountNumber.replace(/\D/g, "").length >= 9)
+        .map((r) => ({
+          provider: r.provider,
+          accountName: r.accountName.trim().slice(0, 60),
+          accountNumber: r.accountNumber.replace(/[^\d+]/g, "").slice(0, 20),
+          network: r.provider === "mpesa" ? "vodacom" : r.provider,
+          instructions: r.instructions.trim().slice(0, 200),
+          active: true,
+        }))
+      const res = await fetch("/api/stores", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slug, paymentSettings: payload }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Erreur lors de la sauvegarde.")
+      toast.success("Coordonnées de paiement enregistrées ✅")
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur inconnue")
+    } finally {
+      setDirectSaving(false)
+    }
+  }
+
   const loadOrders = useCallback(async () => {
     try {
       const res = await fetch(`/api/orders?slug=${encodeURIComponent(slug)}`)
@@ -502,7 +573,9 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
     if (activeTab === "croissance") loadGrowth()
     if (activeTab === "avis") loadReviews()
     if (activeTab === "domaine") loadDomain()
-  }, [activeTab, loadGrowth, loadReviews, loadDomain])
+    // P1 (Phase C) — coordonnées de paiement direct chargées à l'ouverture des réglages
+    if (activeTab === "reglages") loadDirectPayments()
+  }, [activeTab, loadGrowth, loadReviews, loadDomain, loadDirectPayments])
 
   const addZone = async () => {
     if (zName.trim().length < 2) return toast.error("Le nom de la zone est requis (2 caractères min).")
@@ -1650,6 +1723,10 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
                             {order.paymentStatus === "paid" && (
                               <Badge className="bg-emerald-600 hover:bg-emerald-600 text-white text-xs">✅ Payée</Badge>
                             )}
+                            {/* P1 (Phase C) — paiement déclaré par l'acheteur, à confirmer */}
+                            {order.paymentStatus === "declared" && (
+                              <Badge className="bg-amber-500 hover:bg-amber-500 text-amber-950 text-xs font-bold">🟠 Paiement déclaré — à confirmer</Badge>
+                            )}
                             {order.paymentStatus === "pending" && (
                               <Badge variant="outline" className="text-xs border-amber-400 text-amber-700 bg-amber-50">⏳ Paiement en cours</Badge>
                             )}
@@ -1694,6 +1771,7 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
                           status={order.status}
                           paymentMethod={order.paymentMethod}
                           paymentStatus={order.paymentStatus}
+                          paymentRef={order.paymentRef}
                           deliveryStatus={(order as OrderData & { deliveryStatus?: string }).deliveryStatus ?? "not_assigned"}
                           deliveryAttempts={(order as OrderData & { deliveryAttempts?: number }).deliveryAttempts ?? 0}
                           onChanged={loadOrders}
@@ -2540,7 +2618,8 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
 
           {/* ─── RÉGLAGES ─── */}
           <TabsContent value="reglages">
-            <Card className="max-w-2xl">
+            <div className="max-w-2xl space-y-5">
+            <Card>
               <CardContent className="p-6 space-y-5">
                 <div className="space-y-2">
                   <Label>Nom de la boutique</Label>
@@ -2592,6 +2671,99 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
                 </Button>
               </CardContent>
             </Card>
+
+            {/* P1 (Phase C) — Paiements directs : coordonnées d'encaissement Mobile Money.
+                Ces coordonnées sont figées dans chaque commande au moment de sa création
+                (snapshot immuable) — l'acheteur paie sur ton numéro puis déclare son
+                paiement, et tu confirmes après vérification dans ton compte opérateur. */}
+            <Card>
+              <CardContent className="p-6 space-y-4">
+                <div>
+                  <p className="font-bold flex items-center gap-2">📲 Paiements directs (Mobile Money)</p>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Renseigne tes numéros d&apos;encaissement : l&apos;acheteur verra ces coordonnées figées dans sa
+                    commande, y paiera lui-même, puis déclarera son paiement. Tu confirmeras après vérification
+                    dans ton compte opérateur. Coordonnées jamais visibles publiquement (acheteur de la commande uniquement).
+                  </p>
+                </div>
+
+                {directLoading ? (
+                  <div className="flex items-center justify-center py-6">
+                    <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {directRows.map((row, idx) => (
+                      <div key={row.provider} className="rounded-xl border p-3 space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <p className="font-semibold text-sm">{DIRECT_LABELS[row.provider]}</p>
+                          <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={row.active}
+                              onChange={(e) =>
+                                setDirectRows((rows) =>
+                                  rows.map((r, i) => (i === idx ? { ...r, active: e.target.checked } : r)),
+                                )
+                              }
+                              className="w-4 h-4 accent-emerald-600"
+                            />
+                            Actif
+                          </label>
+                        </div>
+                        {row.active && (
+                          <div className="space-y-2">
+                            <div className="grid sm:grid-cols-2 gap-2">
+                              <Input
+                                placeholder="Nom du titulaire (ex : MAMA NGO)"
+                                value={row.accountName}
+                                onChange={(e) =>
+                                  setDirectRows((rows) =>
+                                    rows.map((r, i) => (i === idx ? { ...r, accountName: e.target.value } : r)),
+                                  )
+                                }
+                                maxLength={60}
+                              />
+                              <Input
+                                type="tel"
+                                placeholder="Numéro (ex : 0812345678)"
+                                value={row.accountNumber}
+                                onChange={(e) =>
+                                  setDirectRows((rows) =>
+                                    rows.map((r, i) => (i === idx ? { ...r, accountNumber: e.target.value } : r)),
+                                  )
+                                }
+                                maxLength={20}
+                              />
+                            </div>
+                            <Input
+                              placeholder="Instructions (optionnel — ex : envoi en FC uniquement)"
+                              value={row.instructions}
+                              onChange={(e) =>
+                                setDirectRows((rows) =>
+                                  rows.map((r, i) => (i === idx ? { ...r, instructions: e.target.value } : r)),
+                                )
+                              }
+                              maxLength={200}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <Button onClick={saveDirectPayments} disabled={directSaving || directLoading}>
+                  {directSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                  Enregistrer les coordonnées
+                </Button>
+                <p className="text-[11px] text-muted-foreground">
+                  ⚠ Les commandes déjà créées conservent les coordonnées utilisées au moment de leur création
+                  (snapshot immuable) — modifier ces champs n&apos;affecte que les nouvelles commandes.
+                </p>
+              </CardContent>
+            </Card>
+            </div>
           </TabsContent>
         </Tabs>
       </main>

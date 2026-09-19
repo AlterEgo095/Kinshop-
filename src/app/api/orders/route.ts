@@ -16,6 +16,7 @@ import { getUserFromRequest, requireStoreOwner, unauthorized } from "@/lib/auth"
 import { getEnabledPayments, getConfigValue, isFeatureOn } from "@/lib/config-registry"
 import { resolveProvider } from "@/lib/payments"
 import { isPaymentSimulationEnabled } from "@/lib/simulation"
+import { getActiveInstruction, expireOverdueDeclarations } from "@/lib/direct-payments"
 import { makeSequentialOrderRef } from "@/lib/invoice-integrity"
 import { logAudit, actorFromUser } from "@/lib/audit"
 import { canTransitionOrder, ORDER_STATUSES } from "@/lib/order-workflow"
@@ -189,6 +190,36 @@ export async function POST(req: NextRequest) {
       })
     }
 
+    // P1 (Phase C) — SNAPSHOT immuable des coordonnées de paiement direct du
+    // vendeur pour les moyens Mobile Money : copie des coordonnées actives de
+    // la boutique au moment de la création. Une commande historique conserve
+    // à jamais les coordonnées utilisées à sa création, même si le vendeur
+    // change de numéro ensuite. Aucune commande MM ne part sans ce snapshot
+    // quand le vendeur les a configurées (sinon : parcours WhatsApp inchangé).
+    let directPayment: { provider: string; accountName: string; accountNumber: string; network: string; instructions: string } | undefined
+    if (provider.kind === "mobile_money") {
+      const active = getActiveInstruction(store.paymentSettings, method)
+      if (active) {
+        const instruction = await db.orderPaymentInstruction.create({
+          data: {
+            orderId: order.id,
+            provider: method,
+            accountName: active.accountName,
+            accountNumber: active.accountNumber,
+            network: active.network || active.provider,
+            instructions: active.instructions,
+          },
+        })
+        directPayment = {
+          provider: instruction.provider,
+          accountName: instruction.accountName,
+          accountNumber: instruction.accountNumber,
+          network: instruction.network,
+          instructions: instruction.instructions,
+        }
+      }
+    }
+
     // V10 — Historique immuable : création + sélection paiement
     await db.orderEvent.createMany({
       data: [
@@ -266,6 +297,9 @@ export async function POST(req: NextRequest) {
       {
         order: { ...order, paymentRef: recordProviderRef ? initiation.providerRef : null },
         paymentInstructions: recordProviderRef ? initiation.instructions : undefined,
+        // P1 (Phase C) — snapshot des coordonnées directes (l'acheteur paie
+        // lui-même sur le numéro du vendeur puis déclare son paiement).
+        directPayment,
         whatsappUrl: buildWhatsAppLink(store.whatsapp, message),
       },
       { status: 201 },
@@ -291,6 +325,10 @@ export async function GET(req: NextRequest) {
       take: 100,
     })
 
+    // P8 (Phase C) — expiration paresseuse des déclarations au-delà du délai
+    // configuré (pattern des boosts : appliquée aux points de lecture).
+    await expireOverdueDeclarations(orders)
+
     return NextResponse.json({ orders })
   } catch (e) {
     console.error("GET /api/orders", e)
@@ -308,6 +346,9 @@ export async function PATCH(req: NextRequest) {
     const id = String(body.id || "")
     const status = String(body.status || "")
     const confirmCash = body.confirmCash === true
+    // P1 (Phase C) — confirmation d'un encaissement Mobile Money direct :
+    // symétrique de confirmCash (mêmes gardes, vocabulaire MM).
+    const confirmDirect = body.confirmDirect === true
     const reason = String(body.reason || "").slice(0, 300)
 
     if (!id) return NextResponse.json({ error: "Paramètre id requis." }, { status: 400 })
@@ -368,6 +409,46 @@ export async function PATCH(req: NextRequest) {
         oldValue: order.paymentStatus,
         newValue: "paid",
         reason: `Encaissement espèces confirmé par ${actorLabel}${reason ? ` — ${reason}` : ""}`,
+      })
+    }
+
+    // Confirmation d'encaissement MOBILE MONEY DIRECT (P1 — Phase C) :
+    // le vendeur (ou l'admin) vérifie dans son compte opérateur que le montant
+    // déclaré par l'acheteur est bien arrivé, puis confirme. La déclaration de
+    // l'acheteur (declared) n'a JAMAIS confirmé quoi que ce soit par elle-même.
+    // Les quatre vérifications existantes de confirmCash sont conservées à
+    // l'identique (vendeur authentifié, boutique propriétaire, commande
+    // appartenant à la boutique, statut compatible) — pour le cash, le
+    // comportement actuel reste strictement inchangé.
+    if (confirmDirect) {
+      if (!confirmCash && !["mpesa", "airtel", "orange"].includes(order.paymentMethod)) {
+        return NextResponse.json(
+          { error: "La confirmation directe s'applique uniquement aux paiements Mobile Money." },
+          { status: 400 },
+        )
+      }
+      if (["paid", "refunded"].includes(order.paymentStatus)) {
+        return NextResponse.json({ error: "Cette commande est déjà payée." }, { status: 400 })
+      }
+      // Même garde-fou anti-fraude que l'espèces : au minimum « confirmed ».
+      if (["new", "paid", "cancelled", "returned", "refunded", "disputed"].includes(order.status)) {
+        return NextResponse.json(
+          { error: "Confirmation impossible à ce stade du workflow (commande non confirmée ou clôturée)." },
+          { status: 400 },
+        )
+      }
+      const declaredRef = order.paymentRef || "référence non fournie"
+      data.paymentStatus = "paid"
+      data.paidAt = new Date()
+      events.push({
+        orderId: order.id,
+        type: "payment_confirmed",
+        actorType,
+        actorId: user.id,
+        actorLabel: actorLabel,
+        oldValue: order.paymentStatus,
+        newValue: "paid",
+        reason: `Encaissement Mobile Money direct confirmé par ${actorLabel} (réf déclarée : ${declaredRef})${reason ? ` — ${reason}` : ""}`,
       })
     }
 
@@ -475,10 +556,11 @@ export async function PATCH(req: NextRequest) {
     }
 
     await logAudit({
-      action: confirmCash ? "order.payment_confirmed" : "order.status",
+      action: confirmCash || confirmDirect ? "order.payment_confirmed" : "order.status",
       target: `order:${order.ref}`,
       detail:
         (confirmCash ? `Encaissement espèces ${order.ref} (par ${actorLabel}). ` : "") +
+        (confirmDirect ? `Encaissement Mobile Money direct ${order.ref} (par ${actorLabel}). ` : "") +
         (status ? `Statut ${order.status} → ${status}` : "") +
         (reason ? ` — ${reason}` : ""),
       actorType,

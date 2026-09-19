@@ -7,6 +7,7 @@ import {
   BadgeCheck,
   CheckCircle2,
   Circle,
+  Clock,
   Loader2,
   MapPin,
   MessageCircle,
@@ -232,6 +233,14 @@ export function TrackOrderView({ initialRef, onHome }: TrackOrderViewProps) {
                     <div className="flex items-center gap-2 rounded-xl bg-emerald-50 border border-emerald-200 p-3 text-sm text-emerald-800">
                       <BadgeCheck className="w-4 h-4 shrink-0" />
                       Paiement mobile money confirmé en ligne ✅
+                    </div>
+                  )}
+                  {/* P1 (Phase C) — état intermédiaire « déclaré » visible publiquement (badge seul :
+                      la référence déclarée et les notes ne sont jamais exposées au suivi public) */}
+                  {order.paymentStatus === "declared" && (
+                    <div className="flex items-center gap-2 rounded-xl bg-amber-50 border border-amber-300 p-3 text-sm text-amber-800">
+                      <Clock className="w-4 h-4 shrink-0" />
+                      Paiement déclaré — en attente de confirmation du vendeur
                     </div>
                   )}
                 </CardContent>

@@ -41,6 +41,11 @@ model Store {
   customDomain   String? @unique // ex. maboutique.cd (null = aucun)
   domainVerified Boolean @default(false) // vérifié par TXT DNS (_kinshop-verify.<domaine>)
   domainToken    String  @default("") // jeton de vérification kinshop-verify=<token>
+  // P1 (Phase C) — Paiement direct vendeur : coordonnées d'encaissement par moyen,
+  // liste JSON [{provider, accountName, accountNumber, network, instructions, active}]
+  // Éditable par le propriétaire (PATCH /api/stores), jamais exposée publiquement.
+  // Chaque commande non-cash en copie un snapshot immuable (OrderPaymentInstruction).
+  paymentSettings String @default("[]")
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   products    Product[]
@@ -218,9 +223,11 @@ model Order {
   // V2 — Paiement mobile money en ligne de la commande
   // V10 — vocabulaire étendu : unpaid | pending | cash_pending | paid | failed | refunded
   paymentStatus String   @default("unpaid")
-  paymentRef    String   @default("") // référence de transaction (agrégateur ou simulation)
+  paymentRef    String   @default("") // référence de transaction (agrégateur, simulation ou déclaration de l'acheteur — P1)
   payerPhone    String   @default("") // numéro mobile money qui paie (peut différer du client)
   paidAt        DateTime?
+  // P1 (Phase C) — date de la déclaration « J'ai effectué le paiement » (expiration paresseuse P8)
+  declaredAt    DateTime?
   // V10 — Dimension LIVRAISON indépendante du statut commande et du paiement :
   // not_assigned | assigned | picked_up | in_transit | out_for_delivery | delivered | failed | returned
   deliveryStatus   String @default("not_assigned")
@@ -240,9 +247,28 @@ model Order {
   events        OrderEvent[]
   refunds       Refund[]
   invoices      Invoice[]
+  // P1 (Phase C) — snapshot immuable des coordonnées de collecte au moment de la commande
+  paymentInstruction OrderPaymentInstruction?
 
   @@index([userId])
   @@index([storeId, status])
+}
+
+// P1 (Phase C) — Snapshot immuable des coordonnées de paiement direct du vendeur,
+// copiées depuis Store.paymentSettings À LA CRÉATION de chaque commande mobile money.
+// Une commande historique conserve à jamais les coordonnées utilisées au moment de sa
+// création, même si le vendeur change de numéro ensuite. Lecture réservée à l'acheteur
+// de la commande (session) ou à l'administration — jamais publique.
+model OrderPaymentInstruction {
+  id            String   @id @default(cuid())
+  orderId       String   @unique
+  order         Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  provider      String   // mpesa | airtel | orange
+  accountName   String   @default("")
+  accountNumber String   @default("")
+  network       String   @default("") // vodacom | airtel | orange
+  instructions  String   @default("")
+  createdAt     DateTime @default(now())
 }
 
 // V10 — Historique immuable d'une commande : chaque événement critique laisse une trace
@@ -251,7 +277,7 @@ model OrderEvent {
   id         String   @id @default(cuid())
   orderId    String
   order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  type       String // created | status_changed | payment_selected | payment_confirmed | payment_failed | delivery_updated | delivery_failed | delivery_retry | delivery_returned | refund_requested | refund_approved | refund_rejected | refund_executed | invoice_generated | note
+  type       String // created | status_changed | payment_selected | payment_declared (P1) | payment_confirmed | payment_failed | delivery_updated | delivery_failed | delivery_retry | delivery_returned | refund_requested | refund_approved | refund_rejected | refund_executed | invoice_generated | note
   actorType  String   @default("system") // customer | owner | admin | system
   actorId    String   @default("")
   actorLabel String   @default("")

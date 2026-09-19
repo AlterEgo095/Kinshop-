@@ -37,6 +37,7 @@ export function OrderWorkflowControls({
   status,
   paymentMethod,
   paymentStatus,
+  paymentRef: declaredRef,
   deliveryStatus,
   deliveryAttempts,
   onChanged,
@@ -46,6 +47,7 @@ export function OrderWorkflowControls({
   status: string
   paymentMethod: string
   paymentStatus: string
+  paymentRef?: string
   deliveryStatus: string
   deliveryAttempts: number
   onChanged: () => void
@@ -55,6 +57,9 @@ export function OrderWorkflowControls({
   const [failReason, setFailReason] = useState("")
   const [failNote, setFailNote] = useState("")
   const [historyOpen, setHistoryOpen] = useState(false)
+  // P1 (Phase C) — confirmation d'encaissement Mobile Money direct
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [confirmNote, setConfirmNote] = useState("")
   const [events, setEvents] = useState<{ id: string; type: string; actorLabel: string; oldValue: string; newValue: string; reason: string; createdAt: string }[]>([])
   // P4 — facture de commande (émission + statut) : la règle serveur est la référence
   const [invoiceNumber, setInvoiceNumber] = useState<string | null>(null)
@@ -64,6 +69,11 @@ export function OrderWorkflowControls({
   const nextStatuses = ORDER_TRANSITIONS[status as keyof typeof ORDER_TRANSITIONS] ?? []
   const nextDelivery = DELIVERY_TRANSITIONS[deliveryStatus as keyof typeof DELIVERY_TRANSITIONS] ?? []
   const cashConfirmable = paymentMethod === "cash" && !["paid", "refunded"].includes(paymentStatus) &&
+    !["new", "cancelled", "returned", "refunded", "disputed"].includes(status)
+  // P1 (Phase C) — encaissement Mobile Money direct confirmable : mêmes gardes
+  // que l'espèces (serveur = autorité, le vendeur confirme après vérification).
+  const directConfirmable = ["mpesa", "airtel", "orange"].includes(paymentMethod) &&
+    !["paid", "refunded"].includes(paymentStatus) &&
     !["new", "cancelled", "returned", "refunded", "disputed"].includes(status)
   // Facturable dès confirmation (garde serveur identique à POST /api/orders/invoice)
   const invoiceEligible = !["new", "paid", "cancelled", "returned", "refunded", "disputed"].includes(status)
@@ -196,6 +206,22 @@ export function OrderWorkflowControls({
         </Button>
       )}
 
+      {/* P1 (Phase C) — Encaissement Mobile Money direct (owner only, serveur) :
+          l'acheteur déclare son transfert, le vendeur vérifie dans son compte
+          opérateur puis confirme. La déclaration seule n'a JAMAIS confirmé. */}
+      {directConfirmable && (
+        <Button
+          size="sm"
+          className="h-7 px-2 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
+          disabled={busy}
+          onClick={() => setConfirmOpen(true)}
+          title="Vérifie dans ton compte opérateur que le montant est arrivé, puis confirme l'encaissement"
+        >
+          <Banknote className="w-3.5 h-3.5 mr-1" />
+          {paymentStatus === "declared" ? "Confirmer l'encaissement" : "Encaissé (MM direct)"}
+        </Button>
+      )}
+
       {/* Pilotage livraison (dimension indépendante) */}
       {nextDelivery.map((d) =>
         d === "failed" ? (
@@ -310,6 +336,68 @@ export function OrderWorkflowControls({
             <p className="text-xs text-muted-foreground">
               Après un échec : relance la livraison (nouvelle tentative tracée) ou programme un retour.
             </p>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* P1 (Phase C) — Confirmation d'encaissement Mobile Money direct */}
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Confirmer l&apos;encaissement Mobile Money</DialogTitle>
+            <DialogDescription>
+              Commande <strong className="font-mono">{orderRef}</strong>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm space-y-1">
+              <p className="font-semibold text-amber-900">⚠ Vérifie avant de confirmer</p>
+              <p className="text-amber-800">
+                Ouvre ton compte {paymentMethod === "mpesa" ? "M-Pesa" : paymentMethod === "airtel" ? "Airtel Money" : "Orange Money"} et
+                vérifie que le montant de la commande est bien arrivé. La confirmation est définitive et tracée.
+              </p>
+            </div>
+            {paymentStatus === "declared" && declaredRef ? (
+              <div className="rounded-xl bg-muted/60 p-3 text-sm space-y-1">
+                <p className="text-muted-foreground">Référence déclarée par le client :</p>
+                <p className="font-mono font-bold text-base select-all">{declaredRef}</p>
+                <p className="text-xs text-muted-foreground">
+                  Compare-la à la référence de réception dans ton compte opérateur.
+                </p>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Le client n&apos;a pas encore déclaré de paiement sur la plateforme — confirme uniquement si le
+                montant est réellement arrivé (transfert direct, référence notée dans l&apos;historique).
+              </p>
+            )}
+            <div className="space-y-1.5">
+              <Label htmlFor="confirmNote">Note de vérification (optionnel)</Label>
+              <Input
+                id="confirmNote"
+                placeholder="Ex : réf de réception 9xxxxxxx vérifiée, montant exact"
+                value={confirmNote}
+                onChange={(e) => setConfirmNote(e.target.value)}
+                maxLength={300}
+              />
+            </div>
+            <div className="flex gap-2">
+              <Button
+                className="flex-1 bg-emerald-600 hover:bg-emerald-700"
+                disabled={busy}
+                onClick={async () => {
+                  await callOrders({ confirmDirect: true, reason: confirmNote })
+                  setConfirmOpen(false)
+                  setConfirmNote("")
+                }}
+              >
+                {busy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                Confirmer l&apos;encaissement
+              </Button>
+              <Button variant="outline" onClick={() => setConfirmOpen(false)}>
+                Annuler
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

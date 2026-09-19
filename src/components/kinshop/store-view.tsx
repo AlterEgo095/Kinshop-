@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Clock,
   Images,
   Loader2,
   MapPin,
@@ -81,9 +82,12 @@ interface PaymentFlow {
   totalUSD: number
   whatsappUrl: string
   operatorLabel: string
-  status: "idle" | "initiating" | "waiting" | "paid" | "failed"
+  status: "idle" | "initiating" | "waiting" | "declared" | "paid" | "failed"
   mode: "live" | "simulation" | null
   errorMsg?: string
+  // P1 (Phase C) — snapshot immuable des coordonnées directes du vendeur
+  // (figées à la création de la commande, renvoyées par POST /api/orders)
+  direct?: { provider: string; accountName: string; accountNumber: string; network: string; instructions: string } | null
 }
 
 const PAYMENTS: { id: PaymentMethod; label: string; sub: string; emoji: string }[] = [
@@ -162,6 +166,11 @@ export function StoreView({ slug, onBack, platformRate, config = {}, authUser = 
   // V2 — Paiement mobile money de la commande
   const [payment, setPayment] = useState<PaymentFlow | null>(null)
   const [payerPhone, setPayerPhone] = useState("")
+  // P1 (Phase C) — formulaire de déclaration « J'ai effectué le paiement »
+  const [declareOpen, setDeclareOpen] = useState(false)
+  const [declareRef, setDeclareRef] = useState("")
+  const [declareNote, setDeclareNote] = useState("")
+  const [declareBusy, setDeclareBusy] = useState(false)
 
   // Formulaire de commande
   const [cName, setCName] = useState("")
@@ -532,13 +541,15 @@ export function StoreView({ slug, onBack, platformRate, config = {}, authUser = 
       setCartOpen(false)
       setCoupon(null)
       if (effectivePayment !== "cash") {
-        // V2 — Passer à l'écran de paiement mobile money (push USSD)
+        // V2 — Passer à l'écran de paiement mobile money (push USSD) +
+        // P1 (Phase C) — bloc « Paiement direct au vendeur » (snapshot figé)
         setPayerPhone(cPhone)
         setPayment({
           ...done,
           operatorLabel: payMethods.find((p) => p.id === effectivePayment)?.label || "mobile money",
           status: "idle",
           mode: null,
+          direct: data.directPayment ?? null,
         })
       } else {
         setSuccess(done)
@@ -592,6 +603,40 @@ export function StoreView({ slug, onBack, platformRate, config = {}, authUser = 
       toast.success(`Paiement confirmé — ${payment.ref} ✅`)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Erreur inconnue")
+    }
+  }
+
+  // P1 (Phase C) — DÉCLARATION du paiement direct : l'acheteur a transféré le
+  // montant sur le numéro du vendeur et déclare sa référence. La déclaration
+  // ne confirme JAMAIS le paiement elle-même (règle UNPAID → DECLARED → PAID) :
+  // le vendeur vérifie dans son compte opérateur puis confirme l'encaissement.
+  const declareDirectPayment = async () => {
+    if (!payment) return
+    if (declareRef.trim().length < 4) {
+      return toast.error("Entre la référence de la transaction (visible dans le SMS de confirmation opérateur).")
+    }
+    setDeclareBusy(true)
+    try {
+      const res = await fetch("/api/orders/declare-payment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ref: payment.ref, reference: declareRef.trim(), note: declareNote.trim() }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Erreur lors de la déclaration.")
+      if (data.duplicate) {
+        toast.info(data.message || "Paiement déjà déclaré.")
+      } else {
+        toast.success("Paiement déclaré — le vendeur va confirmer après vérification 🙏")
+      }
+      setPayment({ ...payment, status: "declared" })
+      setDeclareOpen(false)
+      setDeclareRef("")
+      setDeclareNote("")
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur inconnue")
+    } finally {
+      setDeclareBusy(false)
     }
   }
 
@@ -1331,6 +1376,82 @@ export function StoreView({ slug, onBack, platformRate, config = {}, authUser = 
                     </>
                   )}
                 </Button>
+
+                {/* P1 (Phase C) — PAIEMENT DIRECT AU VENDEUR : coordonnées figées
+                    à la création de la commande (snapshot immuable). L'acheteur
+                    transfère lui-même puis déclare son paiement ; la déclaration
+                    reste un état intermédiaire — le vendeur confirme après
+                    vérification dans son compte opérateur. */}
+                {payment.direct && payment.status === "idle" && (
+                  <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-2.5">
+                    <p className="font-bold text-sm flex items-center gap-1.5">
+                      📲 Paiement direct au vendeur ({payment.operatorLabel})
+                    </p>
+                    <div className="text-sm space-y-0.5">
+                      <p><span className="text-muted-foreground">Réseau :</span> <strong>{payment.direct.network || payment.direct.provider}</strong></p>
+                      <p><span className="text-muted-foreground">Nom du titulaire :</span> <strong>{payment.direct.accountName || "—"}</strong></p>
+                      <p>
+                        <span className="text-muted-foreground">Numéro :</span>{" "}
+                        <strong className="font-mono text-base select-all">{payment.direct.accountNumber}</strong>
+                        <button
+                          type="button"
+                          className="ml-2 text-xs font-semibold text-primary underline"
+                          onClick={async () => {
+                            try {
+                              await navigator.clipboard.writeText(payment.direct?.accountNumber || "")
+                              toast.success("Numéro copié ✅")
+                            } catch {
+                              toast.error("Copie impossible")
+                            }
+                          }}
+                        >
+                          Copier
+                        </button>
+                      </p>
+                      <p className="font-semibold">Montant exact : {formatFC(payment.totalFC)}</p>
+                      {payment.direct.instructions && (
+                        <p className="text-xs text-muted-foreground">{payment.direct.instructions}</p>
+                      )}
+                    </div>
+                    {!declareOpen ? (
+                      <Button
+                        variant="outline"
+                        className="w-full border-primary/50 text-primary"
+                        onClick={() => setDeclareOpen(true)}
+                      >
+                        ✅ J&apos;ai effectué le paiement
+                      </Button>
+                    ) : (
+                      <div className="space-y-2 pt-1 border-t border-primary/20">
+                        <Label htmlFor="declareRef">Référence de la transaction *</Label>
+                        <Input
+                          id="declareRef"
+                          placeholder="Ex : PP24091... (visible dans le SMS opérateur)"
+                          value={declareRef}
+                          onChange={(e) => setDeclareRef(e.target.value)}
+                          maxLength={80}
+                        />
+                        <Label htmlFor="declareNote">Note (optionnel)</Label>
+                        <Input
+                          id="declareNote"
+                          placeholder="Ex : envoyé depuis le 082xxx avec mon nom"
+                          value={declareNote}
+                          onChange={(e) => setDeclareNote(e.target.value)}
+                          maxLength={200}
+                        />
+                        <Button className="w-full" onClick={declareDirectPayment} disabled={declareBusy}>
+                          {declareBusy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                          Déclarer mon paiement
+                        </Button>
+                        <p className="text-[11px] text-muted-foreground">
+                          Ta déclaration sera transmise au vendeur qui confirmera après vérification dans son compte
+                          opérateur — elle ne confirme pas elle-même le paiement.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <Button
                   variant="outline"
                   className="w-full"
@@ -1393,6 +1514,48 @@ export function StoreView({ slug, onBack, platformRate, config = {}, authUser = 
                   }}
                 >
                   Payer plus tard via WhatsApp
+                </Button>
+              </div>
+            ) : payment.status === "declared" ? (
+              /* ── P1 (Phase C) — DÉCLARÉ : état intermédiaire visible de tous ── */
+              <div className="text-center space-y-4 py-2">
+                <motion.div
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  transition={{ type: "spring", stiffness: 260, damping: 15 }}
+                  className="w-20 h-20 mx-auto rounded-full bg-amber-100 flex items-center justify-center"
+                >
+                  <Clock className="w-10 h-10 text-amber-600" />
+                </motion.div>
+                <DialogHeader className="space-y-1.5">
+                  <DialogTitle className="text-2xl font-bold text-center">Paiement déclaré 🙏</DialogTitle>
+                  <DialogDescription className="text-center">
+                    Réf : <strong className="text-foreground font-mono">{payment.ref}</strong>
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="rounded-xl bg-amber-50 border border-amber-200 p-4 text-sm text-left space-y-1">
+                  <p className="font-semibold">⏳ En attente de confirmation du vendeur</p>
+                  <p className="text-muted-foreground">
+                    Le vendeur va vérifier dans son compte opérateur que le transfert est arrivé, puis confirmera
+                    l&apos;encaissement. Tu peux suivre l&apos;avancement à tout moment avec ta référence.
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => {
+                    const ref = payment.ref
+                    setPayment(null)
+                    setCheckoutOpen(false)
+                    window.location.hash = `#/suivi/${ref}`
+                  }}
+                >
+                  🔎 Suivre ma commande ({payment.ref})
+                </Button>
+                <Button size="lg" className="w-full text-base bg-emerald-600 hover:bg-emerald-700" asChild>
+                  <a href={payment.whatsappUrl} target="_blank" rel="noopener noreferrer">
+                    📲 Contacter le vendeur sur WhatsApp
+                  </a>
                 </Button>
               </div>
             ) : payment.status === "failed" ? (

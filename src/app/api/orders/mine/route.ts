@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getUserFromRequest, unauthorized } from "@/lib/auth"
 import type { OrderItem } from "@/lib/kinshop"
+import { expireOverdueDeclarations } from "@/lib/direct-payments"
 
 // GET /api/orders/mine — Historique des commandes du COMPTE CLIENT connecté (V10)
 // Seules SES commandes (userId dérivé du serveur, jamais d'un paramètre client).
@@ -21,6 +22,10 @@ export async function GET(req: NextRequest) {
       },
     })
 
+    // P8 (Phase C) — expiration paresseuse des déclarations dépassées
+    // (l'acheteur peut re-déclarer une commande repassée en failed).
+    await expireOverdueDeclarations(orders)
+
     // Aplatissement sûr des items JSON pour l'affichage client
     const data = orders.map((o) => {
       let items: OrderItem[] = []
@@ -34,6 +39,7 @@ export async function GET(req: NextRequest) {
         id: o.id,
         ref: o.ref,
         status: o.status,
+        paymentMethod: o.paymentMethod,
         paymentStatus: o.paymentStatus,
         deliveryStatus: o.deliveryStatus,
         totalUSD: o.totalUSD,

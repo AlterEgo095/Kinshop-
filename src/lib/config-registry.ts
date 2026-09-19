@@ -377,6 +377,45 @@ export const CONFIG_SPECS: ConfigSpec[] = [
     label: "Remboursements ouverts max par boutique",
     description: "Anti-abus : limite de demandes de remboursement simultanées (statut demandé/approuvé).",
   },
+  {
+    key: "business.paymentDeclarationTimeoutHours",
+    section: "business",
+    type: "number",
+    default: 24,
+    public: false,
+    min: 0,
+    max: 720,
+    label: "Expiration des déclarations de paiement (heures)",
+    description:
+      "P8 — une déclaration « J'ai effectué le paiement » jamais confirmée au-delà de ce délai repasse " +
+      "en « failed » avec un événement explicite ; l'acheteur peut redéclarer, le vendeur peut toujours " +
+      "confirmer manuellement si l'argent est arrivé. 0 = expiration désactivée.",
+  },
+
+  /* ─────────── Finances (préparatoire — P9, SANS EFFET) ─────────── */
+  {
+    key: "finance.commissionPercent",
+    section: "finance",
+    type: "number",
+    default: 0,
+    public: false,
+    min: 0,
+    max: 50,
+    label: "Commission plateforme (% — PRÉPARATOIRE, sans effet)",
+    description:
+      "P9 — clé préparatoire AUCUN consommateur : aucune commission n'est calculée, prélevée ni " +
+      "affichée tant que la logique réelle n'est pas décidée (Phase E). Modifiable ici, inerte ailleurs.",
+  },
+  {
+    key: "finance.commissionLabel",
+    section: "finance",
+    type: "string",
+    default: "",
+    public: false,
+    maxLength: 60,
+    label: "Libellé commission (PRÉPARATOIRE, sans effet)",
+    description: "P9 — clé préparatoire sans consommateur (décision business en Phase E).",
+  },
 
   /* ─────────── Gouvernance (P5) ─────────── */
   {
