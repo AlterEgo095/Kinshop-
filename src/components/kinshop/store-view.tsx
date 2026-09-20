@@ -24,8 +24,10 @@ import {
   TicketPercent,
   Trash2,
   Truck,
+  ImagePlus,
 } from "lucide-react"
 import { toast } from "sonner"
+import { compressImageFile, dataUrlSize } from "@/lib/images"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -171,6 +173,9 @@ export function StoreView({ slug, onBack, platformRate, config = {}, authUser = 
   const [declareRef, setDeclareRef] = useState("")
   const [declareNote, setDeclareNote] = useState("")
   const [declareBusy, setDeclareBusy] = useState(false)
+  // Phase D — capture du transfert jointe à la déclaration (optionnel)
+  const [declareProof, setDeclareProof] = useState("")
+  const [declareProofBusy, setDeclareProofBusy] = useState(false)
 
   // Formulaire de commande
   const [cName, setCName] = useState("")
@@ -620,23 +625,52 @@ export function StoreView({ slug, onBack, platformRate, config = {}, authUser = 
       const res = await fetch("/api/orders/declare-payment", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ref: payment.ref, reference: declareRef.trim(), note: declareNote.trim() }),
+        body: JSON.stringify({
+          ref: payment.ref,
+          reference: declareRef.trim(),
+          note: declareNote.trim(),
+          ...(declareProof ? { proofImage: declareProof } : {}),
+        }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "Erreur lors de la déclaration.")
       if (data.duplicate) {
         toast.info(data.message || "Paiement déjà déclaré.")
       } else {
-        toast.success("Paiement déclaré — le vendeur va confirmer après vérification 🙏")
+        toast.success(
+          data.proofSaved
+            ? "Paiement déclaré avec la capture — le vendeur va vérifier et confirmer 🙏"
+            : "Paiement déclaré — le vendeur va confirmer après vérification 🙏",
+        )
       }
       setPayment({ ...payment, status: "declared" })
       setDeclareOpen(false)
       setDeclareRef("")
       setDeclareNote("")
+      setDeclareProof("")
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Erreur inconnue")
     } finally {
       setDeclareBusy(false)
+    }
+  }
+
+  // Phase D — lecture locale de la capture : compression côté appareil
+  // (même utilitaire que les photos produit) puis aperçu avant envoi.
+  const pickDeclareProof = async (file: File | undefined) => {
+    if (!file) return
+    setDeclareProofBusy(true)
+    try {
+      const dataUrl = await compressImageFile(file, { maxSize: 1280, quality: 0.82 })
+      if (dataUrlSize(dataUrl) > 8 * 1024 * 1024) {
+        throw new Error("Capture trop lourde — choisis une image plus simple.")
+      }
+      setDeclareProof(dataUrl)
+      toast.success("Capture jointe — elle sera visible du vendeur et de l'administration.")
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Image illisible")
+    } finally {
+      setDeclareProofBusy(false)
     }
   }
 
@@ -1439,6 +1473,52 @@ export function StoreView({ slug, onBack, platformRate, config = {}, authUser = 
                           onChange={(e) => setDeclareNote(e.target.value)}
                           maxLength={200}
                         />
+                        {/* Phase D — capture du transfert (optionnel, visible vendeur/admin) */}
+                        <div className="space-y-1.5 pt-1">
+                          <Label htmlFor="declareProof">Capture du transfert (optionnel)</Label>
+                          {declareProof ? (
+                            <div className="flex items-center gap-2">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={declareProof}
+                                alt="Capture du transfert"
+                                className="h-20 w-20 rounded-lg border object-cover"
+                              />
+                              <div className="text-xs text-muted-foreground space-y-1">
+                                <p>Capture prête — jointe à ta déclaration.</p>
+                                <button
+                                  type="button"
+                                  className="text-destructive underline font-semibold"
+                                  onClick={() => setDeclareProof("")}
+                                >
+                                  Retirer
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <label
+                              htmlFor="declareProof"
+                              className="flex items-center gap-2 rounded-xl border border-dashed border-primary/40 bg-primary/5 px-3 py-2.5 text-xs text-primary font-semibold cursor-pointer hover:bg-primary/10"
+                            >
+                              {declareProofBusy ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <ImagePlus className="w-4 h-4" />
+                              )}
+                              {declareProofBusy ? "Lecture de l'image…" : "Joindre la capture du transfert (SMS ou app opérateur)"}
+                            </label>
+                          )}
+                          <input
+                            id="declareProof"
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp"
+                            className="hidden"
+                            onChange={(e) => {
+                              pickDeclareProof(e.target.files?.[0])
+                              e.target.value = ""
+                            }}
+                          />
+                        </div>
                         <Button className="w-full" onClick={declareDirectPayment} disabled={declareBusy}>
                           {declareBusy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
                           Déclarer mon paiement

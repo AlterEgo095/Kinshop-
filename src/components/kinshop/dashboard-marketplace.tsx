@@ -8,7 +8,7 @@
 // 3. BoostPanel : campagnes de promotion payante (≠ Premium).
 
 import { useCallback, useEffect, useState } from "react"
-import { Loader2, Plus, Trash2, Megaphone, History, Truck, Banknote, Layers, ReceiptText } from "lucide-react"
+import { Loader2, Plus, Trash2, Megaphone, History, Truck, Banknote, Layers, ReceiptText, Camera } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -60,6 +60,13 @@ export function OrderWorkflowControls({
   // P1 (Phase C) — confirmation d'encaissement Mobile Money direct
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [confirmNote, setConfirmNote] = useState("")
+  // Phase D — preuve photographique du paiement (visible vendeur/admin, jamais publique)
+  const [proofLoading, setProofLoading] = useState(false)
+  const [proofUrl, setProofUrl] = useState<string | null>(null)
+  const [proofNote, setProofNote] = useState("")
+  const [proofAt, setProofAt] = useState<string | null>(null)
+  const [proofLoaded, setProofLoaded] = useState(false)
+  const [proofViewOpen, setProofViewOpen] = useState(false)
   const [events, setEvents] = useState<{ id: string; type: string; actorLabel: string; oldValue: string; newValue: string; reason: string; createdAt: string }[]>([])
   // P4 — facture de commande (émission + statut) : la règle serveur est la référence
   const [invoiceNumber, setInvoiceNumber] = useState<string | null>(null)
@@ -123,6 +130,30 @@ export function OrderWorkflowControls({
       if (res.ok) setEvents(data.events ?? [])
     } catch {
       // silencieux
+    }
+  }
+
+  // Phase D — charge la preuve photographique (acheteur/vendeur/admin uniquement).
+  // Sans preuve jointe, la route répond hasProof:false — affichage neutre.
+  const loadProof = async () => {
+    setProofLoading(true)
+    try {
+      const res = await fetch(`/api/orders/payment-proof?ref=${encodeURIComponent(orderRef)}`, { cache: "no-store" })
+      const data = await res.json()
+      if (res.ok && data.hasProof) {
+        setProofUrl(data.image || null)
+        setProofNote(data.note || "")
+        setProofAt(data.createdAt || null)
+      } else {
+        setProofUrl(null)
+        setProofNote("")
+        setProofAt(null)
+      }
+    } catch {
+      // silencieux
+    } finally {
+      setProofLoaded(true)
+      setProofLoading(false)
     }
   }
 
@@ -219,6 +250,22 @@ export function OrderWorkflowControls({
         >
           <Banknote className="w-3.5 h-3.5 mr-1" />
           {paymentStatus === "declared" ? "Confirmer l'encaissement" : "Encaissé (MM direct)"}
+        </Button>
+      )}
+
+      {/* Phase D — Preuve photographique du transfert (vendeur/admin, lecture) */}
+      {["mpesa", "airtel", "orange"].includes(paymentMethod) && ["declared", "paid"].includes(paymentStatus) && (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 px-2 text-xs"
+          onClick={() => {
+            setProofViewOpen(true)
+            if (!proofLoaded) loadProof()
+          }}
+          title="Voir la capture du transfert jointe par le client"
+        >
+          <Camera className="w-3.5 h-3.5 mr-1" /> Preuve
         </Button>
       )}
 
@@ -341,7 +388,13 @@ export function OrderWorkflowControls({
       </Dialog>
 
       {/* P1 (Phase C) — Confirmation d'encaissement Mobile Money direct */}
-      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+      <Dialog
+        open={confirmOpen}
+        onOpenChange={(open) => {
+          setConfirmOpen(open)
+          if (open) loadProof()
+        }}
+      >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Confirmer l&apos;encaissement Mobile Money</DialogTitle>
@@ -357,6 +410,28 @@ export function OrderWorkflowControls({
                 vérifie que le montant de la commande est bien arrivé. La confirmation est définitive et tracée.
               </p>
             </div>
+            {/* Phase D — capture jointe par le client (chargée à l'ouverture du dialogue) */}
+            {proofLoading && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="w-4 h-4 animate-spin" /> Chargement de la preuve…
+              </div>
+            )}
+            {!proofLoading && proofUrl && (
+              <div className="rounded-xl border border-primary/30 bg-primary/5 p-3 text-sm space-y-2">
+                <p className="font-semibold text-primary">📎 Capture jointe par le client</p>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={proofUrl}
+                  alt="Preuve du transfert"
+                  className="w-full max-h-56 rounded-lg border object-contain cursor-zoom-in"
+                  onClick={() => setProofViewOpen(true)}
+                />
+                {proofNote && <p className="text-xs text-muted-foreground">Note du client : {proofNote}</p>}
+                <p className="text-[11px] text-muted-foreground">
+                  Compare-la à ta réception dans ton compte opérateur avant de confirmer.
+                </p>
+              </div>
+            )}
             {paymentStatus === "declared" && declaredRef ? (
               <div className="rounded-xl bg-muted/60 p-3 text-sm space-y-1">
                 <p className="text-muted-foreground">Référence déclarée par le client :</p>
@@ -430,6 +505,39 @@ export function OrderWorkflowControls({
               </li>
             ))}
           </ol>
+        </DialogContent>
+      </Dialog>
+      {/* Phase D — Preuve photographique (vue agrandie, jamais publique) */}
+      <Dialog open={proofViewOpen} onOpenChange={setProofViewOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Preuve du paiement — {orderRef}</DialogTitle>
+            <DialogDescription>
+              Capture jointe par le client — visible du vendeur et de l&apos;administration uniquement.
+            </DialogDescription>
+          </DialogHeader>
+          {proofLoading ? (
+            <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+              <Loader2 className="w-5 h-5 animate-spin" /> Chargement…
+            </div>
+          ) : proofUrl ? (
+            <div className="space-y-2">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={proofUrl}
+                alt="Preuve du transfert Mobile Money"
+                className="w-full max-h-[55vh] rounded-xl border object-contain"
+              />
+              {proofNote && <p className="text-xs text-muted-foreground">Note du client : {proofNote}</p>}
+              {proofAt && (
+                <p className="text-[11px] text-muted-foreground/70">Jointe le {new Date(proofAt).toLocaleString("fr-FR")}</p>
+              )}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground py-4 text-center">
+              Aucune capture jointe pour l&apos;instant — le client peut en joindre une depuis ses commandes.
+            </p>
+          )}
         </DialogContent>
       </Dialog>
     </div>

@@ -4,6 +4,7 @@ import { getUserFromRequest, unauthorized } from "@/lib/auth"
 import { logAudit } from "@/lib/audit"
 import { rateLimit, clientIp } from "@/lib/ratelimit"
 import { getActiveInstruction } from "@/lib/direct-payments"
+import { normalizeProofImage, ProofImageError } from "@/lib/payment-proof"
 
 // P1 (Phase C) — Brique 2 : DÉCLARATION du paiement par l'acheteur.
 //
@@ -25,6 +26,11 @@ import { getActiveInstruction } from "@/lib/direct-payments"
 // Anti-double-traitement : limitation de débit par IP et par commande ;
 // re-déclarer une commande déjà declared est un no-op tracé (pas de double
 // événement) ; la confirmation d'une commande déjà payée reste refusée.
+//
+// Phase D — la déclaration peut emporter une PREUVE PHOTOGRAPHIQUE optionnelle
+// (capture du transfert) : normalisée côté serveur (sharp), stockée sur
+// OrderPaymentProof et historisée par l'événement payment_proof (jamais
+// public). Une preuve invalide est refusée AVANT toute écriture.
 
 const MM_METHODS = ["mpesa", "airtel", "orange"]
 
@@ -35,6 +41,8 @@ export async function POST(req: NextRequest) {
     const ref = String(body.ref || "").trim().toUpperCase()
     const reference = String(body.reference || "").trim().slice(0, 80)
     const note = String(body.note || "").trim().slice(0, 200)
+    // Phase D — capture du transfert jointe à la déclaration (optionnel)
+    const proofImage = typeof body.proofImage === "string" && body.proofImage.startsWith("data:image/") ? body.proofImage : ""
 
     if (!ref) return NextResponse.json({ error: "Paramètre ref requis." }, { status: 400 })
 
@@ -88,6 +96,20 @@ export async function POST(req: NextRequest) {
     const actorType = isAdmin ? "admin" : "customer"
     const actorLabel = user.name || user.email
 
+    // Phase D — la preuve éventuelle est normalisée AVANT toute écriture :
+    // une capture invalide est refusée (400/413) sans toucher à la commande.
+    let normalizedProof = ""
+    if (proofImage) {
+      try {
+        normalizedProof = await normalizeProofImage(proofImage)
+      } catch (e) {
+        if (e instanceof ProofImageError) {
+          return NextResponse.json({ error: e.message }, { status: e.status })
+        }
+        throw e
+      }
+    }
+
     // Idempotence : déclarer une commande déjà declared est un no-op tracé.
     if (order.paymentStatus === "declared") {
       await logAudit({
@@ -139,6 +161,40 @@ export async function POST(req: NextRequest) {
       },
     })
 
+    // Phase D — preuve photographique jointe à la déclaration (déjà normalisée) :
+    // une seule preuve active par commande, le remplacement est tracé.
+    if (normalizedProof) {
+      await db.orderPaymentProof.upsert({
+        where: { orderId: order.id },
+        update: {
+          image: normalizedProof,
+          note,
+          uploadedById: user.id,
+          uploadedByLabel: actorLabel,
+          createdAt: new Date(),
+        },
+        create: {
+          orderId: order.id,
+          image: normalizedProof,
+          note,
+          uploadedById: user.id,
+          uploadedByLabel: actorLabel,
+        },
+      })
+      await db.orderEvent.create({
+        data: {
+          orderId: order.id,
+          type: "payment_proof",
+          actorType,
+          actorId: user.id,
+          actorLabel,
+          oldValue: "",
+          newValue: "capture jointe",
+          reason: `Capture du transfert jointe comme justificatif${note ? ` — ${note}` : ""}`,
+        },
+      })
+    }
+
     await logAudit({
       action: "order.payment_declared",
       target: `order:${order.ref}`,
@@ -156,6 +212,7 @@ export async function POST(req: NextRequest) {
       order: { ref: updated.ref, paymentStatus: updated.paymentStatus },
       duplicate: false,
       directPayment: instruction,
+      proofSaved: Boolean(normalizedProof),
       message: "Paiement déclaré — le vendeur va confirmer après vérification dans son compte opérateur.",
     })
   } catch (e) {

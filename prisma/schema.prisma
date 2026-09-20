@@ -249,6 +249,9 @@ model Order {
   invoices      Invoice[]
   // P1 (Phase C) — snapshot immuable des coordonnées de collecte au moment de la commande
   paymentInstruction OrderPaymentInstruction?
+  // Phase D — preuve photographique du paiement direct (capture du transfert
+  // jointe par l'acheteur) — jamais publique (acheteur, vendeur, admin seuls)
+  paymentProof OrderPaymentProof?
 
   @@index([userId])
   @@index([storeId, status])
@@ -269,6 +272,23 @@ model OrderPaymentInstruction {
   network       String   @default("") // vodacom | airtel | orange
   instructions  String   @default("")
   createdAt     DateTime @default(now())
+}
+
+// Phase D — Preuve photographique du paiement direct : capture d'écran du
+// transfert Mobile Money jointe par l'acheteur (à la déclaration ou après).
+// Une seule preuve active par commande (remplacement tracé par événement
+// payment_proof). Image stockée en data URL JPEG normalisée par sharp
+// (pattern photos produit) — jamais exposée publiquement, lisible par
+// l'acheteur, le vendeur propriétaire de la boutique et l'admin uniquement.
+model OrderPaymentProof {
+  id              String   @id @default(cuid())
+  orderId         String   @unique
+  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  image           String // data URL JPEG (≤ 380k chars, pipeline sharp)
+  note            String   @default("") // note libre de l'acheteur (montant, numéro…)
+  uploadedById    String   @default("")
+  uploadedByLabel String   @default("")
+  createdAt       DateTime @default(now())
 }
 
 // V10 — Historique immuable d'une commande : chaque événement critique laisse une trace

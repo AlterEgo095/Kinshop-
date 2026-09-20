@@ -5,8 +5,9 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { motion } from "framer-motion"
-import { ArrowLeft, Package, Search, Loader2, Ban, ReceiptText, Smartphone } from "lucide-react"
+import { ArrowLeft, Package, Search, Loader2, Ban, ReceiptText, Smartphone, ImagePlus } from "lucide-react"
 import { toast } from "sonner"
+import { compressImageFile, dataUrlSize } from "@/lib/images"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -75,6 +76,14 @@ export function MyOrdersView({ onHome }: { onHome: () => void }) {
   const [declareRef, setDeclareRef] = useState("")
   const [declareNote, setDeclareNote] = useState("")
   const [declareBusy, setDeclareBusy] = useState(false)
+  // Phase D — capture jointe à la déclaration (optionnel)
+  const [declareProof, setDeclareProof] = useState("")
+  const [declareProofBusy, setDeclareProofBusy] = useState(false)
+  // Phase D — dialogue « Joindre une preuve » (déclaration déjà envoyée ou complément)
+  const [proofFor, setProofFor] = useState<MyOrder | null>(null)
+  const [proofDataUrl, setProofDataUrl] = useState("")
+  const [proofNote, setProofNote] = useState("")
+  const [proofBusy, setProofBusy] = useState(false)
 
   const openDeclare = async (o: MyOrder) => {
     setDeclareFor(o)
@@ -101,17 +110,69 @@ export function MyOrdersView({ onHome }: { onHome: () => void }) {
       const res = await fetch("/api/orders/declare-payment", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ref: declareFor.ref, reference: declareRef.trim(), note: declareNote.trim() }),
+        body: JSON.stringify({
+          ref: declareFor.ref,
+          reference: declareRef.trim(),
+          note: declareNote.trim(),
+          ...(declareProof ? { proofImage: declareProof } : {}),
+        }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "Erreur lors de la déclaration.")
-      toast.success(data.duplicate ? (data.message || "Paiement déjà déclaré.") : "Paiement déclaré — le vendeur va confirmer 🙏")
+      toast.success(
+        data.duplicate
+          ? data.message || "Paiement déjà déclaré."
+          : data.proofSaved
+            ? "Paiement déclaré avec la capture — le vendeur va vérifier 🙏"
+            : "Paiement déclaré — le vendeur va confirmer 🙏",
+      )
       setDeclareFor(null)
+      setDeclareProof("")
       await load()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Erreur inconnue")
     } finally {
       setDeclareBusy(false)
+    }
+  }
+
+  // Phase D — compression locale de la capture (même utilitaire que les photos produit)
+  const pickLocalImage = async (file: File | undefined, onReady: (dataUrl: string) => void) => {
+    if (!file) return
+    try {
+      const dataUrl = await compressImageFile(file, { maxSize: 1280, quality: 0.82 })
+      if (dataUrlSize(dataUrl) > 8 * 1024 * 1024) {
+        throw new Error("Capture trop lourde — choisis une image plus simple.")
+      }
+      onReady(dataUrl)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Image illisible")
+    }
+  }
+
+  // Phase D — envoi de la preuve photographique (route dédiée, remplacement tracé)
+  const submitProof = async () => {
+    if (!proofFor) return
+    if (!proofDataUrl) {
+      return toast.error("Choisis d'abord la capture du transfert.")
+    }
+    setProofBusy(true)
+    try {
+      const res = await fetch("/api/orders/payment-proof", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ref: proofFor.ref, image: proofDataUrl, note: proofNote.trim() }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Erreur lors de l'envoi de la preuve.")
+      toast.success("Preuve jointe ✅ — le vendeur pourra la vérifier avant de confirmer.")
+      setProofFor(null)
+      setProofDataUrl("")
+      setProofNote("")
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur inconnue")
+    } finally {
+      setProofBusy(false)
     }
   }
 
@@ -286,6 +347,22 @@ export function MyOrdersView({ onHome }: { onHome: () => void }) {
                             <Smartphone className="w-3.5 h-3.5 mr-1" /> Déclarer le paiement
                           </Button>
                         )}
+                      {/* Phase D — preuve photographique (joindre/remplacer la capture du transfert) */}
+                      {["mpesa", "airtel", "orange"].includes(String(o.paymentMethod)) &&
+                        ["unpaid", "failed", "declared"].includes(String(o.paymentStatus)) && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 text-muted-foreground"
+                            onClick={() => {
+                              setProofFor(o)
+                              setProofDataUrl("")
+                              setProofNote("")
+                            }}
+                          >
+                            <ImagePlus className="w-3.5 h-3.5 mr-1" /> Joindre une preuve
+                          </Button>
+                        )}
                       {["paid", "delivered", "returned", "disputed"].includes(o.status) &&
                         !o.refunds.some((r) => ["requested", "approved", "executed"].includes(r.status)) && (
                           <Button
@@ -359,6 +436,43 @@ export function MyOrdersView({ onHome }: { onHome: () => void }) {
                 maxLength={200}
               />
             </div>
+            {/* Phase D — capture du transfert jointe à la déclaration (optionnel) */}
+            <div className="space-y-1.5">
+              <Label htmlFor="myDeclareProof">Capture du transfert (optionnel)</Label>
+              {declareProof ? (
+                <div className="flex items-center gap-2">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={declareProof} alt="Capture du transfert" className="h-20 w-20 rounded-lg border object-cover" />
+                  <div className="text-xs text-muted-foreground space-y-1">
+                    <p>Capture prête — jointe à ta déclaration.</p>
+                    <button type="button" className="text-destructive underline font-semibold" onClick={() => setDeclareProof("")}>
+                      Retirer
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <label
+                  htmlFor="myDeclareProof"
+                  className="flex items-center gap-2 rounded-xl border border-dashed border-emerald-400/50 bg-emerald-50 px-3 py-2.5 text-xs text-emerald-700 font-semibold cursor-pointer hover:bg-emerald-100"
+                >
+                  {declareProofBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImagePlus className="w-4 h-4" />}
+                  {declareProofBusy ? "Lecture de l'image…" : "Joindre la capture (SMS ou app opérateur)"}
+                </label>
+              )}
+              <input
+                id="myDeclareProof"
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                onChange={(e) => {
+                  pickLocalImage(e.target.files?.[0], (dataUrl) => {
+                    setDeclareProof(dataUrl)
+                    toast.success("Capture jointe — elle sera visible du vendeur et de l'administration.")
+                  })
+                  e.target.value = ""
+                }}
+              />
+            </div>
             <Button className="w-full" onClick={submitDeclare} disabled={declareBusy}>
               {declareBusy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
               Déclarer mon paiement
@@ -366,6 +480,72 @@ export function MyOrdersView({ onHome }: { onHome: () => void }) {
             <p className="text-[11px] text-muted-foreground">
               Ta déclaration ne confirme pas le paiement : le vendeur vérifiera dans son compte opérateur avant de
               confirmer l&apos;encaissement.
+            </p>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Phase D — Joindre une preuve photographique (justificatif du transfert) */}
+      <Dialog open={!!proofFor} onOpenChange={(open) => !open && setProofFor(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Joindre une preuve de paiement</DialogTitle>
+            <DialogDescription>
+              Commande <strong className="font-mono">{proofFor?.ref}</strong> — la capture est visible du vendeur et de
+              l&apos;administration uniquement, jamais publiquement.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            {proofDataUrl ? (
+              <div className="flex items-center gap-3">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={proofDataUrl} alt="Capture du transfert" className="h-28 w-28 rounded-xl border object-cover" />
+                <div className="text-xs text-muted-foreground space-y-1">
+                  <p>Capture prête à être envoyée.</p>
+                  <button
+                    type="button"
+                    className="text-destructive underline font-semibold"
+                    onClick={() => setProofDataUrl("")}
+                  >
+                    Choisir une autre image
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <label
+                htmlFor="proofFile"
+                className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-primary/40 bg-primary/5 px-3 py-6 text-xs text-primary font-semibold cursor-pointer hover:bg-primary/10"
+              >
+                <ImagePlus className="w-4 h-4" /> Choisir la capture du transfert (SMS ou app opérateur)
+              </label>
+            )}
+            <input
+              id="proofFile"
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={(e) => {
+                pickLocalImage(e.target.files?.[0], setProofDataUrl)
+                e.target.value = ""
+              }}
+            />
+            <div className="space-y-1.5">
+              <Label htmlFor="proofNote">Note (optionnel)</Label>
+              <Input
+                id="proofNote"
+                placeholder="Ex : transfert du 082xxx, montant exact"
+                value={proofNote}
+                onChange={(e) => setProofNote(e.target.value)}
+                maxLength={300}
+              />
+            </div>
+            <Button className="w-full" onClick={submitProof} disabled={proofBusy}>
+              {proofBusy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+              Envoyer la preuve
+            </Button>
+            <p className="text-[11px] text-muted-foreground">
+              Si une capture était déjà jointe, la nouvelle la remplace — chaque envoi reste tracé dans
+              l&apos;historique de la commande.
             </p>
           </div>
         </DialogContent>

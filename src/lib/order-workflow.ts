@@ -153,6 +153,7 @@ export type OrderEventType =
   | "status_changed"
   | "payment_selected"
   | "payment_declared"
+  | "payment_proof" // Phase D — preuve photographique jointe (jamais publique)
   | "payment_confirmed"
   | "payment_failed"
   | "delivery_updated"
@@ -171,7 +172,10 @@ export type OrderEventType =
    on exclut les détails internes (montants remboursés, notes vendeur…).
    P1 (Phase C) — payment_declared est sûr publiquement : la route de suivi
    public en masque la charge (référence déclarée, note) et n'expose que le
-   badge d'état « Paiement déclaré ». */
+   badge d'état « Paiement déclaré ».
+   Phase D — payment_proof est volontairement ABSENT de cette liste : la
+   capture du transfert n'est JAMAIS publique (acheteur, vendeur propriétaire
+   et admin uniquement — route /api/orders/payment-proof). */
 export const PUBLIC_EVENT_TYPES: OrderEventType[] = [
   "created",
   "status_changed",
@@ -189,6 +193,7 @@ export const EVENT_TYPE_LABELS: Record<string, string> = {
   status_changed: "Statut mis à jour",
   payment_selected: "Moyen de paiement choisi",
   payment_declared: "Paiement déclaré par le client",
+  payment_proof: "Preuve de paiement jointe",
   payment_confirmed: "Paiement confirmé",
   payment_failed: "Paiement échoué",
   delivery_updated: "Livraison mise à jour",
