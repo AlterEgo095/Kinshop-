@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { guardAdmin, logAdminAction } from "@/lib/admin"
+// Phase E — ledger en mode ombre : contrepartie comptable du remboursement
+// exécuté (écriture négative idempotente, jamais bloquante)
+import { recordRefundEntry } from "@/lib/finance"
 
 const REFUND_STATUSES = ["requested", "approved", "rejected", "executed"]
 
@@ -83,6 +86,19 @@ export async function PATCH(req: NextRequest) {
       await db.order.update({
         where: { id: refund.orderId },
         data: { paymentStatus: "refunded", status: "refunded" },
+      })
+      // Phase E — Ledger (mode ombre) : contrepartie comptable du
+      // remboursement (écriture négative) — idempotent par remboursement.
+      await recordRefundEntry({
+        storeId: refund.order.storeId,
+        orderId: refund.orderId,
+        orderRef: refund.order.ref,
+        refundId: refund.id,
+        amountUSD: amount,
+        totalUSD: refund.order.totalUSD,
+        totalFC: refund.order.totalFC,
+        reference:
+          body.reference !== undefined ? String(body.reference).slice(0, 100) : refund.reference,
       })
     }
     // Refus : la commande repart du litige vers son état antérieur pertinent

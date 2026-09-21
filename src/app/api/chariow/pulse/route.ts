@@ -36,6 +36,9 @@ import {
   type ChariowPulsePayload,
 } from "@/lib/chariow"
 import { logAudit } from "@/lib/audit"
+// Phase E — ledger en mode ombre : revenu KinShop reconnu (vente Chariow du
+// produit configuré) journalisé en double écriture — jamais bloquant.
+import { recordPlatformSaleEntry } from "@/lib/finance"
 
 const PREMIUM_DAYS = 30
 
@@ -162,6 +165,16 @@ export async function POST(req: NextRequest) {
               entityType: "boost",
               entityId: boostId,
             })
+            // Phase E — Ledger (mode ombre) : revenu KinShop (boost payé) —
+            // montant réel du payload vérifié, idempotent par vente Chariow.
+            await recordPlatformSaleEntry({
+              storeId: camp.storeId,
+              kind: "boost",
+              saleId,
+              amount: payload.sale?.amount?.value,
+              currency: payload.sale?.amount?.currency,
+              productName: payload.product?.name,
+            })
           }
           // count === 0 → déjà traitée (webhook rejoué) : no-op idempotent
         }
@@ -200,6 +213,16 @@ export async function POST(req: NextRequest) {
             actorType: "system",
             entityType: "store",
             entityId: store.id,
+          })
+          // Phase E — Ledger (mode ombre) : revenu KinShop (Premium) — montant
+          // réel du payload vérifié, idempotent par vente Chariow.
+          await recordPlatformSaleEntry({
+            storeId: store.id,
+            kind: "premium",
+            saleId,
+            amount: payload.sale?.amount?.value,
+            currency: payload.sale?.amount?.currency,
+            productName: payload.product?.name,
           })
         }
       }

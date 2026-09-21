@@ -10,6 +10,7 @@ import {
   ArrowLeft,
   Ban,
   BadgeCheck,
+  Banknote,
   CheckCircle2,
   ChevronDown,
   Clock,
@@ -107,6 +108,8 @@ import {
 } from "@/components/ui/dialog"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { AdminConfigTab } from "@/components/kinshop/admin-config-tab"
+// Phase E — vue financière (ledger mode ombre + réconciliation)
+import { AdminFinanceTab } from "@/components/kinshop/admin-finance-tab"
 import {
   buildWhatsAppLink,
   couponLabel,
@@ -132,6 +135,7 @@ type AdminTab =
   | "boost"
   | "reviews"
   | "growth"
+  | "finance"
   | "config"
   | "audit"
   | "settings"
@@ -1314,6 +1318,9 @@ export function AdminConsole({
             </TabsTrigger>
             <TabsTrigger value="growth" className="gap-1.5 shrink-0">
               <Tag className="w-4 h-4" /> Croissance
+            </TabsTrigger>
+            <TabsTrigger value="finance" className="gap-1.5 shrink-0">
+              <Banknote className="w-4 h-4" /> Finances
             </TabsTrigger>
             <TabsTrigger value="config" className="gap-1.5 shrink-0">
               <Wrench className="w-4 h-4" /> Configuration
@@ -2511,6 +2518,11 @@ export function AdminConsole({
                 <AdminRefundsSection />
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* ════ FINANCES (Phase E — ledger mode ombre + réconciliation) ════ */}
+          <TabsContent value="finance" className="space-y-4">
+            <AdminFinanceTab />
           </TabsContent>
 
           {/* ════ JOURNAL D'AUDIT GLOBAL (V10) ════ */}

@@ -60,6 +60,10 @@ model Store {
   // V10 — Catalogue hiérarchisé & promotion payante (indépendante de Premium)
   storeCategories StoreCategory[]
   boosts          BoostCampaign[]
+  // Phase E — Ledger (mode ombre) : regroupement des écritures financières de
+  // la boutique — AUCUN champ de solde stocké (les agrégats se calculent
+  // depuis LedgerEntry, source de vérité unique) ; aucune exposition vendeur.
+  wallet          Wallet?
 
   @@index([ownerId])
 }
@@ -252,6 +256,9 @@ model Order {
   // Phase D — preuve photographique du paiement direct (capture du transfert
   // jointe par l'acheteur) — jamais publique (acheteur, vendeur, admin seuls)
   paymentProof OrderPaymentProof?
+  // Phase E — Ledger (mode ombre) : écritures financières liées à la commande
+  // (encaissement confirmé, remboursement exécuté) — lecture admin seule
+  ledgerEntries LedgerEntry[]
 
   @@index([userId])
   @@index([storeId, status])
@@ -395,6 +402,71 @@ model PulseDelivery {
   // P2 — anti-replay durable : Chariow régénère le deliveryId à chaque reprise
   // de livraison ; le couple (event, saleId) est lui stable par vente.
   @@unique([event, saleId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase E — Ledger financier « mode ombre » (double écriture d'observation)
+// ─────────────────────────────────────────────────────────────────────────────
+// Chaque fait d'argent DÉJÀ vérifié par le flux métier est copié dans un
+// journal append-only (rapport financier 38 p., §10-13) : encaissement direct
+// confirmé, encaissement espèces, vente Chariow du produit Premium/Boost
+// configuré, remboursement exécuté. JAMAIS bloquant, JAMAIS exposé vendeur,
+// montant toujours côté serveur, AUCUNE conversion silencieuse (FC / USD).
+
+// Regroupement des écritures d'une boutique — 1 wallet par boutique, créé
+// paresseusement. AUCUN champ de solde stocké (available/pending se calculent
+// depuis LedgerEntry — source de vérité unique). Aucune API vendeur en Phase E.
+model Wallet {
+  id        String        @id @default(cuid())
+  storeId   String        @unique // 1 wallet par boutique
+  store     Store         @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  currency  String        @default("FC") // devise de tenue de compte (marketplace)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  entries   LedgerEntry[]
+}
+
+// Écriture financière append-only — idempotence SQL @@unique([psPSource,
+// reference, type]) : un événement métier = UNE écriture (webhook rejoué,
+// confirmation répétée, course d'instances jumelles → une seule ligne).
+model LedgerEntry {
+  id          String    @id @default(cuid())
+  // vendor = mouvement d'argent vendeur (wallet) · platform = revenu KinShop
+  scope       String    @default("vendor")
+  // Contexte métier de reporting : order | collection | premium | boost | refund
+  kind        String    @default("")
+  walletId    String?
+  wallet      Wallet?   @relation(fields: [walletId], references: [id], onDelete: Restrict)
+  // Contexte reporting SANS clé étrangère : l'écriture survit à la boutique
+  storeId     String?
+  orderId     String?
+  order       Order?    @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  // SALE | DELIVERY_CASH | REFUND | ADJUSTMENT (constantes lib/finance.ts)
+  type        String
+  // Machine d'états des fonds (réservée) : PENDING | CONFIRMED | AVAILABLE —
+  // le mode ombre écrit directement CONFIRMED (fait d'argent déjà vérifié) ;
+  // AVAILABLE sera mobilisé par la future machinerie de retraits.
+  status      String    @default("CONFIRMED")
+  // Sens porté par le signe : crédit vendeur / revenu KinShop > 0, débit < 0
+  amount      Float
+  // Part plateforme — TOUJOURS 0 en mode ombre (aucun prélèvement réel ; la
+  // clé P9 finance.commissionPercent reste inerte jusqu'à décision business)
+  commission  Float     @default(0)
+  // Devise native du fait d'argent : FC (marketplace) ou USD (Chariow) —
+  // jamais de conversion silencieuse
+  currency    String    @default("FC")
+  // Traçabilité : référence métier (orderId / saleId / refundId) + source
+  reference   String    @default("")
+  psPSource   String    @default("") // direct | cash | chariow | refund
+  note        String    @default("")
+  availableAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([psPSource, reference, type]) // idempotence : un événement = une écriture
+  @@index([walletId, status])
+  @@index([orderId])
+  @@index([scope, createdAt])
 }
 
 // V2 — Statistiques : visites journalières par boutique (agrégat 1 ligne/jour)

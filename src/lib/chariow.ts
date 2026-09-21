@@ -354,11 +354,24 @@ export async function fetchRecentSales(productId: string, perPage = 20): Promise
 
 /* ─────────── Webhook (Pulses) ─────────── */
 
+/** Montant d'une vente Chariow tel que porté par les payloads (Pulse, API). */
+export interface ChariowPulseAmount {
+  value?: number
+  formatted?: string
+  short?: string
+  currency?: string
+}
+
 export interface ChariowPulsePayload {
   event: string
   sale?: {
     id?: string
     status?: string
+    // Phase E — montant réel de la vente (revenu KinShop journalisé tel quel,
+    // jamais recalculé) : présent sur successful.sale (doc Chariow) ; lecturé
+    // défensivement, son absence ne bloque aucune activation.
+    amount?: ChariowPulseAmount | null
+    original_amount?: ChariowPulseAmount | null
     custom_metadata?: Record<string, string> | null
     completed_at?: string | null
   }

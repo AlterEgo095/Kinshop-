@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
+// Phase E — ledger en mode ombre (double écriture financière non bloquante)
+import { recordVendorPaymentEntry } from "@/lib/finance"
 import {
   PAYMENT_LABELS,
   buildOrderMessage,
@@ -512,6 +514,34 @@ export async function PATCH(req: NextRequest) {
     const updated = await db.order.update({ where: { id }, data })
     if (events.length > 0) {
       await db.orderEvent.createMany({ data: events })
+    }
+
+    // Phase E — Ledger (mode ombre) : double écriture financière de
+    // l'encaissement CONFIRMÉ (le fait d'argent est déjà vérifié ci-dessus).
+    // Idempotent (une commande = une écriture) et JAMAIS bloquant : un échec
+    // est journalisé serveur (réconciliation admin) sans affecter la réponse.
+    if (data.paymentStatus === "paid") {
+      if (confirmCash) {
+        await recordVendorPaymentEntry({
+          storeId: order.storeId,
+          orderId: order.id,
+          type: "DELIVERY_CASH",
+          amountFC: order.totalFC,
+          orderRef: order.ref,
+          declaredRef: order.paymentRef,
+          actorLabel,
+        })
+      } else if (confirmDirect) {
+        await recordVendorPaymentEntry({
+          storeId: order.storeId,
+          orderId: order.id,
+          type: "SALE",
+          amountFC: order.totalFC,
+          orderRef: order.ref,
+          declaredRef: order.paymentRef,
+          actorLabel,
+        })
+      }
     }
 
     // P4 (F4-6) — Cohérence commande ↔ facture : une commande annulée,
