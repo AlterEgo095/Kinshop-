@@ -755,19 +755,56 @@ export function BoostPanel({ slug }: { slug: string }) {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "Erreur.")
-      // Paiement simulé (agrégateur) → active
+      // Phase F — paiement en ligne Chariow (produit À PRIX FIXE configuré) :
+      // redirection vers la page hébergée ; au retour, l'app reboote sur le
+      // dashboard et la webhook passe la campagne « active » (temps réel).
+      if (data.payment?.mode === "chariow" && data.payment.url) {
+        toast.success("Redirection vers le paiement sécurisé…")
+        window.location.href = data.payment.url
+        return
+      }
+      if (data.payment?.mode === "chariow_error") {
+        await load() // la campagne créée reste visible « en attente de paiement »
+        throw new Error(data.payment.error || "Paiement impossible.")
+      }
+      // Repli manual (produit du palier non configuré) : la campagne reste en
+      // attente d'activation par l'administration. En mode démo explicite
+      // (PAYMENT_SIMULATION), la confirmation simulée fonctionne ; en
+      // production la requête est refusée (403 kill-switch) — même UX honnête.
       const res2 = await fetch("/api/boost", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: data.campaign.id }),
       })
-      const data2 = await res2.json()
-      if (!res2.ok) {
-        await load() // la campagne créée reste visible « en attente de paiement »
-        throw new Error(data2.error || "Paiement impossible.")
+      const data2 = await res2.json().catch(() => null)
+      if (res2.ok) {
+        toast.success("Campagne active — ta boutique apparaît en « Sponsorisé » sur l'accueil 🚀")
+      } else {
+        toast.info("Campagne créée — paiement en attente.")
       }
-      toast.success("Campagne active — ta boutique apparaît en « Sponsorisé » sur l'accueil 🚀")
       await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur inconnue")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // Phase F — re-initie le paiement Chariow d'une campagne en attente
+  // (session abandonnée / paiement plus tard). Aucune écriture de statut :
+  // l'activation reste le fait d'un paiement vérifié (webhook) ou de l'admin.
+  const payPending = async (id: string) => {
+    setBusy(true)
+    try {
+      const res = await fetch("/api/boost", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, action: "checkout" }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data.url) throw new Error(data.error || "Paiement impossible.")
+      toast.success("Redirection vers le paiement sécurisé…")
+      window.location.href = data.url
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Erreur inconnue")
     } finally {
@@ -820,16 +857,30 @@ export function BoostPanel({ slug }: { slug: string }) {
                   <span>
                     {new Date(c.startAt).toLocaleDateString("fr-FR")} → {new Date(c.endAt).toLocaleDateString("fr-FR")}
                   </span>
-                  <span>
-                    {c.status === "pending_payment"
-                      ? "Paiement en attente"
-                      : c.status === "ended"
+                  {c.status === "pending_payment" ? (
+                    <span className="flex items-center gap-2">
+                      <span>Paiement en attente</span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-6 px-2 text-xs"
+                        disabled={busy}
+                        onClick={() => payPending(c.id)}
+                        title="Payer maintenant via le paiement en ligne sécurisé (si configuré)"
+                      >
+                        Payer
+                      </Button>
+                    </span>
+                  ) : (
+                    <span>
+                      {c.status === "ended"
                         ? "Terminée"
                         : c.status === "expired"
                           ? "Expirée"
                           : "Rejetée"}{" "}
-                    · {c.impressions} vues
-                  </span>
+                      · {c.impressions} vues
+                    </span>
+                  )}
                 </div>
               ))}
           </div>

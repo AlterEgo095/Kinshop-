@@ -321,6 +321,45 @@ export const CONFIG_SPECS: ConfigSpec[] = [
       "Colle-le ici après création : le paiement réel s'active instantanément, sans redéploiement. " +
       "Vide (ou clé API absente) = mode démo.",
   },
+  {
+    key: "payments.chariowBoost7ProductId",
+    section: "payments",
+    type: "string",
+    default: CONFIG_DEFAULTS["payments.chariowBoost7ProductId"] as string,
+    public: false,
+    maxLength: 60,
+    label: "Chariow — ID produit Boost 7 jours (prd_xxx)",
+    description:
+      "Produit Chariow À PRIX FIXE pour la mise en avant 7 jours (type course/downloadable, publié). " +
+      "Son prix doit correspondre au paramètre boost.price7USD. " +
+      "Vide = le boost reste en attente de paiement, activable par l'administration (comportement actuel).",
+  },
+  {
+    key: "payments.chariowBoost30ProductId",
+    section: "payments",
+    type: "string",
+    default: CONFIG_DEFAULTS["payments.chariowBoost30ProductId"] as string,
+    public: false,
+    maxLength: 60,
+    label: "Chariow — ID produit Boost 30 jours (prd_xxx)",
+    description:
+      "Produit Chariow À PRIX FIXE pour la mise en avant 30 jours (type course/downloadable, publié). " +
+      "Son prix doit correspondre au paramètre boost.price30USD. " +
+      "Vide = le boost reste en attente de paiement, activable par l'administration (comportement actuel).",
+  },
+  {
+    key: "payments.chariowEnabled",
+    section: "payments",
+    type: "boolean",
+    default: CONFIG_DEFAULTS["payments.chariowEnabled"] as boolean,
+    public: false,
+    label: "Chariow — canal actif (kill-switch)",
+    description:
+      "Coupe-circuit du PSP des revenus KinShop (Premium + Boost). Désactivé : le checkout " +
+      "renvoie « suspendu » (503) et le webhook n'active plus rien, sans redéploiement. " +
+      "Un paiement effectué pendant la coupure reste récupérable (vérification à la demande Premium, " +
+      "activation administration Boost).",
+  },
 
   /* ─────────── Règles métier ─────────── */
   {

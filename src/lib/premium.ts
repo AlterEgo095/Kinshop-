@@ -25,6 +25,7 @@ import {
   resolveChariowProductId,
   type ChariowSale,
 } from "@/lib/chariow"
+import { logAudit } from "@/lib/audit"
 
 export const PREMIUM_DAYS = 30
 
@@ -107,6 +108,17 @@ export async function verifyAndApplyPremium(
       },
     })
     if (updated.count === 0) return { activated: false, saleId: s.id, reason: "already_applied" }
+    // Journalisation (Phase F — opérations sensibles) : activation tracée dans
+    // la chaîne d'audit, quel que soit le chemin (webhook, vérification à la
+    // demande ou pré-check checkout).
+    await logAudit({
+      action: "premium.activated",
+      target: `store:${store.slug}`,
+      detail: `Vente Chariow ${s.id} appliquée par vérification serveur (+${PREMIUM_DAYS} j).`,
+      actorType: "system",
+      entityType: "store",
+      entityId: store.id,
+    })
     return { activated: true, saleId: s.id }
   }
 

@@ -176,6 +176,17 @@ export const CONFIG_DEFAULTS: PublicConfig = {
   // Vide = la clé API .env seule ne suffit pas → mode démo. Configurable depuis
   // la console ADMIN (section Paiements) sans redéploiement.
   "payments.chariowProductId": "",
+  // Phase F — Chariow devient le PSP des revenus KinShop : les boosts (7 j / 30 j)
+  // sont payés via des produits Chariow À PRIX FIXE (un produit par palier, créé
+  // dans le dashboard Chariow, type course/downloadable). Vide = repli actuel
+  // (campagne en attente + activation administration). JAMAIS de montant
+  // dynamique de commande marketplace via Chariow.
+  "payments.chariowBoost7ProductId": "",
+  "payments.chariowBoost30ProductId": "",
+  // Phase F — Kill-switch administrable du canal Chariow (PSP des revenus
+  // KinShop : Premium + Boost). true = canal actif ; false = checkout refusé
+  // (503 « suspendu ») et webhook sans activation, sans redéploiement.
+  "payments.chariowEnabled": true,
 
   /* ─────────── Règles métier ─────────── */
   "business.maxStoresPerUser": 1, // un compte = N boutique(s)

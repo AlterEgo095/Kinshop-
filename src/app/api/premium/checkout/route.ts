@@ -14,6 +14,7 @@ import {
   buildPremiumRedirectUrl,
   resolveChariowProductId,
   isChariowLiveAsync,
+  isChariowDisabled,
 } from "@/lib/chariow"
 import { normalizePhone } from "@/lib/kinshop"
 import { requireStoreOwner, forbidden, unauthorized } from "@/lib/auth"
@@ -84,6 +85,14 @@ export async function POST(req: NextRequest) {
 
     // ─── MODE SIMULATION ───
     // Paiement réel = clé API (.env) + produit résolu dynamiquement (console admin ou .env)
+    // Kill-switch administrable (Phase F) : canal Chariow coupé → message honnête,
+    // indépendant de la configuration produit (jamais de repli simulation en prod).
+    if (await isChariowDisabled()) {
+      return NextResponse.json(
+        { error: "Le paiement Premium est momentanément suspendu par l'administration de la plateforme." },
+        { status: 503 },
+      )
+    }
     if (!(await isChariowLiveAsync())) {
       // Kill-switch (audit F-01) : la démo de paiement n'existe que si
       // PAYMENT_SIMULATION=on est explicitement défini dans l'environnement.
