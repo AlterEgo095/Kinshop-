@@ -167,6 +167,7 @@ export type OrderEventType =
   | "invoice_generated"
   | "invoice_cancelled"
   | "note"
+  | "stock_restored" // LOT 1 — stock restitué (annulation/retour) ; usage interne
 
 /* Types d'événements visibles publiquement par le client (suivi) :
    on exclut les détails internes (montants remboursés, notes vendeur…).
@@ -207,6 +208,7 @@ export const EVENT_TYPE_LABELS: Record<string, string> = {
   invoice_generated: "Facture générée",
   invoice_cancelled: "Facture annulée",
   note: "Note",
+  stock_restored: "Stock restitué",
 }
 
 /* ─────────── Options de livraison (module boutique) ─────────── */

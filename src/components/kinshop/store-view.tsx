@@ -385,6 +385,10 @@ export function StoreView({ slug, onBack, platformRate, config = {}, authUser = 
   const filtered = useMemo(() => {
     if (!store?.products) return []
     return store.products.filter((p) => {
+      // LOT 1 — double garde : le serveur ne sert déjà que les produits publiés
+      // aux visiteurs ; on écarte aussi localement les données éventuellement
+      // en cache (un produit masqué n'apparaît jamais sur la vitrine).
+      if (p.published === false) return false
       // P2 — filtre structuré prioritaire dès que la boutique en définit ;
       // sans catégories structurées, on garde le filtre legacy par texte libre.
       const matchCat = effectiveStoreCatId
@@ -410,9 +414,19 @@ export function StoreView({ slug, onBack, platformRate, config = {}, authUser = 
   })
 
   const addToCart = (product: ProductData) => {
+    // LOT 1 — pas d'ajout d'un produit en rupture ; le panier ne dépasse
+    // jamais le stock réel (le serveur reste l'autorité en cas de course).
+    if (product.stock <= 0) {
+      toast.error(`${product.emoji} ${product.name} est en rupture de stock.`)
+      return
+    }
     setCart((c) => {
       const existing = c.find((l) => l.product.id === product.id)
       if (existing) {
+        if (existing.qty + 1 > product.stock) {
+          toast.error(`Stock maximum atteint pour ${product.name} (${product.stock} disponible(s)).`)
+          return c
+        }
         return c.map((l) => (l.product.id === product.id ? { ...l, qty: l.qty + 1 } : l))
       }
       return [...c, { product, qty: 1 }]
@@ -436,7 +450,8 @@ export function StoreView({ slug, onBack, platformRate, config = {}, authUser = 
       setCart((c) => c.filter((l) => l.product.id !== productId))
       return
     }
-    setCart((c) => c.map((l) => (l.product.id === productId ? { ...l, qty: Math.min(99, qty) } : l)))
+    // LOT 1 — la quantité ne dépasse jamais le stock du produit
+    setCart((c) => c.map((l) => (l.product.id === productId ? { ...l, qty: Math.min(99, l.product.stock, qty) } : l)))
   }
 
   /* ─────────── V6 — Code promo & avis ─────────── */
@@ -951,12 +966,24 @@ export function StoreView({ slug, onBack, platformRate, config = {}, authUser = 
                       <p className="font-extrabold text-primary text-lg leading-tight">
                         {formatFC(p.priceUSD * rate)}
                       </p>
+                      {/* LOT 1 — vitrine honnête : disponibilité visible */}
+                      {p.stock <= 0 ? (
+                        <p className="text-[10px] font-semibold text-red-600">Rupture de stock</p>
+                      ) : p.stock <= 5 ? (
+                        <p className="text-[10px] text-amber-600">Plus que {p.stock} en stock</p>
+                      ) : null}
                       <div className="flex items-center justify-between mt-2">
                         <span className="text-xs text-muted-foreground">{formatUSD(p.priceUSD)}</span>
-                        <Button size="sm" className="h-8 px-3" onClick={() => addToCart(p)} aria-label={`Ajouter ${p.name} au panier`}>
-                          <Plus className="w-4 h-4 mr-0.5" />
-                          Ajouter
-                        </Button>
+                        {p.stock > 0 ? (
+                          <Button size="sm" className="h-8 px-3" onClick={() => addToCart(p)} aria-label={`Ajouter ${p.name} au panier`}>
+                            <Plus className="w-4 h-4 mr-0.5" />
+                            Ajouter
+                          </Button>
+                        ) : (
+                          <span className="inline-flex items-center h-8 px-3 rounded-md border border-red-200 bg-red-50 text-[11px] font-bold uppercase tracking-wide text-red-600" aria-label={`${p.name} indisponible`}>
+                            Épuisé
+                          </span>
+                        )}
                       </div>
                     </div>
                   </CardContent>
@@ -1165,13 +1192,14 @@ export function StoreView({ slug, onBack, platformRate, config = {}, authUser = 
                 <Button
                   size="lg"
                   className="w-full text-base"
+                  disabled={detail.stock <= 0}
                   onClick={() => {
                     addToCart(detail)
                     setDetail(null)
                   }}
                 >
                   <ShoppingCart className="w-5 h-5 mr-2" />
-                  Ajouter au panier
+                  {detail.stock > 0 ? "Ajouter au panier" : "Rupture de stock"}
                 </Button>
               </div>
             </div>

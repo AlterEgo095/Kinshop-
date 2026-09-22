@@ -22,6 +22,11 @@ import { getActiveInstruction, expireOverdueDeclarations } from "@/lib/direct-pa
 import { makeSequentialOrderRef } from "@/lib/invoice-integrity"
 import { logAudit, actorFromUser } from "@/lib/audit"
 import { canTransitionOrder, ORDER_STATUSES } from "@/lib/order-workflow"
+import { restoreOrderStock } from "@/lib/stock"
+
+// LOT 1 — signal interne de conflit de stock (course entre deux commandes) :
+// la commande concurrente est refusée 400 sans contaminer les flux d'erreur 500.
+class StockConflictError extends Error {}
 
 // POST /api/orders — Créer une commande (calcul 100 % serveur + traçabilité V10)
 // V10 : compte client OBLIGATOIRE (flag feature.orderAccounts) ; la commande est
@@ -70,6 +75,17 @@ export async function POST(req: NextRequest) {
       const p = map.get(String(r.productId))
       if (!p) continue
       const qty = Math.max(1, Math.min(maxQty, Number(r.qty) || 1))
+      // LOT 1 — disponibilité : un produit épuisé ne se commande pas et la
+      // quantité demandée ne dépasse jamais le stock réel (anti-survente).
+      if (p.stock <= 0) {
+        return NextResponse.json({ error: `${p.name} est en rupture de stock.` }, { status: 400 })
+      }
+      if (qty > p.stock) {
+        return NextResponse.json(
+          { error: `Stock insuffisant pour ${p.name} : ${p.stock} disponible(s).` },
+          { status: 400 },
+        )
+      }
       items.push({ productId: p.id, name: p.name, emoji: p.emoji, priceUSD: p.priceUSD, qty })
       subtotalRaw += p.priceUSD * qty
     }
@@ -146,10 +162,27 @@ export async function POST(req: NextRequest) {
     const ref = await makeSequentialOrderRef()
     const actor = actorFromUser(user, "customer")
 
-    const order = await db.order.create({
-      data: {
-        ref,
-        storeId: store.id,
+    // LOT 1 — décrément ATOMIQUE du stock dans la MÊME transaction que la
+    // création de la commande : updateMany conditionnel (stock >= qty) — deux
+    // commandes concurrentes ne peuvent pas vendre la même unité. En cas de
+    // course, la commande perdante est refusée 400 et RIEN n'est écrit.
+    let stockConflictMsg = ""
+    const order = await db
+      .$transaction(async (tx) => {
+        for (const it of items) {
+          const res = await tx.product.updateMany({
+            where: { id: it.productId, stock: { gte: it.qty } },
+            data: { stock: { decrement: it.qty } },
+          })
+          if (res.count === 0) {
+            stockConflictMsg = `Stock insuffisant pour ${it.name} : la commande n'a pas été enregistrée.`
+            throw new StockConflictError(stockConflictMsg)
+          }
+        }
+        return tx.order.create({
+          data: {
+            ref,
+            storeId: store.id,
         // V10 — lien compte client (null seulement si flag orderAccounts désactivé)
         userId: user?.id ?? null,
         customerName: customerName.slice(0, 80),
@@ -165,12 +198,20 @@ export async function POST(req: NextRequest) {
         deliveryFeeFC,
         deliveryAddress,
         paymentMethod: method,
-        // V10 — état initial via le fournisseur (espèces = cash_pending, jamais « payée »)
-        paymentStatus: provider.kind === "cash" ? "cash_pending" : "unpaid",
-        note: String(body.note || "").slice(0, 300),
-        status: "new",
-      },
-    })
+            // V10 — état initial via le fournisseur (espèces = cash_pending, jamais « payée »)
+            paymentStatus: provider.kind === "cash" ? "cash_pending" : "unpaid",
+            note: String(body.note || "").slice(0, 300),
+            status: "new",
+          },
+        })
+      })
+      .catch((e: unknown) => {
+        if (e instanceof StockConflictError) return null
+        throw e
+      })
+    if (!order) {
+      return NextResponse.json({ error: stockConflictMsg || "Stock insuffisant." }, { status: 400 })
+    }
 
     // Initiation provider (référence agrégateur / instructions espèces)
     const initiation = await provider.initiate({
@@ -514,6 +555,17 @@ export async function PATCH(req: NextRequest) {
     const updated = await db.order.update({ where: { id }, data })
     if (events.length > 0) {
       await db.orderEvent.createMany({ data: events })
+    }
+
+    // LOT 1 — restitution du stock : annulation ou retour ⇒ les articles
+    // repassent en stock (idempotent : un seul événement stock_restored par
+    // commande, re-vérifié en transaction par le helper partagé).
+    if (data.status === "cancelled" || data.status === "returned") {
+      await restoreOrderStock(
+        id,
+        { type: actorType, id: user.id, label: actorLabel },
+        data.status === "cancelled" ? "Stock restitué (commande annulée)" : "Stock restitué (commande retournée)",
+      )
     }
 
     // Phase E — Ledger (mode ombre) : double écriture financière de

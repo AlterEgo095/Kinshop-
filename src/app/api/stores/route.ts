@@ -114,6 +114,12 @@ export async function GET(req: NextRequest) {
     })
     if (!store) return NextResponse.json({ error: "Boutique introuvable." }, { status: 404 })
 
+    // LOT 1 — propriétaire de la boutique ? (session dérivée serveur, jamais le
+    // client). Calculé après la lecture : le filtrage des produits se fait au
+    // mapping (l'include Prisma est partagé par tous les appelants).
+    const requester = await getUserFromRequest(req).catch(() => null)
+    const isStoreOwner = Boolean(requester && store.ownerId && store.ownerId === requester.id)
+
     // F-04 (audit Task 19) : boutique SUSPENDUE → AUCUN contenu servi publiquement
     // (produits, premium, taux…). Squelette minimal uniquement : l'UI vitrine
     // affiche l'avis de suspension (store.status === "suspended"), le dashboard
@@ -155,7 +161,12 @@ export async function GET(req: NextRequest) {
           // V4 — galerie multi-photos normalisée (retombe sur imageUrl si vide)
           // Mission Premium — specs produit normalisées + description servies tels quels
           // (la description fait partie de la vitrine publique, champ Product.description)
-          products: publicStore.products.map((p) => ({
+          // LOT 1 — publication produit : le propriétaire voit TOUT son catalogue
+          // (gestion) ; les visiteurs ne voient que les produits publiés.
+          products: (isStoreOwner
+            ? publicStore.products
+            : publicStore.products.filter((p) => p.published)
+          ).map((p) => ({
             ...p,
             images: normalizeImages(p.images, p.imageUrl),
             specs: normalizeSpecs(p.specs),

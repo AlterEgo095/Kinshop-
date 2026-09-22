@@ -206,6 +206,8 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
   const [editSpecs, setEditSpecs] = useState<ProductSpec[]>([])
   const [previewEdit, setPreviewEdit] = useState(false)
   const [savingEdit, setSavingEdit] = useState(false)
+  // LOT 1 — publication en cours (anti double-clic sur l'interrupteur vitrine)
+  const [busyPublishId, setBusyPublishId] = useState("")
 
   // Réglages
   const [sName, setSName] = useState("")
@@ -840,6 +842,28 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
       toast.error(e instanceof Error ? e.message : "Erreur")
     } finally {
       setAdding(false)
+    }
+  }
+
+  // LOT 1 — publication vitrine : accessible quel que soit le plan (gouvernance
+  // basique, jamais verrouillée Premium) ; le serveur trace le changement dans
+  // l'audit et re-sert le produit normalisé.
+  const togglePublish = async (p: ProductData) => {
+    setBusyPublishId(p.id)
+    try {
+      const res = await fetch("/api/products", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: p.id, published: p.published === false }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setProducts((ps) => ps.map((x) => (x.id === p.id ? { ...x, published: data.product.published } : x)))
+      toast.success(data.product.published ? `${p.name} est visible sur ta vitrine` : `${p.name} est masqué de ta vitrine`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Impossible de changer la publication.")
+    } finally {
+      setBusyPublishId("")
     }
   }
 
@@ -1653,6 +1677,18 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
                           Fiche complétée
                         </span>
                       )}
+                      {/* LOT 1 — état de publication vitrine + disponibilité du stock */}
+                      {p.published === false && (
+                        <span className="inline-flex items-center gap-1 text-[10px] text-slate-600 bg-slate-100 border border-slate-200 rounded-full px-1.5 py-0.5 mb-1">
+                          <EyeOff className="w-2.5 h-2.5" />
+                          Masqué de la vitrine
+                        </span>
+                      )}
+                      {p.stock <= 0 ? (
+                        <p className="text-[10px] font-semibold text-red-600">Rupture — commandes refusées</p>
+                      ) : p.stock <= 3 ? (
+                        <p className="text-[10px] text-amber-600">Stock faible : {p.stock} restant(s)</p>
+                      ) : null}
                       <p className="font-bold text-primary">{formatFC(p.priceUSD * store.rateFC)}</p>
                       <p className="text-xs text-muted-foreground">{formatUSD(p.priceUSD)}</p>
                       {/* Gestion de l'article — actions TOUJOURS visibles (mobile d'abord :
@@ -1680,6 +1716,26 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
                           Supprimer
                         </button>
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => togglePublish(p)}
+                        disabled={busyPublishId === p.id}
+                        className={`mt-2 h-9 w-full inline-flex items-center justify-center gap-1.5 rounded-lg border text-xs font-semibold transition-colors ${
+                          p.published === false
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                            : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100"
+                        } disabled:opacity-50`}
+                        aria-label={p.published === false ? `Publier ${p.name} sur la vitrine` : `Masquer ${p.name} de la vitrine`}
+                      >
+                        {busyPublishId === p.id ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : p.published === false ? (
+                          <Eye className="w-3.5 h-3.5" />
+                        ) : (
+                          <EyeOff className="w-3.5 h-3.5" />
+                        )}
+                        {p.published === false ? "Publier sur la vitrine" : "Masquer de la vitrine"}
+                      </button>
                     </CardContent>
                   </Card>
                 ))}

@@ -15,6 +15,8 @@ export interface ProductData {
   // P2 — catégorie structurée de boutique (rattache le produit à la navigation vitrine)
   storeCategoryId?: string | null
   stock: number
+  // LOT 1 — false = produit masqué de la vitrine (visible du propriétaire seul)
+  published?: boolean
 }
 
 /* ─────────── Mission Premium — fiche produit enrichie ─────────── */

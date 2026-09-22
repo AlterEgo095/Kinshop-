@@ -7,6 +7,7 @@ import {
   DELIVERY_FAILURE_REASONS,
   DELIVERY_FAILURE_LABELS,
 } from "@/lib/order-workflow"
+import { restoreOrderStock } from "@/lib/stock"
 
 // PATCH /api/orders/delivery — Dimension LIVRAISON indépendante (V10)
 // Le vendeur (propriétaire dérivé serveur) fait avancer le statut de livraison :
@@ -84,6 +85,12 @@ export async function PATCH(req: NextRequest) {
     }
     if (deliveryStatus === "returned" && !["returned", "refunded"].includes(order.status)) {
       await db.order.update({ where: { id }, data: { status: "returned" } })
+      // LOT 1 — restitution du stock au retour définitif du colis (idempotent).
+      await restoreOrderStock(
+        order.id,
+        { type: "owner", id: user.id, label: actorLabel },
+        "Stock restitué (retour livraison)",
+      )
     }
 
     // Réponse : état FRAIS (les alignements ci-dessus ne sont pas dans `data`)

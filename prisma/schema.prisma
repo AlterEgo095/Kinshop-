@@ -172,6 +172,10 @@ model Product {
   storeCategoryId String?
   storeCategory   StoreCategory? @relation(fields: [storeCategoryId], references: [id], onDelete: SetNull)
   stock     Int      @default(99)
+  // LOT 1 (cycle 2) — Publication vitrine : false = produit masqué du catalogue
+  // public (le propriétaire continue de le voir dans son dashboard). La gestion
+  // de la publication n'est JAMAIS verrouillée par le plan (gouvernance basique).
+  published Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

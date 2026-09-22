@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { normalizeImages, normalizeSpecs, serializeSpecs } from "@/lib/kinshop"
-import { requireStoreOwner, quotaExceeded } from "@/lib/auth"
+import { requireStoreOwner, quotaExceeded, getUserFromRequest } from "@/lib/auth"
+import { logAudit } from "@/lib/audit"
 import { planOf } from "@/lib/plans"
 import { getPlanQuotas } from "@/lib/config-registry"
 import { withStoreQuotaWrite } from "@/lib/quota-guard"
@@ -193,6 +194,37 @@ export async function PATCH(req: NextRequest) {
     const guard = await requireStoreOwner(req, { id: product.storeId })
     if (!guard.ok) return guard.response
     const plan = planOf(guard.store)
+
+    // LOT 1 — publication de la vitrine : gouvernance basique JAMAIS verrouillée
+    // par le plan (cacher un produit n'est pas une fonctionnalité Premium). Traitée
+    // en accès dédié AVANT la porte d'édition commerciale, avec traçabilité audit.
+    const otherKeys = Object.keys(body).filter((k) => k !== "id" && k !== "published")
+    if (Object.keys(body).includes("published") && otherKeys.length === 0) {
+      if (typeof body.published !== "boolean") {
+        return NextResponse.json({ error: "published doit être un booléen." }, { status: 400 })
+      }
+      if (body.published !== product.published) {
+        await db.product.update({ where: { id }, data: { published: body.published } })
+        const requester = await getUserFromRequest(req)
+        await logAudit({
+          action: "product.published",
+          target: `product:${id}`,
+          detail: `${product.name} — ${body.published ? "publié" : "masqué"} de la vitrine (par ${requester?.name || requester?.email || "propriétaire"})`,
+          actorType: "owner",
+          actorId: requester?.id || "",
+          entityType: "product",
+          entityId: id,
+        })
+      }
+      const refreshed = await db.product.findUnique({ where: { id } })
+      return NextResponse.json({
+        product: {
+          ...refreshed,
+          images: normalizeImages(refreshed!.images, refreshed!.imageUrl),
+          specs: normalizeSpecs(refreshed!.specs),
+        },
+      })
+    }
 
     // Mission abonnement — plan Free : gestion verrouillée (402 = invitation à s'abonner)
     if (plan.id !== "premium") return quotaExceeded(EDIT_LOCKED)
