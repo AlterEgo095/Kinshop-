@@ -501,6 +501,11 @@ model NotificationLog {
   body      String
   status    String   @default("simulated") // simulated | sent | failed
   provider  String   @default("simulation")
+  // LOT 3 — événement métier à l'origine de la notification (new_order,
+  // order_confirmed, order_ready, order_ready_for_pickup, order_out_for_delivery,
+  // order_delivered, order_picked_up, order_cancelled, order_returned,
+  // delivery_failed, delivery_retry, payment_confirmed, payment_declared)
+  event     String   @default("")
   createdAt DateTime @default(now())
 }
 

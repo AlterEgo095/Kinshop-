@@ -299,6 +299,8 @@ export interface NotificationData {
   body: string
   status: "simulated" | "sent" | "failed"
   provider: string
+  // LOT 3 — événement métier à l'origine de la notification (vide pour l'historique antérieur)
+  event?: string
   createdAt: string
 }
 

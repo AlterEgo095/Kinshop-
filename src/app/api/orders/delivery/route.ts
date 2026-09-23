@@ -8,6 +8,7 @@ import {
   DELIVERY_FAILURE_LABELS,
 } from "@/lib/order-workflow"
 import { restoreOrderStock } from "@/lib/stock"
+import { notifyOrderEvent } from "@/lib/notifier"
 
 // PATCH /api/orders/delivery — Dimension LIVRAISON indépendante (V10)
 // Le vendeur (propriétaire dérivé serveur) fait avancer le statut de livraison :
@@ -26,7 +27,10 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "Paramètres id et deliveryStatus requis." }, { status: 400 })
     }
 
-    const order = await db.order.findUnique({ where: { id } })
+    const order = await db.order.findUnique({
+      where: { id },
+      include: { store: { select: { name: true, whatsapp: true } } },
+    })
     if (!order) return NextResponse.json({ error: "Commande introuvable." }, { status: 404 })
 
     const user = await getUserFromRequest(req)
@@ -139,6 +143,29 @@ export async function PATCH(req: NextRequest) {
       entityType: "order",
       entityId: order.id,
     })
+
+    // LOT 3 — Notifications d'événements (§20) — jamais bloquant.
+    const notifyCtx = {
+      storeId: order.storeId,
+      storeName: order.store.name,
+      storeWhatsapp: order.store.whatsapp,
+      orderId: order.id,
+      ref: order.ref,
+      customerName: order.customerName,
+      customerPhone: order.customerPhone,
+      totalFC: order.totalFC,
+      paymentStatus: order.paymentStatus,
+      actorType: "owner",
+    }
+    if (deliveryStatus === "delivered") {
+      await notifyOrderEvent("order_delivered", notifyCtx)
+    } else if (deliveryStatus === "failed") {
+      await notifyOrderEvent("delivery_failed", { ...notifyCtx, reason: reasonLabel })
+    } else if (deliveryStatus === "returned") {
+      await notifyOrderEvent("order_returned", notifyCtx)
+    } else if (order.deliveryStatus === "failed" && deliveryStatus === "assigned") {
+      await notifyOrderEvent("delivery_retry", notifyCtx)
+    }
 
     return NextResponse.json({ order: { ...updated, status: updated.status } })
   } catch (e) {

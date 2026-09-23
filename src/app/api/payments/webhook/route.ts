@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { isWebhookAuthorized } from "@/lib/mobile-money"
+import { notifyOrderEvent } from "@/lib/notifier"
 
 // POST /api/payments/webhook — Callback de l'agrégateur mobile money (pattern FlexPay)
 // Payload type : { code: "0", reference: "KIN-XXXX", transactionRef: "...", ... }
@@ -28,7 +29,10 @@ export async function POST(req: NextRequest) {
     const transactionRef = String(body.transactionRef ?? "").trim()
     if (!reference) return NextResponse.json({ error: "Référence manquante." }, { status: 400 })
 
-    const order = await db.order.findUnique({ where: { ref: reference } })
+    const order = await db.order.findUnique({
+      where: { ref: reference },
+      include: { store: { select: { name: true, whatsapp: true } } },
+    })
     if (!order) return NextResponse.json({ error: "Commande introuvable." }, { status: 404 })
 
     // Idempotence : déjà traitée
@@ -63,6 +67,22 @@ export async function POST(req: NextRequest) {
           },
         })
         .catch((err) => console.error("orderEvent payment_confirmed (webhook)", err))
+      // LOT 3 — §20 PAYMENT_CONFIRMED : l'acheteur apprend que son paiement est
+      // accepté et le vendeur peut préparer la commande. L'idempotence du
+      // webhook (paiement déjà payé ⇒ sortie anticipée) garantit l'unicité de
+      // la notification. Jamais bloquant.
+      await notifyOrderEvent("payment_confirmed", {
+        storeId: order.storeId,
+        storeName: order.store.name,
+        storeWhatsapp: order.store.whatsapp,
+        orderId: order.id,
+        ref: order.ref,
+        customerName: order.customerName,
+        customerPhone: order.customerPhone,
+        totalFC: order.totalFC,
+        actorType: "system",
+        reason: transactionRef || "",
+      })
       return NextResponse.json({ ok: true, ref: updated.ref, paymentStatus: updated.paymentStatus })
     }
 

@@ -5,6 +5,7 @@ import { logAudit } from "@/lib/audit"
 import { rateLimit, clientIp } from "@/lib/ratelimit"
 import { getActiveInstruction } from "@/lib/direct-payments"
 import { normalizeProofImage, ProofImageError } from "@/lib/payment-proof"
+import { notifyOrderEvent } from "@/lib/notifier"
 
 // P1 (Phase C) — Brique 2 : DÉCLARATION du paiement par l'acheteur.
 //
@@ -66,7 +67,7 @@ export async function POST(req: NextRequest) {
 
     const order = await db.order.findUnique({
       where: { ref },
-      include: { store: { select: { paymentSettings: true } } },
+      include: { store: { select: { paymentSettings: true, name: true, whatsapp: true } } },
     })
     if (!order) return NextResponse.json({ error: "Commande introuvable." }, { status: 404 })
 
@@ -203,6 +204,23 @@ export async function POST(req: NextRequest) {
       actorId: user.id,
       entityType: "order",
       entityId: order.id,
+    })
+
+    // LOT 3 — §20 : le vendeur est notifié de la déclaration (il doit vérifier
+    // l'arrivée des fonds dans son compte opérateur puis confirmer). L'acheteur
+    // n'est pas notifié ici : la réponse écran lui confirme déjà la déclaration.
+    // Jamais bloquant.
+    await notifyOrderEvent("payment_declared", {
+      storeId: order.storeId,
+      storeName: order.store.name,
+      storeWhatsapp: order.store.whatsapp,
+      orderId: order.id,
+      ref: order.ref,
+      customerName: order.customerName,
+      customerPhone: order.customerPhone,
+      totalFC: order.totalFC,
+      actorType,
+      reason: reference || "",
     })
 
     // Le snapshot (s'il existe) est renvoyé à l'acheteur pour confirmation d'écran.

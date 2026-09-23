@@ -13,7 +13,7 @@ import {
   type OrderItem,
   type PaymentMethod,
 } from "@/lib/kinshop"
-import { notifyNewOrder } from "@/lib/notifier"
+import { notifyNewOrder, notifyOrderEvent } from "@/lib/notifier"
 import { getUserFromRequest, requireStoreOwner, unauthorized } from "@/lib/auth"
 import { getEnabledPayments, getConfigValue, isFeatureOn } from "@/lib/config-registry"
 import { resolveProvider } from "@/lib/payments"
@@ -407,7 +407,11 @@ export async function PATCH(req: NextRequest) {
 
     if (!id) return NextResponse.json({ error: "Paramètre id requis." }, { status: 400 })
 
-    const order = await db.order.findUnique({ where: { id } })
+    // LOT 3 — informations boutique requises pour les notifications d'événements
+    const order = await db.order.findUnique({
+      where: { id },
+      include: { store: { select: { name: true, whatsapp: true } } },
+    })
     if (!order) return NextResponse.json({ error: "Commande introuvable." }, { status: 404 })
 
     // Autorisation : soit le propriétaire de la boutique (dérivé serveur), soit l'admin.
@@ -669,6 +673,37 @@ export async function PATCH(req: NextRequest) {
       entityType: "order",
       entityId: order.id,
     })
+
+    // LOT 3 — Notifications d'événements (§20) : chaque transition métier
+    // notifie ses destinataires. Jamais bloquant (les erreurs sont journalisées
+    // par le notifieur, jamais remontées à la requête).
+    const notifyCtx = {
+      storeId: order.storeId,
+      storeName: order.store.name,
+      storeWhatsapp: order.store.whatsapp,
+      orderId: order.id,
+      ref: order.ref,
+      customerName: order.customerName,
+      customerPhone: order.customerPhone,
+      totalFC: order.totalFC,
+      paymentStatus: data.paymentStatus ?? order.paymentStatus,
+      actorType,
+    }
+    if (data.paymentStatus === "paid") {
+      await notifyOrderEvent("payment_confirmed", { ...notifyCtx, reason: order.paymentRef })
+    }
+    if (data.status) {
+      if (data.status === "confirmed") await notifyOrderEvent("order_confirmed", notifyCtx)
+      else if (data.status === "ready") await notifyOrderEvent("order_ready", notifyCtx)
+      else if (data.status === "ready_for_pickup") await notifyOrderEvent("order_ready_for_pickup", notifyCtx)
+      else if (data.status === "out_for_delivery") await notifyOrderEvent("order_out_for_delivery", notifyCtx)
+      else if (data.status === "delivered") {
+        // LOT 2 : un retrait remis en main propre = ORDER_PICKED_UP ; une
+        // livraison remise = ORDER_DELIVERED.
+        await notifyOrderEvent(order.fulfillment === "pickup" ? "order_picked_up" : "order_delivered", notifyCtx)
+      } else if (data.status === "cancelled") await notifyOrderEvent("order_cancelled", notifyCtx)
+      else if (data.status === "returned") await notifyOrderEvent("order_returned", notifyCtx)
+    }
 
     return NextResponse.json({ order: updated })
   } catch (e) {
