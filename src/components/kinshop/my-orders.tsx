@@ -31,6 +31,8 @@ interface MyOrder {
   paymentMethod?: string
   paymentStatus: PaymentStatus | string
   deliveryStatus: string
+  // LOT 2 — mode de réception (retrait en boutique ≠ livraison)
+  fulfillment?: string
   totalUSD: number
   totalFC: number
   createdAt: string
@@ -47,6 +49,7 @@ const STATUS_BADGE: Record<string, string> = {
   confirmed: "bg-teal-100 text-teal-800 border-teal-200",
   processing: "bg-sky-100 text-sky-800 border-sky-200",
   ready: "bg-violet-100 text-violet-800 border-violet-200",
+  ready_for_pickup: "bg-fuchsia-100 text-fuchsia-800 border-fuchsia-200",
   out_for_delivery: "bg-indigo-100 text-indigo-800 border-indigo-200",
   delivered: "bg-emerald-600 text-white border-emerald-600",
   cancelled: "bg-rose-100 text-rose-700 border-rose-200",
@@ -305,7 +308,13 @@ export function MyOrdersView({ onHome }: { onHome: () => void }) {
                       >
                         💳 {PAYMENT_STATUS_LABELS[o.paymentStatus as PaymentStatus] || o.paymentStatus}
                       </Badge>
-                      {o.deliveryStatus !== "not_assigned" && (
+                      {/* LOT 2 — un retrait n'a pas de livraison : badge dédié */}
+                      {o.fulfillment === "pickup" && (
+                        <Badge variant="outline" className="text-[11px]">
+                          🏪 Retrait en boutique
+                        </Badge>
+                      )}
+                      {o.fulfillment !== "pickup" && o.deliveryStatus !== "not_assigned" && (
                         <Badge variant="outline" className="text-[11px]">
                           🚚 {DELIVERY_STATUS_LABELS[o.deliveryStatus] || o.deliveryStatus}
                         </Badge>

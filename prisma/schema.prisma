@@ -242,6 +242,10 @@ model Order {
   deliveryAttempts Int    @default(0) // tentatives (relances après échec)
   deliveryReason   String @default("") // dernier motif structuré (échec/retour)
   deliveryAddress  String @default("") // adresse de livraison libre (complète la zone)
+  // LOT 2 — mode de fulfillment : delivery (livraison, défaut) | pickup (retrait
+  // en boutique). Une commande pickup n'a pas de livraison (ni adresse ni
+  // livreur) — la remise en main propre passe par le statut delivered.
+  fulfillment   String @default("delivery")
   // V6 — Récap commerce détaillé (sous-total − remise + livraison)
   couponCode    String   @default("") // code promo appliqué ("" = aucun)
   discountUSD   Float    @default(0) // remise accordée

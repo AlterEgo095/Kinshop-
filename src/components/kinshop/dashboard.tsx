@@ -33,6 +33,7 @@ import {
   ShoppingCart,
   Sparkles,
   Star,
+  Store,
   TicketPercent,
   Trash2,
   TrendingDown,
@@ -106,6 +107,9 @@ import {
   type StoreData,
   type VendorStats,
 } from "@/lib/kinshop"
+// LOT 2 — retrait différencié : le vendeur choisit le type de chaque option
+// (livraison ou point de retrait) ; les libellés viennent du vocabulaire central.
+import { DELIVERY_KINDS, DELIVERY_KIND_LABELS } from "@/lib/order-workflow"
 import { isPremiumActive, planOf, PLANS } from "@/lib/plans"
 import { StatusStudio } from "@/components/kinshop/status-studio"
 import { ProductImagesEditor } from "@/components/kinshop/product-images-editor"
@@ -148,6 +152,7 @@ const STATUS_CONFIG: Record<string, { label: string; variant: "default" | "secon
   confirmed: { label: "Confirmée", variant: "outline", className: "bg-emerald-100 text-emerald-800 border-emerald-300" },
   processing: { label: "En préparation", variant: "outline", className: "bg-sky-100 text-sky-800 border-sky-300" },
   ready: { label: "Prête", variant: "outline", className: "bg-violet-100 text-violet-800 border-violet-300" },
+  ready_for_pickup: { label: "Prête au retrait", variant: "outline", className: "bg-fuchsia-100 text-fuchsia-800 border-fuchsia-300" },
   out_for_delivery: { label: "En livraison", variant: "outline", className: "bg-indigo-100 text-indigo-800 border-indigo-300" },
   delivered: { label: "Livrée", variant: "default", className: "bg-emerald-600 text-white border-emerald-600" },
   cancelled: { label: "Annulée", variant: "destructive", className: "" },
@@ -295,6 +300,8 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
   const [zones, setZones] = useState<DeliveryZoneData[]>([])
   const [zName, setZName] = useState("")
   const [zFee, setZFee] = useState("")
+  // LOT 2 — type de la prochaine zone/option (livraison ou point de retrait)
+  const [zKind, setZKind] = useState("standard")
   const [zSaving, setZSaving] = useState(false)
 
   const [coupons, setCoupons] = useState<CouponData[]>([])
@@ -586,7 +593,7 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
       const res = await fetch("/api/delivery-zones", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ slug, name: zName.trim(), feeFC: Number(zFee) || 0 }),
+        body: JSON.stringify({ slug, name: zName.trim(), feeFC: Number(zFee) || 0, kind: zKind }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "Erreur lors de l'ajout de la zone.")
@@ -1828,6 +1835,7 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
                           paymentMethod={order.paymentMethod}
                           paymentStatus={order.paymentStatus}
                           paymentRef={order.paymentRef}
+                          fulfillment={(order as OrderData & { fulfillment?: string }).fulfillment ?? "delivery"}
                           deliveryStatus={(order as OrderData & { deliveryStatus?: string }).deliveryStatus ?? "not_assigned"}
                           deliveryAttempts={(order as OrderData & { deliveryAttempts?: number }).deliveryAttempts ?? 0}
                           onChanged={loadOrders}
@@ -2161,8 +2169,8 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
                       <Truck className="w-5 h-5 text-emerald-700" />
                     </div>
                     <div>
-                      <p className="font-bold leading-tight">Zones de livraison</p>
-                      <p className="text-xs text-muted-foreground">Frais ajoutés automatiquement au checkout</p>
+                      <p className="font-bold leading-tight">Livraison & retrait</p>
+                      <p className="text-xs text-muted-foreground">Frais ajoutés au checkout · retrait sans adresse</p>
                     </div>
                   </div>
                   <div className="flex gap-2">
@@ -2187,6 +2195,22 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
                       {zSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
                     </Button>
                   </div>
+                  {/* LOT 2 — type d'option : livraison OU point de retrait en boutique */}
+                  <div className="flex items-center gap-2">
+                    <Label className="text-xs text-muted-foreground shrink-0">Type</Label>
+                    <Select value={zKind} onValueChange={setZKind}>
+                      <SelectTrigger className="h-9 flex-1" aria-label="Type d'option (livraison ou retrait)">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {DELIVERY_KINDS.map((k) => (
+                          <SelectItem key={k} value={k}>
+                            {DELIVERY_KIND_LABELS[k]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                   {zones.length === 0 ? (
                     <p className="text-sm text-muted-foreground text-center py-4 border border-dashed rounded-xl">
                       Aucune zone — tes clients tapent librement leur commune (0 FC de frais).
@@ -2200,11 +2224,16 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
                         >
                           <div className="flex-1 min-w-0">
                             <p className="font-semibold text-sm truncate flex items-center gap-1.5">
-                              <Truck className="w-3.5 h-3.5 text-primary shrink-0" />
+                              {z.kind === "pickup" ? (
+                                <Store className="w-3.5 h-3.5 text-violet-600 shrink-0" />
+                              ) : (
+                                <Truck className="w-3.5 h-3.5 text-primary shrink-0" />
+                              )}
                               {z.name}
                             </p>
                             <p className="text-xs text-muted-foreground">
-                              {z.feeFC > 0 ? `${formatFC(z.feeFC)} de frais` : "Livraison gratuite"}
+                              {z.feeFC > 0 ? `${formatFC(z.feeFC)} de frais` : z.kind === "pickup" ? "Retrait gratuit" : "Livraison gratuite"}
+                              {z.kind === "pickup" ? " · point de retrait" : ""}
                               {!z.active && " · masquée"}
                             </p>
                           </div>

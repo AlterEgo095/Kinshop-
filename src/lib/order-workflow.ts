@@ -12,6 +12,7 @@ export type OrderStatus =
   | "confirmed"
   | "processing"
   | "ready"
+  | "ready_for_pickup" // LOT 2 — préparée et attendant le client en boutique
   | "out_for_delivery"
   | "delivered"
   | "cancelled"
@@ -20,7 +21,7 @@ export type OrderStatus =
   | "disputed"
 
 export const ORDER_STATUSES: OrderStatus[] = [
-  "new", "paid", "confirmed", "processing", "ready", "out_for_delivery",
+  "new", "paid", "confirmed", "processing", "ready", "ready_for_pickup", "out_for_delivery",
   "delivered", "cancelled", "returned", "refunded", "disputed",
 ]
 
@@ -28,9 +29,15 @@ export const ORDER_STATUSES: OrderStatus[] = [
 export const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   new: ["confirmed", "cancelled"],
   paid: ["confirmed", "cancelled"],
-  confirmed: ["processing", "ready", "delivered", "cancelled"],
-  processing: ["ready", "out_for_delivery", "delivered", "cancelled"],
-  ready: ["out_for_delivery", "delivered", "cancelled"],
+  confirmed: ["processing", "ready", "ready_for_pickup", "delivered", "cancelled"],
+  processing: ["ready", "ready_for_pickup", "out_for_delivery", "delivered", "cancelled"],
+  // LOT 2 — « ready » (préparée) peut basculer en retrait si le client vient
+  // finalement chercher sa commande ; l'inverse reste interdit (jamais de
+  // retrait qui part en livraison).
+  ready: ["out_for_delivery", "ready_for_pickup", "delivered", "cancelled"],
+  // LOT 2 — une commande prête pour le retrait attend le client en boutique :
+  // remise en main propre (delivered) ou annulation. JAMAIS « en livraison ».
+  ready_for_pickup: ["delivered", "cancelled"],
   out_for_delivery: ["delivered", "returned"],
   delivered: ["returned", "refunded", "disputed"],
   cancelled: [], // terminal
@@ -50,6 +57,7 @@ export const ORDER_STATUS_LABELS: Record<string, string> = {
   confirmed: "Confirmée",
   processing: "En préparation",
   ready: "Prête pour livraison",
+  ready_for_pickup: "Prête pour le retrait",
   out_for_delivery: "En livraison",
   delivered: "Livrée",
   cancelled: "Annulée",
@@ -211,10 +219,16 @@ export const EVENT_TYPE_LABELS: Record<string, string> = {
   stock_restored: "Stock restitué",
 }
 
-/* ─────────── Options de livraison (module boutique) ─────────── */
+/* ─────────── Options de livraison (module boutique) ───────────
+   LOT 2 — « pickup » est un mode de FULFILLMENT à part entière (retrait en
+   boutique) : une commande créée sur une zone pickup n'a jamais de livraison
+   (pas d'adresse, pas de livreur) — la remise en main propre la clôture. */
 export type DeliveryKind = "standard" | "express" | "pickup" | "local" | "national"
 
 export const DELIVERY_KINDS: DeliveryKind[] = ["standard", "express", "pickup", "local", "national"]
+
+/** LOT 2 — types d'option ouvrant le mode de fulfillment RETRAIT (vs livraison). */
+export const PICKUP_KINDS: DeliveryKind[] = ["pickup"]
 
 export const DELIVERY_KIND_LABELS: Record<DeliveryKind, string> = {
   standard: "Livraison standard",

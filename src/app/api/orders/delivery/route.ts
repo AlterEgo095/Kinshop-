@@ -35,6 +35,17 @@ export async function PATCH(req: NextRequest) {
     if (!guard.ok) return guard.response
     const actorLabel = user.name || user.email
 
+    // LOT 2 — cohérence fulfillment : une commande en RETRAIT en boutique n'a
+    // pas de livraison (le client vient chercher). Aucun livreur ne peut être
+    // assigné ; la remise en main propre se fait via le statut « Remise »
+    // (ready_for_pickup → delivered), jamais via la dimension livraison.
+    if (order.fulfillment === "pickup") {
+      return NextResponse.json(
+        { error: "Commande en retrait en boutique : la livraison ne s'applique pas. Marquez la commande « Remise » au moment de la remise en main propre." },
+        { status: 400 },
+      )
+    }
+
     if (deliveryStatus === order.deliveryStatus) {
       return NextResponse.json({ error: "La livraison est déjà dans cet état." }, { status: 400 })
     }

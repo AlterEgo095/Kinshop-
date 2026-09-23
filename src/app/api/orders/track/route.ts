@@ -84,6 +84,8 @@ export async function GET(req: NextRequest) {
       couponCode: order.couponCode,
       deliveryZone: order.deliveryZone,
       deliveryFeeFC: order.deliveryFeeFC,
+      // LOT 2 — la frise de suivi s'adapte au retrait en boutique
+      fulfillment: order.fulfillment,
       totalUSD: order.totalUSD,
       totalFC: order.totalFC,
       createdAt: order.createdAt.toISOString(),

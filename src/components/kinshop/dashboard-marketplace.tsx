@@ -40,6 +40,7 @@ export function OrderWorkflowControls({
   paymentRef: declaredRef,
   deliveryStatus,
   deliveryAttempts,
+  fulfillment,
   onChanged,
 }: {
   orderId: string
@@ -50,6 +51,8 @@ export function OrderWorkflowControls({
   paymentRef?: string
   deliveryStatus: string
   deliveryAttempts: number
+  // LOT 2 — mode de fulfillment : delivery (défaut) | pickup (retrait boutique)
+  fulfillment?: string
   onChanged: () => void
 }) {
   const [busy, setBusy] = useState(false)
@@ -74,6 +77,9 @@ export function OrderWorkflowControls({
   const [invoiceLoading, setInvoiceLoading] = useState(false)
 
   const nextStatuses = ORDER_TRANSITIONS[status as keyof typeof ORDER_TRANSITIONS] ?? []
+  // LOT 2 — un retrait n'a pas de dimension livraison : pas de livreur, la
+  // remise en main propre clôture la commande (bouton « Remise »).
+  const isPickup = fulfillment === "pickup"
   const nextDelivery = DELIVERY_TRANSITIONS[deliveryStatus as keyof typeof DELIVERY_TRANSITIONS] ?? []
   const cashConfirmable = paymentMethod === "cash" && !["paid", "refunded"].includes(paymentStatus) &&
     !["new", "cancelled", "returned", "refunded", "disputed"].includes(status)
@@ -219,8 +225,8 @@ export function OrderWorkflowControls({
           disabled={busy}
           onClick={() => callOrders({ status: s })}
         >
-          {s === "delivered" ? "✅ " : s === "cancelled" ? "✖ " : ""}
-          {ORDER_STATUS_LABELS[s] ?? s}
+          {s === "delivered" ? (isPickup ? "🤝 " : "✅ ") : s === "cancelled" ? "✖ " : ""}
+          {s === "delivered" && isPickup ? "Remise" : ORDER_STATUS_LABELS[s] ?? s}
         </Button>
       ))}
 
@@ -269,8 +275,9 @@ export function OrderWorkflowControls({
         </Button>
       )}
 
-      {/* Pilotage livraison (dimension indépendante) */}
-      {nextDelivery.map((d) =>
+      {/* LOT 2 — Pilotage livraison (dimension indépendante) : masqué pour un
+          retrait en boutique — aucun livreur, la remise passe par « Remise » */}
+      {!isPickup && nextDelivery.map((d) =>
         d === "failed" ? (
           <Button
             key={d}

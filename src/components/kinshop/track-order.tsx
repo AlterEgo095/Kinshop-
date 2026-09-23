@@ -41,10 +41,20 @@ const STEPS: { status: string; label: string; desc: string; emoji: string }[] = 
   { status: "delivered", label: "Livrée", desc: "Commande remise au client", emoji: "🎉" },
 ]
 
+// LOT 2 — parcours de suivi dédié au retrait en boutique (remise en main
+// propre) : « Prête pour le retrait » remplace les étapes de livraison.
+const PICKUP_STEPS: { status: string; label: string; desc: string; emoji: string }[] = [
+  { status: "new", label: "Commande reçue", desc: "Le vendeur a été notifié", emoji: "📦" },
+  { status: "confirmed", label: "Confirmée", desc: "Le vendeur prépare ta commande", emoji: "✅" },
+  { status: "ready_for_pickup", label: "Prête pour le retrait", desc: "Viens la chercher en boutique", emoji: "🏪" },
+  { status: "delivered", label: "Remise", desc: "Commande remise en main propre", emoji: "🎉" },
+]
+
 const STATUS_BADGE: Record<string, { label: string; className: string }> = {
   new: { label: "Reçue", className: "bg-amber-100 text-amber-800 border-amber-300" },
   paid: { label: "Payée en ligne", className: "bg-emerald-50 text-emerald-700 border-emerald-400" },
   confirmed: { label: "Confirmée", className: "bg-emerald-100 text-emerald-800 border-emerald-300" },
+  ready_for_pickup: { label: "Prête au retrait", className: "bg-fuchsia-100 text-fuchsia-800 border-fuchsia-300" },
   delivered: { label: "Livrée", className: "bg-emerald-600 text-white border-emerald-600" },
   cancelled: { label: "Annulée", className: "bg-red-100 text-red-700 border-red-300" },
 }
@@ -87,7 +97,9 @@ export function TrackOrderView({ initialRef, onHome }: TrackOrderViewProps) {
     }
   }, [initialRef, lookup])
 
-  const stepIndex = order ? STEPS.findIndex((s) => s.status === order.status) : -1
+  // LOT 2 — la frise s'adapte au mode de réception (retrait ≠ livraison)
+  const steps = order?.fulfillment === "pickup" ? PICKUP_STEPS : STEPS
+  const stepIndex = order ? steps.findIndex((s) => s.status === order.status) : -1
 
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-b from-emerald-50/50 to-background">
@@ -195,7 +207,7 @@ export function TrackOrderView({ initialRef, onHome }: TrackOrderViewProps) {
               <Card>
                 <CardContent className="p-5">
                   <ol className="space-y-0">
-                    {STEPS.map((step, i) => {
+                    {steps.map((step, i) => {
                       const done = stepIndex >= i
                       const current = stepIndex === i
                       return (
@@ -208,7 +220,7 @@ export function TrackOrderView({ initialRef, onHome }: TrackOrderViewProps) {
                             ) : (
                               <Circle className="w-6 h-6 text-muted-foreground/30" />
                             )}
-                            {i < STEPS.length - 1 && (
+                            {i < steps.length - 1 && (
                               <span
                                 className={`w-0.5 flex-1 min-h-8 my-1 rounded ${stepIndex > i ? "bg-emerald-500" : "bg-border"}`}
                               />

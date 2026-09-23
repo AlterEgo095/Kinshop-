@@ -98,15 +98,23 @@ export async function POST(req: NextRequest) {
     let zoneName = String(body.zone || "").slice(0, 80)
     let deliveryFeeFC = 0
     const zoneId = String(body.zoneId || "")
+    // LOT 2 — retrait différencié : une zone de kind « pickup » fait de la
+    // commande un RETRAIT en boutique (pas une livraison). Le point de retrait
+    // est la boutique — la zone ne sert que de libellé (frais éventuels
+    // conservés, calculés côté serveur comme pour une livraison).
+    let fulfillment: "delivery" | "pickup" = "delivery"
     if (zoneId) {
       const zone = await db.deliveryZone.findFirst({ where: { id: zoneId, storeId: store.id, active: true } })
       if (zone) {
         zoneName = zone.name
         deliveryFeeFC = zone.feeFC
+        if (zone.kind === "pickup") fulfillment = "pickup"
       }
     }
-    // V10 — Adresse de livraison libre (complète la zone)
-    const deliveryAddress = String(body.deliveryAddress || "").slice(0, 200)
+    // V10 — Adresse de livraison libre (complète la zone).
+    // LOT 2 : une commande retrait n'a pas d'adresse de livraison — le serveur
+    // écrase toute valeur reçue (jamais d'adresse factice sur un retrait).
+    const deliveryAddress = fulfillment === "pickup" ? "" : String(body.deliveryAddress || "").slice(0, 200)
 
     // V6 — Code promo : validation serveur (jamais faire confiance au client)
     let discountUSD = 0
@@ -197,6 +205,8 @@ export async function POST(req: NextRequest) {
         deliveryZone: zoneName,
         deliveryFeeFC,
         deliveryAddress,
+        // LOT 2 — mode de fulfillment inscrit à la création (jamais réécrit ensuite)
+        fulfillment,
         paymentMethod: method,
             // V10 — état initial via le fournisseur (espèces = cash_pending, jamais « payée »)
             paymentStatus: provider.kind === "cash" ? "cash_pending" : "unpaid",
@@ -312,6 +322,7 @@ export async function POST(req: NextRequest) {
       discountUSD,
       couponCode,
       deliveryFeeFC,
+      fulfillment,
     })
 
     // V2 — Notification SMS vendeur + client (jamais bloquante, simulée si fournisseur absent)
@@ -504,6 +515,14 @@ export async function PATCH(req: NextRequest) {
         if (!canTransitionOrder(order.status, status)) {
           return NextResponse.json(
             { error: `Transition interdite : ${order.status} → ${status}.` },
+            { status: 400 },
+          )
+        }
+        // LOT 2 — cohérence fulfillment : une commande retrait ne part JAMAIS
+        // « en livraison » — la remise en main propre passe par delivered.
+        if (order.fulfillment === "pickup" && status === "out_for_delivery") {
+          return NextResponse.json(
+            { error: "Commande en retrait en boutique : la mise en livraison ne s'applique pas — marquez-la « Remise » lors de la remise en main propre." },
             { status: 400 },
           )
         }

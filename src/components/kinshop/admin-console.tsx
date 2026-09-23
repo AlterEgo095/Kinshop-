@@ -336,6 +336,7 @@ const ORDER_STATUS_META: Record<OrderStatus, { label: string; badge: string }> =
   confirmed: { label: "Confirmée", badge: "bg-teal-100 text-teal-800 border-teal-200" },
   processing: { label: "En préparation", badge: "bg-blue-100 text-blue-800 border-blue-200" },
   ready: { label: "Prête pour livraison", badge: "bg-indigo-100 text-indigo-800 border-indigo-200" },
+  ready_for_pickup: { label: "Prête pour le retrait", badge: "bg-fuchsia-100 text-fuchsia-800 border-fuchsia-200" },
   out_for_delivery: { label: "En livraison", badge: "bg-sky-100 text-sky-800 border-sky-200" },
   delivered: { label: "Livrée", badge: "bg-emerald-600 text-white border-emerald-600" },
   cancelled: { label: "Annulée", badge: "bg-rose-100 text-rose-700 border-rose-200" },

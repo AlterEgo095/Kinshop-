@@ -42,6 +42,8 @@ export async function GET(req: NextRequest) {
         paymentMethod: o.paymentMethod,
         paymentStatus: o.paymentStatus,
         deliveryStatus: o.deliveryStatus,
+        // LOT 2 — le client sait qu'une commande est un retrait en boutique
+        fulfillment: o.fulfillment,
         totalUSD: o.totalUSD,
         totalFC: o.totalFC,
         createdAt: o.createdAt.toISOString(),

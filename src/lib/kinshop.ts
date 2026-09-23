@@ -213,6 +213,8 @@ export interface OrderData {
   deliveryZone: string
   deliveryFeeFC: number
   note: string
+  // LOT 2 — mode de fulfillment : delivery (défaut, commandes legacy) | pickup
+  fulfillment?: string
   status: OrderStatus
   createdAt: string
 }
@@ -323,6 +325,10 @@ export interface DeliveryZoneData {
   name: string
   feeFC: number
   active: boolean
+  // V10 — type d'option (standard/express/pickup/local/national) + délai estimé.
+  // LOT 2 : kind=pickup ⇒ retrait en boutique (pas de livraison côté checkout).
+  kind?: string
+  etaLabel?: string
   createdAt: string
 }
 
@@ -405,6 +411,8 @@ export interface TrackOrderData {
   couponCode: string
   deliveryZone: string
   deliveryFeeFC: number
+  // LOT 2 — suivi public : la frise s'adapte au mode de réception
+  fulfillment?: string
   totalUSD: number
   totalFC: number
   createdAt: string
@@ -514,6 +522,8 @@ export function buildOrderMessage(params: {
   discountUSD?: number
   couponCode?: string
   deliveryFeeFC?: number
+  // LOT 2 — mode de réception (le message WhatsApp reflète le retrait)
+  fulfillment?: string
 }): string {
   const lines: string[] = []
   lines.push("🛍️ NOUVELLE COMMANDE — KinShop")
@@ -523,7 +533,8 @@ export function buildOrderMessage(params: {
   lines.push("")
   lines.push(`👤 Client : ${params.customerName}`)
   lines.push(`📞 Tél : ${formatPhoneDisplay(params.customerPhone)}`)
-  if (params.zone) lines.push(`📍 Zone : ${params.zone}`)
+  // LOT 2 — un retrait s'annonce comme retrait (jamais « zone de livraison »)
+  if (params.zone) lines.push(params.fulfillment === "pickup" ? `🏪 Retrait en boutique : ${params.zone}` : `📍 Zone : ${params.zone}`)
   lines.push("")
   lines.push("📦 Produits :")
   for (const it of params.items) {

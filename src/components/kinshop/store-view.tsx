@@ -21,6 +21,7 @@ import {
   ShieldCheck,
   Smartphone,
   Star,
+  Store,
   TicketPercent,
   Trash2,
   Truck,
@@ -405,6 +406,9 @@ export function StoreView({ slug, onBack, platformRate, config = {}, authUser = 
   // V6 — Prévisualisation des totaux (sous-total − remise + livraison). Le serveur fait foi.
   const activeZones = useMemo(() => (zonesEnabled ? zones.filter((z) => z.active) : []), [zones, zonesEnabled])
   const selectedZone = activeZones.find((z) => z.id === cZoneId) || null
+  // LOT 2 — retrait différencié : la zone choisie de type « pickup » transforme
+  // le checkout en retrait en boutique (pas d'adresse de livraison requise).
+  const pickupSelected = selectedZone?.kind === "pickup"
   const discountUSD = coupon ? computeCouponDiscount(coupon, totalUSD) : 0
   const previewTotals = computeOrderTotals({
     subtotalUSD: totalUSD,
@@ -545,7 +549,8 @@ export function StoreView({ slug, onBack, platformRate, config = {}, authUser = 
           couponCode: coupon && discountUSD > 0 ? coupon.code : "",
           paymentMethod: effectivePayment,
           note: cNote,
-          deliveryAddress: cAddress,
+          // LOT 2 — un retrait n'a pas d'adresse de livraison (le serveur écrase aussi)
+          deliveryAddress: pickupSelected ? "" : cAddress,
           items: cart.map((l) => ({ productId: l.product.id, qty: l.qty })),
         }),
       })
@@ -1877,7 +1882,19 @@ export function StoreView({ slug, onBack, platformRate, config = {}, authUser = 
                   )}
                 </div>
 
-                {/* V10 — Adresse de livraison précise (recommandée pour la remise) */}
+                {/* LOT 2 — retrait différencié : pas d'adresse de livraison pour
+                    un retrait en boutique (le point de retrait EST la boutique) */}
+                {pickupSelected ? (
+                  <div className="rounded-xl border border-violet-200 bg-violet-50 p-3 text-sm text-violet-900 flex items-start gap-2">
+                    <Store className="w-4 h-4 mt-0.5 shrink-0 text-violet-700" />
+                    <div className="min-w-0">
+                      <p className="font-semibold">Retrait en boutique{selectedZone ? ` — ${selectedZone.name}` : ""}</p>
+                      <p className="text-xs text-violet-700">
+                        Tu viendras chercher ta commande sur place. Le vendeur te préviendra dès qu'elle sera prête{selectedZone && selectedZone.feeFC > 0 ? ` (frais de préparation : ${formatFC(selectedZone.feeFC)})` : ""}.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
                 <div className="space-y-1.5">
                   <Label htmlFor="cAddress">Adresse / repère de livraison</Label>
                   <Input
@@ -1888,11 +1905,12 @@ export function StoreView({ slug, onBack, platformRate, config = {}, authUser = 
                     maxLength={200}
                   />
                 </div>
+                )}
 
                 {/* V6 — Zones de livraison tarifées configurées par le vendeur */}
                 {activeZones.length > 0 && (
                   <div className="space-y-1.5">
-                    <Label>Zone de livraison *</Label>
+                    <Label>Mode de réception *</Label>
                     <div className="grid gap-2 max-h-44 overflow-y-auto scrollbar-thin pr-1">
                       {activeZones.map((z) => (
                         <button
@@ -1905,7 +1923,11 @@ export function StoreView({ slug, onBack, platformRate, config = {}, authUser = 
                           }`}
                         >
                           <span className="font-medium text-sm flex items-center gap-1.5 min-w-0">
-                            <Truck className="w-4 h-4 text-primary shrink-0" />
+                            {z.kind === "pickup" ? (
+                              <Store className="w-4 h-4 text-violet-600 shrink-0" />
+                            ) : (
+                              <Truck className="w-4 h-4 text-primary shrink-0" />
+                            )}
                             <span className="min-w-0">
                               <span className="block truncate">{z.name}</span>
                               {(z as DeliveryZoneData & { kind?: string; etaLabel?: string }).kind && (
@@ -2014,9 +2036,13 @@ export function StoreView({ slug, onBack, platformRate, config = {}, authUser = 
                   {selectedZone && (
                     <div className="flex items-center justify-between">
                       <span className="text-muted-foreground flex items-center gap-1">
-                        <Truck className="w-3.5 h-3.5" /> Livraison — {selectedZone.name}
+                        {pickupSelected ? (
+                          <><Store className="w-3.5 h-3.5" /> Retrait — {selectedZone.name}</>
+                        ) : (
+                          <><Truck className="w-3.5 h-3.5" /> Livraison — {selectedZone.name}</>
+                        )}
                       </span>
-                      <span className="font-medium">{selectedZone.feeFC > 0 ? formatFC(selectedZone.feeFC) : "Gratuite"}</span>
+                      <span className="font-medium">{selectedZone.feeFC > 0 ? formatFC(selectedZone.feeFC) : pickupSelected ? "Gratuit" : "Gratuite"}</span>
                     </div>
                   )}
                   <div className="flex items-center justify-between font-extrabold text-base pt-1.5 border-t">
