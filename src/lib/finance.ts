@@ -20,10 +20,14 @@
 //     (totalFC recalculé serveur) ou du payload vérifié Chariow (sale.amount) —
 //     JAMAIS d'une entrée client ; AUCUNE conversion silencieuse (une écriture
 //     garde sa devise native : FC pour le marketplace, USD pour Chariow) ;
-//   • SANS FAUX MÉCANISMES : commission figée à 0 (aucun prélèvement réel — la
-//     clé finance.commissionPercent reste inerte) ; pas de solde stocké (les
-//     agrégats se calculent depuis les écritures) ; pas d'exposition vendeur
-//     (aucune API /api/wallet, aucun écran vendeur) — lecture admin seule.
+//   • COMMISSION RÉELLE (cycle 3) : la clé finance.commissionPercent (console
+//     admin, 0–50, défaut 0 = aucun prélèvement) est appliquée aux NOUVELLES
+//     écritures vendeur (SALE / DELIVERY_CASH) au moment de l'écriture — les
+//     écritures déjà posées restent inchangées (append-only) ; la part
+//     remboursée annule la commission correspondante (COMMISSION_REVERSAL) ;
+//     pas de solde stocké (les agrégats se calculent depuis les écritures) ;
+//     pas d'exposition vendeur (aucune API /api/wallet, aucun écran vendeur)
+//     — lecture admin seule.
 //
 // MACHINE D'ÉTATS DES ÉCRITURES (réservée) : PENDING → CONFIRMED → AVAILABLE.
 // Le mode ombre écrit directement CONFIRMED (le fait d'argent est déjà vérifié
@@ -31,12 +35,14 @@
 // future machinerie de retraits (P10 — décision business, hors Phase E).
 
 import { db } from "@/lib/db"
+import { getConfigValue } from "@/lib/config-registry"
 
 export const LEDGER_ENTRY_TYPES = [
   "SALE", // encaissement Mobile Money direct confirmé (vendeur)
   "DELIVERY_CASH", // encaissement espèces confirmé (vendeur)
   "REFUND", // remboursement exécuté (contrepartie négative)
-  "ADJUSTMENT", // correction contrôlée (réservé — jamais écrit en Phase E)
+  "COMMISSION_REVERSAL", // renonciation plateforme à sa commission sur la part remboursée (cycle 3)
+  "ADJUSTMENT", // correction contrôlée (réservé — jamais écrit)
 ] as const
 export type LedgerEntryType = (typeof LEDGER_ENTRY_TYPES)[number]
 
@@ -73,6 +79,28 @@ export async function getOrCreateWalletId(storeId: string): Promise<string | nul
   }
 }
 
+/* ─────────── Commission plateforme (cycle 3 — consommateur de la clé P9) ─────────── */
+
+/**
+ * Pourcentage de commission plateforme applicable aux encaissements vendeurs
+ * (SALE / DELIVERY_CASH), lu au moment de l'écriture depuis la clé
+ * finance.commissionPercent (console admin, 0–50, défaut 0 = aucun
+ * prélèvement). En cas d'échec de lecture : 0 — le ledger ne bloque JAMAIS le
+ * flux métier (mode ombre). La valeur s'applique aux SEULES écritures créées
+ * après son changement (append-only : aucune rétroécriture) et ne touche pas
+ * les revenus Chariow (scope platform — déjà des revenus KinShop).
+ */
+export async function getVendorCommissionPercent(): Promise<number> {
+  try {
+    const raw = await getConfigValue<number>("finance.commissionPercent")
+    const pct = Number(raw)
+    if (!Number.isFinite(pct)) return 0
+    return Math.min(50, Math.max(0, Math.round(pct * 100) / 100))
+  } catch {
+    return 0
+  }
+}
+
 /* ─────────── Écritures idempotentes (JAMAIS bloquantes) ─────────── */
 
 interface LedgerWriteInput {
@@ -80,6 +108,7 @@ interface LedgerWriteInput {
   kind: string // premium | boost | order | collection (contexte métier de reporting)
   type: LedgerEntryType
   amount: number // signe porté : crédit vendeur/revenu > 0, débit < 0
+  commission?: number // part plateforme figée sur un crédit vendeur (défaut 0, jamais > montant)
   currency: string // FC (marketplace) ou USD (Chariow) — jamais converti
   psPSource: string // direct | cash | chariow | refund
   reference: string // clé d'idempotence métier (orderId ou saleId/refundId)
@@ -87,6 +116,17 @@ interface LedgerWriteInput {
   walletId?: string | null // obligatoire pour scope vendor
   orderId?: string | null
   note: string
+}
+
+/**
+ * Normalise la commission d'une écriture : >= 0, arrondie au centime et
+ * bornée au crédit écrit (une commission ne peut jamais dépasser le montant
+ * encaissé ni s'appliquer à un débit). Défaut : 0 (aucun prélèvement).
+ */
+function normalizeCommission(raw: number, amount: number): number {
+  if (!Number.isFinite(raw) || raw <= 0 || amount <= 0) return 0
+  const rounded = Math.round(raw * 100) / 100
+  return Math.min(rounded, amount)
 }
 
 /**
@@ -111,7 +151,7 @@ export async function recordLedgerEntry(w: LedgerWriteInput): Promise<boolean> {
           type: w.type,
           status: "CONFIRMED",
           amount: w.amount,
-          commission: 0, // mode ombre : aucun prélèvement (clé P9 inerte)
+          commission: normalizeCommission(w.commission ?? 0, w.amount),
           currency: w.currency,
           psPSource: w.psPSource,
           reference: w.reference.slice(0, 191),
@@ -152,18 +192,25 @@ export async function recordVendorPaymentEntry(opts: {
     const amount = Number.isFinite(opts.amountFC) ? Math.round(opts.amountFC * 100) / 100 : 0
     const declared =
       opts.declaredRef && opts.declaredRef.trim() ? ` — réf déclarée ${opts.declaredRef.trim()}` : ""
+    // Commission plateforme (cycle 3) : pourcentage configuré appliqué au
+    // montant encaissé et FIGÉ sur l'écriture au moment de l'écriture
+    // (défaut 0 = aucun prélèvement ; aucune rétroécriture possible).
+    const pct = await getVendorCommissionPercent()
+    const commission = pct > 0 ? Math.round(amount * pct) / 100 : 0
+    const commissionNote = commission > 0 ? ` — commission ${commission} FC (${pct} %)` : ""
     await recordLedgerEntry({
       scope: "vendor",
       kind: opts.type === "DELIVERY_CASH" ? "collection" : "order",
       type: opts.type,
       amount,
+      commission,
       currency: "FC",
       psPSource: opts.type === "DELIVERY_CASH" ? "cash" : "direct",
       reference: opts.orderId,
       storeId: opts.storeId,
       walletId,
       orderId: opts.orderId,
-      note: `Commande ${opts.orderRef} — encaissement confirmé par ${opts.actorLabel}${declared}`,
+      note: `Commande ${opts.orderRef} — encaissement confirmé par ${opts.actorLabel}${declared}${commissionNote}`,
     })
   } catch (e) {
     console.error("[finance] recordVendorPaymentEntry (non bloquant)", e)
@@ -243,6 +290,43 @@ export async function recordRefundEntry(opts: {
       orderId: opts.orderId,
       note: `Commande ${opts.orderRef} — remboursement $${opts.amountUSD.toFixed(2)} exécuté${opts.reference ? ` (réf ${opts.reference})` : ""}`,
     })
+    // Commission remboursée (cycle 3) : si l'encaissement d'origine portait
+    // une commission, la plateforme renonce à sa part sur la portion
+    // remboursée — écriture positive miroir (COMMISSION_REVERSAL,
+    // idempotente par remboursement via l'index unique), JAMAIS bloquante.
+    // Une écriture d'origine sans commission (0, historique) ne produit RIEN.
+    try {
+      const original = await db.ledgerEntry.findFirst({
+        where: {
+          scope: "vendor",
+          orderId: opts.orderId,
+          type: { in: ["SALE", "DELIVERY_CASH"] },
+        },
+        select: { commission: true },
+      })
+      const originalCommission = original?.commission ?? 0
+      if (originalCommission > 0) {
+        const reversal = Math.round(originalCommission * ratio * 100) / 100
+        if (reversal > 0) {
+          await recordLedgerEntry({
+            scope: "vendor",
+            kind: "refund",
+            type: "COMMISSION_REVERSAL",
+            amount: reversal,
+            commission: 0,
+            currency: "FC",
+            psPSource: "refund",
+            reference: opts.refundId,
+            storeId: opts.storeId,
+            walletId,
+            orderId: opts.orderId,
+            note: `Commande ${opts.orderRef} — commission reversée sur remboursement (${Math.round(ratio * 100)} % de ${originalCommission} FC)`,
+          })
+        }
+      }
+    } catch (e) {
+      console.error("[finance] commission reversal (non bloquant)", e)
+    }
   } catch (e) {
     console.error("[finance] recordRefundEntry (non bloquant)", e)
   }

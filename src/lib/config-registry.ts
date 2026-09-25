@@ -431,7 +431,7 @@ export const CONFIG_SPECS: ConfigSpec[] = [
       "confirmer manuellement si l'argent est arrivé. 0 = expiration désactivée.",
   },
 
-  /* ─────────── Finances (préparatoire — P9, SANS EFFET) ─────────── */
+  /* ─────────── Finances (commission — cycle 3) ─────────── */
   {
     key: "finance.commissionPercent",
     section: "finance",
@@ -440,10 +440,13 @@ export const CONFIG_SPECS: ConfigSpec[] = [
     public: false,
     min: 0,
     max: 50,
-    label: "Commission plateforme (% — PRÉPARATOIRE, sans effet)",
+    label: "Commission plateforme (% des encaissements vendeurs)",
     description:
-      "P9 — clé préparatoire AUCUN consommateur : aucune commission n'est calculée, prélevée ni " +
-      "affichée tant que la logique réelle n'est pas décidée (Phase E). Modifiable ici, inerte ailleurs.",
+      "Cycle 3 — commission appliquée aux NOUVELLES écritures vendeur du ledger (encaissements MM " +
+      "direct et espèces confirmés) au moment de l'écriture. 0 = aucun prélèvement (défaut). Les " +
+      "écritures déjà posées restent inchangées (append-only) ; la part remboursée annule la " +
+      "commission correspondante (COMMISSION_REVERSAL). Ne s'applique PAS aux revenus Chariow " +
+      "(déjà revenus plateforme).",
   },
   {
     key: "finance.commissionLabel",
@@ -452,8 +455,8 @@ export const CONFIG_SPECS: ConfigSpec[] = [
     default: "",
     public: false,
     maxLength: 60,
-    label: "Libellé commission (PRÉPARATOIRE, sans effet)",
-    description: "P9 — clé préparatoire sans consommateur (décision business en Phase E).",
+    label: "Libellé commission (réservé — sans effet)",
+    description: "Clé réservée à un futur affichage vendeur de la commission (aucun consommateur aujourd'hui).",
   },
 
   /* ─────────── Gouvernance (P5) ─────────── */

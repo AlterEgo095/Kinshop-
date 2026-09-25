@@ -20,6 +20,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { guardAdmin } from "@/lib/admin"
+// Cycle 3 — commission : lecture du pourcentage configuré (affichage reporting)
+import { getVendorCommissionPercent } from "@/lib/finance"
 
 export async function GET(req: NextRequest) {
   const denied = await guardAdmin(req)
@@ -39,6 +41,9 @@ export async function GET(req: NextRequest) {
       vendorEntryOrders,
       pulsesSuccessful,
       platformSaleCount,
+      commissionAgg,
+      commissionReversalAgg,
+      refundAgg,
     ] = await Promise.all([
       // Revenus plateforme (Chariow, USD) — agrégat global
       db.ledgerEntry.aggregate({
@@ -95,6 +100,20 @@ export async function GET(req: NextRequest) {
       // Ventes Chariow livrées (tous produits) vs revenus reconnus
       db.pulseDelivery.count({ where: { event: "successful.sale" } }),
       db.ledgerEntry.count({ where: { scope: "platform", type: "SALE" } }),
+      // Commission plateforme (cycle 3) : part prélevée sur les encaissements
+      // vendeurs + renonciations (remboursements) + remboursements exécutés
+      db.ledgerEntry.aggregate({
+        _sum: { commission: true },
+        where: { scope: "vendor", type: { in: ["SALE", "DELIVERY_CASH"] } },
+      }),
+      db.ledgerEntry.aggregate({
+        _sum: { amount: true },
+        where: { scope: "vendor", type: "COMMISSION_REVERSAL" },
+      }),
+      db.ledgerEntry.aggregate({
+        _sum: { amount: true },
+        where: { scope: "vendor", type: "REFUND" },
+      }),
     ])
 
     // ─── Réconciliation (lecture pure) ───
@@ -115,9 +134,23 @@ export async function GET(req: NextRequest) {
         }))
         .sort((a, b) => b.amountUSD - a.amountUSD),
     }
+    // Commission (cycle 3) : part prélevée − renonciations ; net vendeur =
+    // encaissements − commission + renonciations + remboursements (négatifs).
+    const commissionTotalFC = Math.round((commissionAgg._sum.commission ?? 0) * 100) / 100
+    const commissionReversedFC = Math.round((commissionReversalAgg._sum.amount ?? 0) * 100) / 100
+    const refundsTotalFC = Math.round((refundAgg._sum.amount ?? 0) * 100) / 100
+    const commissionPercent = await getVendorCommissionPercent()
     const marketplace = {
       collectedTotalFC: Math.round((vendorAgg._sum.amount ?? 0) * 100) / 100,
       collectedCount: vendorAgg._count,
+      commissionPercent,
+      commissionTotalFC,
+      commissionReversedFC,
+      netVendorTotalFC:
+        Math.round(
+          ((vendorAgg._sum.amount ?? 0) - commissionTotalFC + commissionReversedFC + refundsTotalFC) *
+            100
+        ) / 100,
       bySource: vendorBySource
         .map((s) => ({
           source: s.psPSource || "inconnu",

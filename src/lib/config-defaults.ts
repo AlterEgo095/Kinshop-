@@ -80,10 +80,10 @@ export const CONFIG_SECTIONS: ConfigSectionMeta[] = [
   },
   {
     id: "finance",
-    title: "Finances (préparatoire)",
+    title: "Finances",
     description:
-      "Clés PRÉPARATOIRES sans aucun effet (P9) : aucune commission n'est calculée, prélevée ni affichée " +
-    "tant que la logique réelle n'est pas décidée (Phase E). Modifiables ici, inertes partout ailleurs.",
+      "Commission plateforme appliquée aux nouvelles écritures vendeur du ledger (cycle 3) — " +
+    "0 = aucun prélèvement (défaut). Les écritures déjà posées restent inchangées (append-only).",
     icon: "Coins",
   },
   {
@@ -199,12 +199,11 @@ export const CONFIG_DEFAULTS: PublicConfig = {
   // (événement payment_failed explicite, re-déclaration possible). 0 = désactivé.
   "business.paymentDeclarationTimeoutHours": 24,
 
-  /* ─────────── Finances (préparatoire — P9, SANS EFFET) ─────────── */
-  // P9 — clés inertes : aucune commission n'existe aujourd'hui (ni calcul, ni
-  // stockage, ni affichage). Ces clés n'ont AUCUN consommateur dans le code —
-  // elles préparent la décision business de la Phase E (ledger documenté) et
-  // n'apparaissent que dans la console admin. Aucun montant affiché au client
-  // ne les utilise, aucun prélèvement ne s'en déclenche.
+  /* ─────────── Finances (commission — cycle 3) ─────────── */
+  // finance.commissionPercent A UN consommateur depuis le cycle 3 : appliquée
+  // aux nouvelles écritures vendeur du ledger au moment de l'écriture (défaut
+  // 0 = aucun prélèvement, append-only sans rétroécriture). Aucun montant
+  // affiché au client ne l'utilise ; les revenus Chariow ne sont pas touchés.
   "finance.commissionPercent": 0,
   "finance.commissionLabel": "",
 

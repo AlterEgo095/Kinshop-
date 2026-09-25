@@ -30,6 +30,10 @@ interface FinanceData {
   marketplace: {
     collectedTotalFC: number
     collectedCount: number
+    commissionPercent?: number
+    commissionTotalFC?: number
+    commissionReversedFC?: number
+    netVendorTotalFC?: number
     bySource: { source: string; amountFC: number; count: number }[]
   }
   ledger: {
@@ -66,6 +70,7 @@ const TYPE_LABEL: Record<string, string> = {
   SALE: "Vente",
   DELIVERY_CASH: "Espèces",
   REFUND: "Remboursement",
+  COMMISSION_REVERSAL: "Commission reversée",
   ADJUSTMENT: "Ajustement",
 }
 const SOURCE_LABEL: Record<string, string> = {
@@ -126,8 +131,9 @@ export function AdminFinanceTab() {
             <span className="font-medium text-foreground">Ledger en mode ombre (Phase E)</span> —
             double écriture d&apos;observation des faits d&apos;argent déjà vérifiés par les flux
             métier. Les vendeurs encaissent toujours en direct (KinShop ne détient aucun fonds) ; la
-            commission vaut 0 (aucun prélèvement) ; aucune exposition vendeur n&apos;existe encore.
-            Revenus KinShop = Chariow uniquement (Premium, Boost).
+            commission plateforme est paramétrable (console → Finances, 0 = aucun prélèvement) et
+            figée par écriture ; aucune exposition vendeur directe n&apos;existe encore (retraits : lot
+            suivant). Revenus KinShop = Chariow + commission marketplace.
           </p>
         </CardContent>
       </Card>
@@ -166,6 +172,21 @@ export function AdminFinanceTab() {
                 .map((s) => ` · ${SOURCE_LABEL[s.source] ?? s.source} ${fmtFC(s.amountFC)}`)
                 .join("")}
             </p>
+            {(data?.marketplace.commissionTotalFC ?? 0) > 0 ||
+            (data?.marketplace.commissionPercent ?? 0) > 0 ? (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Commission ({data?.marketplace.commissionPercent ?? 0} %) :{" "}
+                {fmtFC(data?.marketplace.commissionTotalFC ?? 0)} — reversée :{" "}
+                {fmtFC(data?.marketplace.commissionReversedFC ?? 0)} ·{" "}
+                <span className="font-medium text-foreground">
+                  Net vendeur : {fmtFC(data?.marketplace.netVendorTotalFC ?? 0)}
+                </span>
+              </p>
+            ) : (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Commission : 0 % (aucun prélèvement)
+              </p>
+            )}
           </CardContent>
         </Card>
         <Card>
