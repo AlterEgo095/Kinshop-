@@ -32,6 +32,10 @@ const PROOF_WRITABLE_STATUSES = ["unpaid", "failed", "declared"]
 
 export async function POST(req: NextRequest) {
   try {
+    // TD3 (cycle 3) — identité AVANT toute validation de forme / lecture de corps.
+    const user = await getUserFromRequest(req)
+    if (!user) return unauthorized("Connecte-toi pour joindre une preuve de paiement.")
+
     const body = await req.json().catch(() => null)
     if (!body || typeof body !== "object") {
       return NextResponse.json({ error: "Corps de requête invalide." }, { status: 400 })
@@ -56,10 +60,6 @@ export async function POST(req: NextRequest) {
         { status: 429, headers: { "Retry-After": "600" } },
       )
     }
-
-    // Identité : acheteur de la commande (session) ou administrateur.
-    const user = await getUserFromRequest(req)
-    if (!user) return unauthorized("Connecte-toi pour joindre une preuve de paiement.")
 
     const order = await db.order.findUnique({ where: { ref } })
     if (!order) return NextResponse.json({ error: "Commande introuvable." }, { status: 404 })

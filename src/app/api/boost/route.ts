@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
-import { requireStoreOwner, quotaExceeded } from "@/lib/auth"
+import { requireStoreOwner, quotaExceeded, getUserFromRequest, unauthorized } from "@/lib/auth"
 import { isFeatureOn, getConfigValue } from "@/lib/config-registry"
 import { logAudit } from "@/lib/audit"
 import { isPaymentSimulationEnabled } from "@/lib/simulation"
@@ -103,6 +103,11 @@ async function startBoostCheckout(campaignId: string): Promise<
 
 export async function POST(req: NextRequest) {
   try {
+    // TD3 (cycle 3) — identité avant le feature-gate et la validation de forme
+    // (l'autorisation propriétaire, qui a besoin du slug du corps, reste à sa place).
+    const session = await getUserFromRequest(req)
+    if (!session) return unauthorized()
+
     if (!(await isFeatureOn("boost"))) {
       return NextResponse.json({ error: "La promotion payante est désactivée pour le moment." }, { status: 403 })
     }

@@ -38,6 +38,10 @@ const MM_METHODS = ["mpesa", "airtel", "orange"]
 // Anti-rafale : 10 déclarations / 5 min / IP, et 5 / heure / commande.
 export async function POST(req: NextRequest) {
   try {
+    // TD3 (cycle 3) — identité AVANT toute validation de forme / lecture de corps.
+    const user = await getUserFromRequest(req)
+    if (!user) return unauthorized("Connecte-toi pour déclarer ton paiement.")
+
     const body = await req.json()
     const ref = String(body.ref || "").trim().toUpperCase()
     const reference = String(body.reference || "").trim().slice(0, 80)
@@ -60,10 +64,6 @@ export async function POST(req: NextRequest) {
         { status: 429, headers: { "Retry-After": "600" } },
       )
     }
-
-    // Identité : acheteur de la commande (session) ou administrateur.
-    const user = await getUserFromRequest(req)
-    if (!user) return unauthorized("Connecte-toi pour déclarer ton paiement.")
 
     const order = await db.order.findUnique({
       where: { ref },
