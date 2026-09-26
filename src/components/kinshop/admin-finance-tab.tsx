@@ -21,6 +21,34 @@ import {
   TableRow,
 } from "@/components/ui/table"
 
+interface WithdrawalRow {
+  id: string
+  storeId: string
+  amount: number
+  fee: number
+  netAmount: number
+  currency: string
+  status: string
+  method: string
+  accountName: string
+  accountNumber: string
+  reference: string
+  proofNote: string
+  failReason: string
+  createdAt: string
+}
+interface WithdrawalsData {
+  withdrawals: WithdrawalRow[]
+  stores: { id: string; name: string; slug: string }[]
+}
+const WD_STATUS: Record<string, { label: string; cls: string }> = {
+  requested: { label: "Demandé", cls: "bg-amber-500 hover:bg-amber-500" },
+  approved: { label: "Approuvé", cls: "bg-blue-500 hover:bg-blue-500" },
+  paid: { label: "Payé", cls: "bg-emerald-600 hover:bg-emerald-600" },
+  rejected: { label: "Refusé", cls: "bg-zinc-500 hover:bg-zinc-500" },
+  failed: { label: "Échec — débloqué", cls: "bg-rose-500 hover:bg-rose-500" },
+}
+
 interface FinanceData {
   platform: {
     revenueTotalUSD: number
@@ -96,6 +124,7 @@ function fmtUSD(n: number): string {
 
 export function AdminFinanceTab() {
   const [data, setData] = useState<FinanceData | null>(null)
+  const [wd, setWd] = useState<WithdrawalsData | null>(null)
   const [loading, setLoading] = useState(false)
 
   const load = useCallback(async () => {
@@ -105,12 +134,33 @@ export function AdminFinanceTab() {
       const json = await res.json()
       if (!res.ok) throw new Error(json?.error || "Chargement impossible")
       setData(json as FinanceData)
+      // Cycle 3 — retraits : liste + décisions (le dashboard vendeur demande,
+      // la console admin approuve / règle / trace — double contrôle ch. 16).
+      const wres = await fetch("/api/admin/withdrawals", { cache: "no-store" })
+      const wjson = await wres.json().catch(() => null)
+      if (wres.ok && wjson) setWd(wjson as WithdrawalsData)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Erreur de chargement")
     } finally {
       setLoading(false)
     }
   }, [])
+
+  const wdAction = async (id: string, action: string, extra?: Record<string, string>) => {
+    try {
+      const res = await fetch("/api/admin/withdrawals", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, action, ...extra }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json?.error || "Action refusée")
+      toast.success("Retrait mis à jour.")
+      load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur")
+    }
+  }
 
   useEffect(() => {
     load()
@@ -256,6 +306,98 @@ export function AdminFinanceTab() {
               configurés sont rejetées et journalisées (product_mismatch) sans revenu reconnu.
             </p>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Retraits vendeurs (cycle 3) */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium">Retraits vendeurs</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {(wd?.withdrawals ?? []).length === 0 && (
+            <p className="py-3 text-center text-sm text-muted-foreground">
+              Aucune demande de retrait — les vendeurs demandent depuis l&apos;onglet Solde de leur
+              tableau de bord.
+            </p>
+          )}
+          {(wd?.withdrawals ?? []).map((w) => {
+            const store = (wd?.stores ?? []).find((s) => s.id === w.storeId)
+            const badge = WD_STATUS[w.status] ?? { label: w.status, cls: "" }
+            return (
+              <div
+                key={w.id}
+                className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border p-3 text-sm"
+              >
+                <div className="font-mono font-semibold">{fmtFC(w.netAmount)}</div>
+                <Badge className={badge.cls}>{badge.label}</Badge>
+                <span className="text-xs text-muted-foreground">
+                  {store ? `${store.name} (${store.slug})` : w.storeId}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  → {w.accountName} ({w.method} {w.accountNumber})
+                </span>
+                {w.reference && (
+                  <span className="text-xs text-muted-foreground">réf : {w.reference}</span>
+                )}
+                {w.failReason && (
+                  <span className="text-xs text-rose-600">échec : {w.failReason}</span>
+                )}
+                <span className="ml-auto text-xs text-muted-foreground">
+                  {new Date(w.createdAt).toLocaleDateString("fr-FR", {
+                    day: "2-digit",
+                    month: "2-digit",
+                  })}
+                </span>
+                {w.status === "requested" && (
+                  <span className="flex gap-1">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => wdAction(w.id, "approve")}
+                      disabled={loading}
+                    >
+                      Approuver
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => wdAction(w.id, "reject")}
+                      disabled={loading}
+                    >
+                      Refuser
+                    </Button>
+                  </span>
+                )}
+                {w.status === "approved" && (
+                  <span className="flex gap-1">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        const reference = window.prompt("Référence de la preuve de paiement :")
+                        if (reference) wdAction(w.id, "mark_paid", { reference })
+                      }}
+                      disabled={loading}
+                    >
+                      Marquer payé
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        const failReason = window.prompt("Motif de l'échec (déblocage automatique) :")
+                        if (failReason) wdAction(w.id, "mark_failed", { failReason })
+                      }}
+                      disabled={loading}
+                    >
+                      Échec
+                    </Button>
+                  </span>
+                )}
+              </div>
+            )
+          })}
         </CardContent>
       </Card>
 

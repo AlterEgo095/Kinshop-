@@ -48,6 +48,7 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 import { OrderWorkflowControls, StoreCategoriesManager, BoostPanel } from "@/components/kinshop/dashboard-marketplace"
+import { DashboardWallet } from "@/components/kinshop/dashboard-wallet"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -1623,6 +1624,10 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
               <Settings className="w-4 h-4 mr-1.5" />
               Réglages
             </TabsTrigger>
+            <TabsTrigger value="solde" className="px-4">
+              <Banknote className="w-4 h-4 mr-1.5" />
+              Solde
+            </TabsTrigger>
           </TabsList>
 
           {/* ─── PRODUITS ─── */}
@@ -2702,6 +2707,10 @@ export function Dashboard({ slug, onBack, onViewStore, platformRate, onLogout, c
           </TabsContent>
 
           {/* ─── RÉGLAGES ─── */}
+          <TabsContent value="solde" className="space-y-4">
+            <DashboardWallet slug={slug} />
+          </TabsContent>
+
           <TabsContent value="reglages">
             <div className="max-w-2xl space-y-5">
             <Card>

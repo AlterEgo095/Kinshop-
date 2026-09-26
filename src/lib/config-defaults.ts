@@ -82,8 +82,9 @@ export const CONFIG_SECTIONS: ConfigSectionMeta[] = [
     id: "finance",
     title: "Finances",
     description:
-      "Commission plateforme appliquée aux nouvelles écritures vendeur du ledger (cycle 3) — " +
-    "0 = aucun prélèvement (défaut). Les écritures déjà posées restent inchangées (append-only).",
+      "Commission plateforme (cycle 3) : appliquée aux nouvelles écritures vendeur du ledger, " +
+    "0 = aucun prélèvement (défaut). Retraits vendeurs : minimum, frais, plafond journalier — " +
+    "tous convertis FC au taux plateforme (defaultRateFC).",
     icon: "Coins",
   },
   {
@@ -206,6 +207,10 @@ export const CONFIG_DEFAULTS: PublicConfig = {
   // affiché au client ne l'utilise ; les revenus Chariow ne sont pas touchés.
   "finance.commissionPercent": 0,
   "finance.commissionLabel": "",
+  "finance.withdrawalMinUSD": 5, // converti FC au taux defaultRateFC (5 $ = 12 000 FC)
+  "finance.withdrawalFeeUSD": 0,
+  "finance.withdrawalFeePercent": 0,
+  "finance.dailyWithdrawalCapUSD": 0,
 
   /* ─────────── Gouvernance (P5) ─────────── */
   "governance.verificationCooldownDays": 7, // délai anti-spam entre deux demandes de vérification

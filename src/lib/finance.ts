@@ -42,7 +42,8 @@ export const LEDGER_ENTRY_TYPES = [
   "DELIVERY_CASH", // encaissement espèces confirmé (vendeur)
   "REFUND", // remboursement exécuté (contrepartie négative)
   "COMMISSION_REVERSAL", // renonciation plateforme à sa commission sur la part remboursée (cycle 3)
-  "ADJUSTMENT", // correction contrôlée (réservé — jamais écrit)
+  "WITHDRAWAL", // retrait vendeur approuvé (débit réversible — cycle 3, ch. 16)
+  "ADJUSTMENT", // correction contrôlée : déblocage d'échec de retrait (cycle 3)
 ] as const
 export type LedgerEntryType = (typeof LEDGER_ENTRY_TYPES)[number]
 
@@ -329,5 +330,171 @@ export async function recordRefundEntry(opts: {
     }
   } catch (e) {
     console.error("[finance] recordRefundEntry (non bloquant)", e)
+  }
+}
+
+/* ─────────── Retraits vendeurs (cycle 3 — ch. 16 du rapport financier) ─────────── */
+
+/**
+ * Taux de conversion plateforme FC/USD (clé defaultRateFC, défaut 2400).
+ * Sert à convertir les paramètres de retrait exprimés en USD (min, frais fixe,
+ * plafond journalier) en FC — la devise native du ledger marketplace.
+ */
+export async function fcPerUSD(): Promise<number> {
+  try {
+    const rate = Number(await getConfigValue<number>("defaultRateFC"))
+    return Number.isFinite(rate) && rate > 0 ? rate : 2400
+  } catch {
+    return 2400
+  }
+}
+
+/**
+ * Solde de la boutique — JAMAIS stocké, toujours recalculé depuis le ledger
+ * (source de vérité unique) :
+ *   disponible = Σ(SALE + DELIVERY_CASH) − Σ(commission) + Σ(COMMISSION_REVERSAL)
+ *                + Σ(REFUND, négatif) + Σ(ADJUSTMENT) + Σ(WITHDRAWAL, négatif)
+ * Les retraits REQUESTED ne sont PAS débités : le débit (verrou réversible)
+ * n'est posé qu'à l'APPROBATION, où le disponible est re-vérifié (anti-race).
+ */
+export async function getWalletSummary(storeId: string): Promise<{
+  collectedFC: number
+  commissionFC: number
+  reversedFC: number
+  refundsFC: number
+  adjustmentsFC: number
+  withdrawnFC: number
+  availableFC: number
+}> {
+  const zero = { collectedFC: 0, commissionFC: 0, reversedFC: 0, refundsFC: 0, adjustmentsFC: 0, withdrawnFC: 0, availableFC: 0 }
+  try {
+    const [collected, commission, reversal, refunds, adjustments, withdrawn] = await Promise.all([
+      db.ledgerEntry.aggregate({
+        _sum: { amount: true },
+        where: { scope: "vendor", storeId, type: { in: ["SALE", "DELIVERY_CASH"] } },
+      }),
+      db.ledgerEntry.aggregate({
+        _sum: { commission: true },
+        where: { scope: "vendor", storeId, type: { in: ["SALE", "DELIVERY_CASH"] } },
+      }),
+      db.ledgerEntry.aggregate({
+        _sum: { amount: true },
+        where: { scope: "vendor", storeId, type: "COMMISSION_REVERSAL" },
+      }),
+      db.ledgerEntry.aggregate({
+        _sum: { amount: true },
+        where: { scope: "vendor", storeId, type: "REFUND" },
+      }),
+      db.ledgerEntry.aggregate({
+        _sum: { amount: true },
+        where: { scope: "vendor", storeId, type: "ADJUSTMENT" },
+      }),
+      db.ledgerEntry.aggregate({
+        _sum: { amount: true },
+        where: { scope: "vendor", storeId, type: "WITHDRAWAL" },
+      }),
+    ])
+    const collectedFC = Math.round((collected._sum.amount ?? 0) * 100) / 100
+    const commissionFC = Math.round((commission._sum.commission ?? 0) * 100) / 100
+    const reversedFC = Math.round((reversal._sum.amount ?? 0) * 100) / 100
+    const refundsFC = Math.round((refunds._sum.amount ?? 0) * 100) / 100
+    const adjustmentsFC = Math.round((adjustments._sum.amount ?? 0) * 100) / 100
+    const withdrawnFC = Math.round((withdrawn._sum.amount ?? 0) * 100) / 100
+    const availableFC =
+      Math.round((collectedFC - commissionFC + reversedFC + refundsFC + adjustmentsFC + withdrawnFC) * 100) / 100
+    return { collectedFC, commissionFC, reversedFC, refundsFC, adjustmentsFC, withdrawnFC, availableFC }
+  } catch (e) {
+    console.error("[finance] getWalletSummary (non bloquant)", e)
+    return zero
+  }
+}
+
+/**
+ * Débit réversible d'un retrait APPROUVÉ : écriture WITHDRAWAL négative au
+ * MONTANT DEMANDÉ (le disponible consommé), et si des frais s'appliquent, une
+ * écriture plateforme correspondante (revenu KinShop, kind=withdrawal-fee).
+ * Le vendeur reçoit net = montant − frais. Idempotente par retrait
+ * (psPSource=admin, reference=withdrawalId). Retourne true si l'écriture a eu
+ * lieu — un false permet à l'appelant de refuser un double-approbation.
+ */
+export async function recordWithdrawalEntry(opts: {
+  storeId: string
+  withdrawalId: string
+  amountFC: number
+  feeFC: number
+  method: string
+  accountName: string
+  accountNumber: string
+}): Promise<boolean> {
+  try {
+    const walletId = await getOrCreateWalletId(opts.storeId)
+    const written = await recordLedgerEntry({
+      scope: "vendor",
+      kind: "withdrawal",
+      type: "WITHDRAWAL",
+      amount: -Math.round(opts.amountFC * 100) / 100,
+      commission: 0,
+      currency: "FC",
+      psPSource: "admin",
+      reference: opts.withdrawalId,
+      storeId: opts.storeId,
+      walletId,
+      orderId: null,
+      note: `Retrait ${opts.withdrawalId.slice(-8)} — ${Math.round(opts.amountFC).toLocaleString("fr-FR")} FC vers ${opts.accountName} (${opts.method} ${opts.accountNumber}) — net ${Math.round((opts.amountFC - opts.feeFC) * 100) / 100} FC`,
+    })
+    if (written && opts.feeFC > 0) {
+      // Frais de retrait = revenu plateforme (écriture miroir, même clé).
+      await recordLedgerEntry({
+        scope: "platform",
+        kind: "withdrawal-fee",
+        type: "SALE",
+        amount: Math.round(opts.feeFC * 100) / 100,
+        commission: 0,
+        currency: "FC",
+        psPSource: "admin",
+        reference: opts.withdrawalId,
+        storeId: opts.storeId,
+        walletId: null,
+        orderId: null,
+        note: `Retrait ${opts.withdrawalId.slice(-8)} — frais de règlement`,
+      })
+    }
+    return written
+  } catch (e) {
+    console.error("[finance] recordWithdrawalEntry (non bloquant)", e)
+    return false
+  }
+}
+
+/**
+ * Contrepartie de déblocage d'un retrait EN ÉCHEC (ch. 16 : jamais de perte
+ * silencieuse) : écriture ADJUSTMENT positive qui annule le débit réversible
+ * (le disponible remonte). Idempotente par retrait (même clé, type distinct).
+ */
+export async function recordWithdrawalUnlockEntry(opts: {
+  storeId: string
+  withdrawalId: string
+  netFC: number
+  failReason: string
+}): Promise<boolean> {
+  try {
+    const walletId = await getOrCreateWalletId(opts.storeId)
+    return await recordLedgerEntry({
+      scope: "vendor",
+      kind: "withdrawal-unlock",
+      type: "ADJUSTMENT",
+      amount: Math.round(opts.netFC * 100) / 100,
+      commission: 0,
+      currency: "FC",
+      psPSource: "admin",
+      reference: opts.withdrawalId,
+      storeId: opts.storeId,
+      walletId,
+      orderId: null,
+      note: `Retrait ${opts.withdrawalId.slice(-8)} en échec — fonds débloqués (${opts.failReason})`,
+    })
+  } catch (e) {
+    console.error("[finance] recordWithdrawalUnlockEntry (non bloquant)", e)
+    return false
   }
 }

@@ -458,6 +458,54 @@ export const CONFIG_SPECS: ConfigSpec[] = [
     label: "Libellé commission (réservé — sans effet)",
     description: "Clé réservée à un futur affichage vendeur de la commission (aucun consommateur aujourd'hui).",
   },
+  {
+    key: "finance.withdrawalMinUSD",
+    section: "finance",
+    type: "number",
+    default: 5,
+    public: false,
+    min: 0,
+    max: 1000,
+    label: "Retrait : montant minimum (USD, converti FC)",
+    description:
+      "Cycle 3 — montant minimum d'une demande de retrait, converti en FC au taux plateforme " +
+      "(defaultRateFC). 0 = aucun minimum.",
+  },
+  {
+    key: "finance.withdrawalFeeUSD",
+    section: "finance",
+    type: "number",
+    default: 0,
+    public: false,
+    min: 0,
+    max: 100,
+    label: "Retrait : frais fixes (USD, convertis FC)",
+    description: "Cycle 3 — frais fixes déduits du net réglé au vendeur. 0 = aucun frais fixe (défaut).",
+  },
+  {
+    key: "finance.withdrawalFeePercent",
+    section: "finance",
+    type: "number",
+    default: 0,
+    public: false,
+    min: 0,
+    max: 20,
+    label: "Retrait : frais proportionnels (%)",
+    description: "Cycle 3 — pourcentage du montant déduit du net réglé au vendeur. 0 = aucun frais (défaut).",
+  },
+  {
+    key: "finance.dailyWithdrawalCapUSD",
+    section: "finance",
+    type: "number",
+    default: 0,
+    public: false,
+    min: 0,
+    max: 100000,
+    label: "Retrait : plafond journalier par boutique (USD)",
+    description:
+      "Cycle 3 — fusible anti-abus du pilote : somme maximale de retraits par boutique et par jour " +
+      "(demandes + approuvés + payés). 0 = plafond désactivé (défaut).",
+  },
 
   /* ─────────── Gouvernance (P5) ─────────── */
   {

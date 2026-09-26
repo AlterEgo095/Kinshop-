@@ -434,6 +434,43 @@ model Wallet {
   entries   LedgerEntry[]
 }
 
+// Cycle 3 — Retrait vendeur (ch. 16 du rapport financier) : demande à double
+// contrôle (vendeur → administrateur), débit ledger RÉVERSIBLE à l'approbation
+// (écriture WITHDRAWAL), PAID irréversible avec référence de preuve, échec →
+// déblocage automatique (contrepartie ADJUSTMENT). Le bénéficiaire est un
+// SNAPSHOT des coordonnées Mobile Money actives au moment de la demande —
+// jamais modifiable pendant le cycle. Aucune suppression (append-only).
+model Withdrawal {
+  id            String    @id @default(cuid())
+  storeId       String
+  walletId      String?
+  // Montant demandé (brut FC), frais déduits, net réellement réglé
+  amount        Float
+  fee           Float     @default(0)
+  netAmount     Float
+  currency      String    @default("FC")
+  // Machine d'états ch. 16 : requested | approved | paid | rejected | failed
+  status        String    @default("requested")
+  // Bénéficiaire figé à la demande (coordonnées Mobile Money actives)
+  method        String    @default("")
+  accountName   String    @default("")
+  accountNumber String    @default("")
+  network       String    @default("")
+  note          String    @default("")
+  // Preuve d'exécution (PAID) + motif d'échec (failed)
+  reference     String    @default("")
+  proofNote     String    @default("")
+  failReason    String    @default("")
+  requestedBy   String    @default("")
+  processedBy   String    @default("")
+  processedAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([storeId, status])
+  @@index([createdAt])
+}
+
 // Écriture financière append-only — idempotence SQL @@unique([psPSource,
 // reference, type]) : un événement métier = UNE écriture (webhook rejoué,
 // confirmation répétée, course d'instances jumelles → une seule ligne).
